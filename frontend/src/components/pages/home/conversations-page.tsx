@@ -21,17 +21,6 @@ export default function ConversationsPage({
   const [isGroupJoined, setIsGroupJoined] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  useEffect(() => {
-    if (conversations.length > 0) {
-      const foundGroup = conversations.find(
-        (conv) => conv.id === env.NEXT_PUBLIC_XMTP_DEFAULT_CONVERSATION_ID
-      );
-      if (foundGroup) {
-        setIsGroupJoined(true);
-      }
-    }
-  }, [conversations]);
-
   const handleAddMeToDefaultConversation = async () => {
     if (!client) return;
 
