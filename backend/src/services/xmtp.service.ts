@@ -31,9 +31,9 @@ export const addUserToDefaultGroupChat = async (
       env: env.XMTP_ENV,
     }
   );
+  console.log("Client created", client.inboxId);
   // Sync the conversations from the network to update the local db
-  // await client.conversations.sync();
-  await client.conversations.syncAll();
+  await client.conversations.sync();
 
   // Get the group chat by id
   const conversation = await client.conversations.getConversationById(
