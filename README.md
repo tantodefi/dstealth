@@ -2,7 +2,7 @@
 
 A Farcaster MiniApp with XMTP private chat example.
 
-![screenshot](./frontend/public/images/screenshot.png)
+[![screenshot](./frontend/public/images/screenshot.png)](https://www.youtube.com/watch?v=tw6bDNDt-AM)
 
 ## Getting Started
 
