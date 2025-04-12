@@ -9,7 +9,7 @@ import { toBytes, type WalletClient } from "viem";
  */
 export const createBrowserSigner = (
   address: `0x${string}`,
-  walletClient: WalletClient
+  walletClient: WalletClient,
 ): BrowserSigner => {
   return {
     type: "EOA",

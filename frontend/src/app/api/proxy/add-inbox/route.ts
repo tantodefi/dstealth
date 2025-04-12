@@ -1,7 +1,7 @@
-import { env } from "@/lib/env";
 import ky from "ky";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { env } from "@/lib/env";
 
 // Input validation schema
 const joinChatSchema = z.object({

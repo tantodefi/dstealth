@@ -6,6 +6,7 @@
   "scripts": {
     "build": "next build",
     "dev": "next dev",
+    "format": "prettier --write .",
     "frames": "frames",
     "lint": "next lint",
     "start": "next start"
@@ -55,12 +56,17 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@ianvs/prettier-plugin-sort-imports": "^4.4.1",
     "@types/localtunnel": "^2",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "eslint": "^8",
     "eslint-config-next": "14.2.6",
+    "eslint-config-prettier": "^10.0.1",
+    "eslint-plugin-prettier": "^5.2.3",
+    "prettier": "^3.4.2",
+    "prettier-plugin-packagejson": "^2.5.8",
     "tailwindcss": "^3.4.1",
     "typescript": "^5"
   },

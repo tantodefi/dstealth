@@ -21,8 +21,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${montserrat.className} size-full antialiased max-h-screen overflow-y-hidden`}
-      >
+        className={`${montserrat.className} size-full antialiased max-h-screen overflow-y-hidden`}>
         <Providers cookies={cookies}>{children}</Providers>
       </body>
     </html>
