@@ -19,9 +19,11 @@ jobs:
         env:
           SKIP_YARN_COREPACK_CHECK: "1"
       - run: corepack enable
-      - run: yarn
       - name: Verify working directory
         run: echo "Processing folder: ${{ matrix.folder }}"
+      - name: Install dependencies
+        working-directory: ${{ matrix.folder }}
+        run: yarn
       - name: Format code
         working-directory: ${{ matrix.folder }}
         run: yarn format

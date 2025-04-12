@@ -4,6 +4,9 @@ A Farcaster MiniApp with XMTP private chat example.
 
 [![screenshot](./frontend/public/images/screenshot.png)](https://www.youtube.com/watch?v=tw6bDNDt-AM)
 
+> See youtube [video](https://www.youtube.com/watch?v=tw6bDNDt-AM) for a quick
+> demo
+
 ## Getting Started
 
 This Farcaster Miniapp (Framev2) is a [Next.js](https://nextjs.org) project
