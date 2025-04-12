@@ -22,7 +22,8 @@ jobs:
       - run: yarn
       - name: Verify working directory
         run: echo "Processing folder: ${{ matrix.folder }}"
-      - working-directory: ${{ matrix.folder }}
+      - name: Format code
+        working-directory: ${{ matrix.folder }}
         run: yarn format
       - working-directory: ${{ matrix.folder }}
         run: yarn typecheck
