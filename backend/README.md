@@ -34,11 +34,11 @@ git clone https://github.com/xmtp/xmtp-mini-app.git
 # Navigate to backend directory
 cd xmtp-mini-app/backend
 # or
-bun install
+yarn install
 # Create .env file
 cp .env.example .env
 # Run in development mode
-bun run dev
+yarn run dev
 ```
 
 ## API endpoints

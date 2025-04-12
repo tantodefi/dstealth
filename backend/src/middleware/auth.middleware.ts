@@ -1,10 +1,10 @@
-import { NextFunction, Request, Response } from "express";
+import { type NextFunction, type Request, type Response } from "express";
 import { env } from "../lib/env.js";
 
 export const validateApiSecret = (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   const apiSecret = req.header("x-api-secret");
 

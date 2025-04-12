@@ -1,12 +1,12 @@
-import { Request, Response } from "express";
-import { addUserToDefaultGroupChat } from "../services/xmtp.service.js";
+import { type Request, type Response } from "express";
+import { addUserToDefaultGroupChat } from "../services/xmtp.service";
 
 export const addUserToDefaultGroupChatController = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   try {
-    const { inboxId } = req.body;
+    const { inboxId } = req.body as { inboxId: string };
     const result = await addUserToDefaultGroupChat(inboxId);
     if (!result) {
       res.status(200).json({

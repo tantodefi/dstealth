@@ -1,10 +1,10 @@
-import { Client, Group } from "@xmtp/node-sdk";
+import { Client, type Group } from "@xmtp/node-sdk";
 import { env } from "../lib/env.js";
 import {
-  createNodeSigner,
+  createSigner,
   generateEncryptionKeyHex,
   getEncryptionKeyFromHex,
-} from "../lib/xmtp-utils.js";
+} from "../lib/xmtp-utils";
 
 // create random encryption key
 const encryptionKey = env.XMTP_ENCRYPTION_KEY
@@ -17,10 +17,10 @@ const encryptionKey = env.XMTP_ENCRYPTION_KEY
  * @returns true if the user was added, false otherwise
  */
 export const addUserToDefaultGroupChat = async (
-  newUserInboxId: string
+  newUserInboxId: string,
 ): Promise<boolean> => {
   // create ephemeral node signer
-  const signer = createNodeSigner(env.XMTP_PRIVATE_KEY);
+  const signer = createSigner(env.XMTP_PRIVATE_KEY);
   console.log("Adding user to default group chat", newUserInboxId);
   // create XMTP Node client
   console.log("Creating XMTP Node client with encription key", encryptionKey);
@@ -29,7 +29,7 @@ export const addUserToDefaultGroupChat = async (
     getEncryptionKeyFromHex(encryptionKey),
     {
       env: env.XMTP_ENV,
-    }
+    },
   );
   console.log("Client created", client.inboxId);
   // Sync the conversations from the network to update the local db
@@ -37,17 +37,17 @@ export const addUserToDefaultGroupChat = async (
 
   // Get the group chat by id
   const conversation = await client.conversations.getConversationById(
-    env.XMTP_DEFAULT_CONVERSATION_ID
+    env.XMTP_DEFAULT_CONVERSATION_ID,
   );
   if (!conversation)
     throw new Error(
-      `Conversation not found with id: ${env.XMTP_DEFAULT_CONVERSATION_ID} on env: ${env.XMTP_ENV}`
+      `Conversation not found with id: ${env.XMTP_DEFAULT_CONVERSATION_ID} on env: ${env.XMTP_ENV}`,
     );
 
   // Get the metadata
   const metadata = await conversation.metadata();
   console.log("Conversation found", metadata);
-  if (metadata?.conversationType !== "group")
+  if (metadata.conversationType !== "group")
     throw new Error("Conversation is not a group");
 
   // load members from the group
@@ -55,10 +55,10 @@ export const addUserToDefaultGroupChat = async (
   const groupMembers = await group.members();
   console.log(
     "Group members",
-    groupMembers.map((member) => member.inboxId)
+    groupMembers.map((member) => member.inboxId),
   );
   const isMember = groupMembers.some(
-    (member) => member.inboxId === newUserInboxId
+    (member) => member.inboxId === newUserInboxId,
   );
   if (isMember) {
     console.warn("User already in group, skipping...");
