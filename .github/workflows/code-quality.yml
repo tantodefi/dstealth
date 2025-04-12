@@ -29,6 +29,11 @@ jobs:
       - name: Build code
         working-directory: ${{ matrix.folder }}
         run: yarn build
+        env:
+          JWT_SECRET: "dummy-secret-for-ci"
+          BACKEND_URL: "https://example.com/api"
+          API_SECRET_KEY: "dummy-api-key-for-ci"
+          NEXT_PUBLIC_URL: "https://example.com"
       - name: Lint
         working-directory: ${{ matrix.folder }}
         run: yarn lint
