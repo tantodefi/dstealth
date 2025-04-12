@@ -9,7 +9,8 @@ A Node.js backend service for the XMTP MiniApp that handles XMTP operations.
 ### Requirements
 
 - Node.js v20 or higher
-- `bun` or `yarn`
+- Yarn v4 or higher
+- Docker (optional, for local network)
 
 ### Environment variables
 
