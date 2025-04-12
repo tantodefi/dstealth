@@ -2,48 +2,43 @@
 
 A Node.js backend service for the XMTP MiniApp that handles XMTP operations.
 
-## Setup
+## Getting started
 
-1. Clone the repository
-2. Navigate to the backend directory
-3. Install dependencies:
+> [!TIP] This backend works with any XMTP-compatible client including xmtp.chat.
+
+### Requirements
+
+- Node.js v20 or higher
+- `bun` or `yarn`
+
+### Environment variables
+
+To run your XMTP backend, you must create a `.env` file with the following
+variables:
 
 ```bash
-npm install
+PORT=5001 # Server port
+NODE_ENV=development # Environment mode (development/production)
+API_SECRET_KEY= # Secret key for API authentication, generate with openssl rand -base64 32
+XMTP_PRIVATE_KEY= # XMTP private key
+XMTP_ENCRYPTION_KEY= # XMTP encryption key
+XMTP_ENV=dev # XMTP environment (dev/local/production)
+XMTP_DEFAULT_CONVERSATION_ID= # Default XMTP conversation ID
+```
+
+### Run the backend
+
+```bash
+# Clone repository
+git clone https://github.com/xmtp/xmtp-mini-app.git
+# Navigate to backend directory
+cd xmtp-mini-app/backend
 # or
 bun install
-```
-
-4. Create a `.env` file based on `.env.example`:
-
-```bash
+# Create .env file
 cp .env.example .env
-```
-
-5. Fill in the required environment variables in the `.env` file:
-   - `API_SECRET_KEY`: Generate with `openssl rand -base64 32`
-   - `XMTP_PRIVATE_KEY`: Your XMTP private key
-   - `XMTP_ENCRYPTION_KEY`: Get yours using `bun run gen:keys`
-   - `XMTP_DEFAULT_CONVERSATION_ID`: The ID of your default group conversation
-
-## Running the server
-
-Development mode with hot reloading:
-
-```bash
-npm run dev
-# or
+# Run in development mode
 bun run dev
-```
-
-Production mode:
-
-```bash
-npm run build
-npm start
-# or
-bun run build
-bun start
 ```
 
 ## API endpoints
@@ -70,7 +65,3 @@ request headers as `x-api-secret`.
 - `XMTP_ENCRYPTION_KEY`: XMTP encryption key
 - `XMTP_ENV`: XMTP environment (dev/local/production)
 - `XMTP_DEFAULT_CONVERSATION_ID`: Default XMTP conversation ID
-
-## Requirements
-
-- Node.js >= 20

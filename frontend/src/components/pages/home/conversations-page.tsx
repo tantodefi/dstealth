@@ -20,6 +20,7 @@ export default function ConversationsPage({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isGroupJoined, setIsGroupJoined] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [groupName, setGroupName] = useState("XMTP & Frames v2");
 
   useEffect(() => {
     if (conversations.length > 0) {
@@ -27,7 +28,9 @@ export default function ConversationsPage({
         (conv) => conv.id === env.NEXT_PUBLIC_XMTP_DEFAULT_CONVERSATION_ID
       );
       if (foundGroup) {
+        console.log("foundGroup", foundGroup);
         setIsGroupJoined(true);
+        setGroupName((foundGroup as Group).name ?? "XMTP & Frames v2");
       }
     }
   }, [conversations]);
@@ -102,7 +105,7 @@ export default function ConversationsPage({
         {loading || joining
           ? "Joining..."
           : isGroupJoined
-          ? "Joined 'XMTP & Frames v2'"
+          ? `Joined ${groupName}`
           : "Join Chat"}
       </button>
       {errorMessage ? (
