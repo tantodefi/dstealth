@@ -27,7 +27,9 @@ jobs:
       - name: Format code
         working-directory: ${{ matrix.folder }}
         run: yarn format
-      - working-directory: ${{ matrix.folder }}
+      - name: Typecheck
+        working-directory: ${{ matrix.folder }}
         run: yarn typecheck
-      - working-directory: ${{ matrix.folder }}
+      - name: Lint
+        working-directory: ${{ matrix.folder }}
         run: yarn lint
