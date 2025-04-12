@@ -1,7 +1,9 @@
+import fs from "fs";
 import { Client, type Group } from "@xmtp/node-sdk";
-import { env } from "../lib/env.js";
+import { env } from "../lib/env";
 import {
   createSigner,
+  createUser,
   generateEncryptionKeyHex,
   getEncryptionKeyFromHex,
 } from "../lib/xmtp-utils";
@@ -21,9 +23,18 @@ export const addUserToDefaultGroupChat = async (
 ): Promise<boolean> => {
   // create ephemeral node signer
   const signer = createSigner(env.XMTP_PRIVATE_KEY);
+  const user = createUser(env.XMTP_PRIVATE_KEY);
   console.log("Adding user to default group chat", newUserInboxId);
   // create XMTP Node client
   console.log("Creating XMTP Node client with encription key", encryptionKey);
+  // Railway deployment support
+  const volumePath = process.env.RAILWAY_VOLUME_MOUNT_PATH ?? ".data/xmtp";
+  const dbPath = `${volumePath}/${user.account.address.toLowerCase()}-${env.XMTP_ENV}`;
+
+  // Create database directory if it doesn't exist
+  if (!fs.existsSync(dbPath)) {
+    fs.mkdirSync(dbPath, { recursive: true });
+  }
   const client = await Client.create(
     signer,
     getEncryptionKeyFromHex(encryptionKey),
