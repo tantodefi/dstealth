@@ -7,12 +7,19 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        folder: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v1
         with:
           bun-version: latest
       - run: bun install
+        working-directory: ${{ matrix.folder }}
       - run: bun run format
+        working-directory: ${{ matrix.folder }}
       - run: bun run typecheck
+        working-directory: ${{ matrix.folder }}
       - run: bun run lint
+        working-directory: ${{ matrix.folder }}
