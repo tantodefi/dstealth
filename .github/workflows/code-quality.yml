@@ -12,12 +12,15 @@ jobs:
         folder: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v1
+      - uses: actions/setup-node@v4
         with:
-          bun-version: latest
-      - run: bun install
+          node-version: "lts/*"
+          cache: "yarn"
+      - run: yarn install
         working-directory: ${{ matrix.folder }}
-      - run: bun run build
+      - run: yarn build
         working-directory: ${{ matrix.folder }}
-      - run: bun run lint
+      - run: yarn lint
+        working-directory: ${{ matrix.folder }}
+      - run: yarn format
         working-directory: ${{ matrix.folder }}

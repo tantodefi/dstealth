@@ -9,7 +9,8 @@ A Farcaster MiniApp with XMTP private chat example.
 ### Requirements
 
 - Node.js v20 or higher
-- `bun` runtime
+- Yarn v4 or higher
+- Docker (optional, for local network)
 - A Farcaster account
 
 ### Environment variables
@@ -38,13 +39,13 @@ git clone https://github.com/xmtp/xmtp-mini-app.git
 # Navigate to frontend directory
 cd xmtp-mini-app/frontend
 # Install dependencies
-bun install
+yarn install
 # Create .env.local file
 cp .env.example .env.local
 # Run in development mode
-bun dev
+yarn dev
 # Run frames.js debugger (optional)
-bun frames
+yarn frames
 ```
 
 ## Testing the frame
@@ -54,7 +55,7 @@ There are multiple ways to test your MiniApp:
 ### Using frames.js debugger
 
 ```bash
-bun frames
+yarn frames
 ```
 
 Then enter your NEXT_PUBLIC_URL (e.g., http://localhost:3000)
