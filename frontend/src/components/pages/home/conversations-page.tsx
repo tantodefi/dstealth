@@ -1,4 +1,4 @@
-import { Conversation, Dm, Group } from "@xmtp/browser-sdk";
+import { Conversation, Group } from "@xmtp/browser-sdk";
 import ky from "ky";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/shadcn/button";
@@ -20,20 +20,75 @@ export default function ConversationsPage({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isGroupJoined, setIsGroupJoined] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [groupName, setGroupName] = useState("XMTP & Frames v2");
+  const [groupName, setGroupName] = useState("");
+  const [groupConversation, setGroupConversation] =
+    useState<Conversation | null>(null);
 
   useEffect(() => {
-    if (conversations.length > 0) {
-      const foundGroup = conversations.find(
-        (conv) => conv.id === env.NEXT_PUBLIC_XMTP_DEFAULT_CONVERSATION_ID,
-      );
-      if (foundGroup) {
-        console.log("foundGroup", foundGroup);
-        setIsGroupJoined(true);
-        setGroupName((foundGroup as Group).name ?? "XMTP & Frames v2");
-      }
+    if (conversations.length >= 0) {
+      handleFetchGroupId();
     }
   }, [conversations]);
+
+  const handleLeaveGroup = async () => {
+    if (!client || !groupConversation) return;
+
+    try {
+      setJoining(true);
+      // call nextjs backend to set header without exposing the API_SECRET_KEY
+      const data = await ky
+        .post<{ success: boolean; message: string }>(
+          `/api/proxy/remove-inbox`,
+          {
+            json: {
+              inboxId: client.inboxId,
+            },
+          },
+        )
+        .json();
+      setJoining(false);
+
+      if (data.success) {
+        const newConversations = await list(undefined, true);
+        setConversations(newConversations);
+        setIsGroupJoined(false);
+        setGroupConversation(null);
+      } else {
+        console.warn("Failed to remove me from the default conversation", data);
+        setErrorMessage(data.message);
+      }
+    } catch (error) {
+      console.error("Error removing me from the default conversation", error);
+      setErrorMessage("Failed to remove me from the default conversation");
+      setJoining(false);
+    }
+  };
+
+  const handleFetchGroupId = async () => {
+    try {
+      const getGroupId = async () => {
+        const res = await fetch("/api/proxy/get-group-id");
+        const data = await res.json();
+        return data.groupId;
+      };
+
+      const groupId = await getGroupId();
+      console.log("groupId", groupId);
+
+      const foundGroup = conversations.find((conv) => conv.id === groupId);
+      if (foundGroup) {
+        await foundGroup?.sync();
+        if ((foundGroup as Group).isActive) {
+          setIsGroupJoined(true);
+          setGroupName((foundGroup as Group).name ?? "XMTP Mini app");
+          setGroupConversation(foundGroup);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching group ID:", error);
+      setErrorMessage("Failed to fetch group ID");
+    }
+  };
 
   const handleAddMeToDefaultConversation = async () => {
     if (!client) return;
@@ -79,75 +134,61 @@ export default function ConversationsPage({
 
   return (
     <div className="flex flex-col gap-2 text-center mt-4">
-      <button
-        onClick={handleAddMeToDefaultConversation}
-        className={cn(
-          "px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-colors duration-200",
-          {
-            "opacity-50":
-              isRefreshing ||
-              loading ||
-              joining ||
-              isGroupJoined ||
-              !client ||
-              !client.inboxId,
-          },
-        )}
-        disabled={
-          isRefreshing ||
-          loading ||
-          joining ||
-          isGroupJoined ||
-          !client ||
-          !client.inboxId
-        }>
-        {loading || joining
-          ? "Joining..."
-          : isGroupJoined
-            ? `Joined ${groupName}`
-            : "Join Chat"}
-      </button>
-      {errorMessage ? (
-        <div className="text-red-500 text-sm">{errorMessage}</div>
-      ) : null}
+      <h2 className="text-2xl font-bold text-white">Group chat</h2>
 
-      <div className="flex flex-col gap-2">
-        <h2 className="text-2xl font-bold text-white">My Conversations</h2>
-        <div className="flex flex-row gap-2 items-center justify-center">
-          <p className="text-xs text-gray-400">
-            Inbox ID: {client?.inboxId?.slice(0, 6)}...
-            {client?.inboxId?.slice(-4)}
-          </p>
+      <div className="flex flex-col gap-4 items-center">
+        <p className="text-xs text-gray-400">
+          Inbox ID: {client?.inboxId?.slice(0, 6)}...
+          {client?.inboxId?.slice(-4)}
+        </p>
+
+        {isGroupJoined && groupConversation ? (
+          <button
+            onClick={() => onSelectConversation(groupConversation)}
+            className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-colors duration-200">
+            Enter {groupName}
+          </button>
+        ) : (
+          <button
+            onClick={handleAddMeToDefaultConversation}
+            className={cn(
+              "px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-colors duration-200",
+              {
+                "opacity-50":
+                  isRefreshing ||
+                  loading ||
+                  joining ||
+                  !client ||
+                  !client.inboxId,
+              },
+            )}
+            disabled={
+              isRefreshing || loading || joining || !client || !client.inboxId
+            }>
+            {loading || joining ? "Joining..." : "Join chat"}
+          </button>
+        )}
+
+        {errorMessage ? (
+          <div className="text-red-500 text-sm">{errorMessage}</div>
+        ) : null}
+
+        <Button
+          variant="link"
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="text-xs text-gray-400">
+          {isRefreshing ? "Refreshing..." : "Refresh"}
+        </Button>
+
+        {isGroupJoined && (
           <Button
             variant="link"
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className="text-xs text-gray-400 w-[100px]">
-            {isRefreshing ? "Refreshing..." : "Refresh"}
+            onClick={handleLeaveGroup}
+            disabled={joining}
+            className="text-xs text-red-400">
+            {joining ? "Leaving..." : "Leave group"}
           </Button>
-        </div>
-        {conversations && conversations.length > 0 ? (
-          conversations.map(async (conv) => {
-            let convName = "";
-            if (conv.metadata?.conversationType === "dm") {
-              const peerInboxId = await (conv as Dm).peerInboxId();
-              convName = `DM ${peerInboxId.slice(0, 6)}...${peerInboxId.slice(
-                -4,
-              )}`;
-            } else {
-              convName = (conv as Group).name ?? "";
-            }
-            return (
-              <button
-                key={conv.id}
-                onClick={() => onSelectConversation(conv)}
-                className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-colors duration-200">
-                {convName}
-              </button>
-            );
-          })
-        ) : (
-          <div className="text-gray-400">No conversations found</div>
         )}
       </div>
     </div>
