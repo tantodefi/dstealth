@@ -46,11 +46,12 @@ const initializeXmtpClient = async () => {
   console.log("XMTP Client initialized with inbox ID:", xmtpClient.inboxId);
   await xmtpClient.conversations.sync();
   let conversation: Conversation | undefined;
+  console.log("GROUP_ID", GROUP_ID);
   if (GROUP_ID) {
     conversation = await xmtpClient.conversations.getConversationById(GROUP_ID);
   } else {
     conversation = await xmtpClient.conversations.newGroup(defaultInboxes);
-
+    console.log("New group created:", conversation.id);
     GROUP_ID = conversation.id;
     appendToEnv("GROUP_ID", GROUP_ID);
   }
@@ -59,10 +60,13 @@ const initializeXmtpClient = async () => {
     console.error("Failed to initialize XMTP client");
     return;
   }
+  const message = await conversation.send("Test message");
+  console.log("Message sent:", message);
 
   await xmtpClient.conversations.sync();
 
   const isAdmin = (conversation as Group).isSuperAdmin(xmtpClient.inboxId);
+  await conversation.sync();
   console.log("Client is admin of the group:", isAdmin);
 };
 
@@ -222,7 +226,6 @@ app.post(
     })();
   },
 );
-
 app.get(
   "/api/xmtp/get-group-id",
   validateApiSecret,
@@ -232,7 +235,7 @@ app.get(
     void (async () => {
       try {
         console.log("🔵 Inside get-group-id async block");
-        console.log("Current client inbox ID:", xmtpClient.inboxId);
+        console.log("Current client inbox ID:", req.query.inboxId);
         console.log("Looking for group with ID:", GROUP_ID);
         const conversation = await xmtpClient.conversations.getConversationById(
           GROUP_ID ?? "",
@@ -246,20 +249,13 @@ app.get(
         console.log("🟡 Conversation synced");
 
         const groupMembers = await (conversation as Group).members();
-        console.log("📋 Group members count:", groupMembers.length);
-        console.log(
-          "📋 Group members details:",
-          groupMembers.map((member) => ({
-            inboxId: member.inboxId,
-            permissionLevel: member.permissionLevel,
-          })),
-        );
 
         const isMember = groupMembers.some(
-          (member) => member.inboxId === xmtpClient.inboxId,
+          (member) => member.inboxId === req.query.inboxId,
         );
+
         console.log("🟣 isMember check complete:", isMember);
-        console.log("🟣 Client inbox ID:", xmtpClient.inboxId);
+        console.log("🟣 Client inbox ID:", req.query.inboxId);
 
         const responseObject = { groupId: process.env.GROUP_ID, isMember };
         console.log("🔵 Full response object:", JSON.stringify(responseObject));
