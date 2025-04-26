@@ -1,10 +1,9 @@
 import { Conversation, Group } from "@xmtp/browser-sdk";
 import ky from "ky";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/shadcn/button";
 import { useXMTP } from "@/context/xmtp-context";
 import { useConversations } from "@/hooks/use-conversations";
-import { env } from "@/lib/env";
 import { cn } from "@/lib/utils";
 
 interface ConversationsPageProps {
@@ -25,12 +24,94 @@ export default function ConversationsPage({
     useState<Conversation | null>(null);
   const [hasAttemptedRefresh, setHasAttemptedRefresh] = useState(false);
 
+  const handleFetchGroupId = useCallback(async () => {
+    try {
+      // If we're already refreshing, don't trigger another refresh
+      if (isRefreshing) {
+        return;
+      }
+
+      // Make sure we have a client with an inboxId
+      if (!client || !client.inboxId) {
+        console.log("No client or inboxId available");
+        return;
+      }
+
+      const getGroupId = async () => {
+        const res = await fetch(
+          `/api/proxy/get-group-id?inboxId=${client.inboxId}`,
+        );
+        const data = await res.json();
+        return { groupId: data.groupId, isMember: data.isMember };
+      };
+
+      const { groupId, isMember } = await getGroupId();
+      console.log("groupId", groupId);
+      console.log("isMember", isMember);
+      console.log("version", "0.1.1");
+      console.log("Conversations count:", conversations.length);
+
+      // IMPORTANT: Always set isGroupJoined based on isMember status from API
+      // This ensures the Leave Group button appears whenever the user is a member
+      setIsGroupJoined(isMember);
+      console.log("Setting isGroupJoined to:", isMember);
+
+      const foundGroup = conversations.find((conv) => conv.id === groupId);
+      console.log("Found group:", foundGroup ? foundGroup.id : "not found");
+
+      if (foundGroup) {
+        await foundGroup?.sync();
+        console.log("Group isActive:", (foundGroup as Group).isActive);
+        if ((foundGroup as Group).isActive) {
+          setGroupName((foundGroup as Group).name ?? "XMTP Mini app");
+          setGroupConversation(foundGroup);
+          console.log("Group conversation set:", foundGroup.id);
+        } else {
+          console.log("Group found but not active");
+        }
+      } else if (isMember && client && !hasAttemptedRefresh) {
+        // If user is a member but conversation is not loaded yet
+        // Refresh the conversation list to try to load it - but only once
+        console.log(
+          "User is a member but conversation not found, refreshing (once)",
+        );
+        setIsRefreshing(true);
+        setHasAttemptedRefresh(true);
+        try {
+          const newConversations = await list(undefined, true);
+          console.log(
+            "After refresh, new conversations count:",
+            newConversations.length,
+          );
+          setConversations(newConversations);
+        } catch (error) {
+          console.error("Error refreshing conversations:", error);
+          // If refresh fails, stop trying
+        } finally {
+          setIsRefreshing(false);
+        }
+      } else {
+        console.log("Group not found and not refreshing");
+      }
+    } catch (error) {
+      console.error("Error fetching group ID:", error);
+      setErrorMessage("Failed to fetch group ID");
+    }
+  }, [
+    client,
+    conversations,
+    hasAttemptedRefresh,
+    isRefreshing,
+    list,
+    setConversations,
+  ]);
+
   // Only fetch group ID when component mounts or client changes
   useEffect(() => {
     if (client) {
       handleFetchGroupId();
     }
-  }, [client]);
+  }, [client, handleFetchGroupId]);
 
   // Check for group when conversations change, with debounce
   useEffect(() => {
@@ -42,7 +123,7 @@ export default function ConversationsPage({
 
       return () => clearTimeout(timer);
     }
-  }, [conversations, isGroupJoined, hasAttemptedRefresh]);
+  }, [conversations, isGroupJoined, hasAttemptedRefresh, handleFetchGroupId]);
 
   // Add monitoring for conversations changes
   useEffect(() => {
@@ -92,80 +173,6 @@ export default function ConversationsPage({
       console.error("Error removing me from the default conversation", error);
       setErrorMessage("Failed to remove me from the default conversation");
       setJoining(false);
-    }
-  };
-
-  const handleFetchGroupId = async () => {
-    try {
-      // If we're already refreshing, don't trigger another refresh
-      if (isRefreshing) {
-        return;
-      }
-
-      // Make sure we have a client with an inboxId
-      if (!client || !client.inboxId) {
-        console.log("No client or inboxId available");
-        return;
-      }
-
-      const getGroupId = async () => {
-        const res = await fetch(
-          `/api/proxy/get-group-id?inboxId=${client.inboxId}`,
-        );
-        const data = await res.json();
-        return { groupId: data.groupId, isMember: data.isMember };
-      };
-
-      const { groupId, isMember } = await getGroupId();
-      console.log("groupId", groupId);
-      console.log("isMember", isMember);
-      console.log("Conversations count:", conversations.length);
-
-      // IMPORTANT: Always set isGroupJoined based on isMember status from API
-      // This ensures the Leave Group button appears whenever the user is a member
-      setIsGroupJoined(isMember);
-      console.log("Setting isGroupJoined to:", isMember);
-
-      const foundGroup = conversations.find((conv) => conv.id === groupId);
-      console.log("Found group:", foundGroup ? foundGroup.id : "not found");
-
-      if (foundGroup) {
-        await foundGroup?.sync();
-        console.log("Group isActive:", (foundGroup as Group).isActive);
-        if ((foundGroup as Group).isActive) {
-          setGroupName((foundGroup as Group).name ?? "XMTP Mini app");
-          setGroupConversation(foundGroup);
-          console.log("Group conversation set:", foundGroup.id);
-        } else {
-          console.log("Group found but not active");
-        }
-      } else if (isMember && client && !hasAttemptedRefresh) {
-        // If user is a member but conversation is not loaded yet
-        // Refresh the conversation list to try to load it - but only once
-        console.log(
-          "User is a member but conversation not found, refreshing (once)",
-        );
-        setIsRefreshing(true);
-        setHasAttemptedRefresh(true);
-        try {
-          const newConversations = await list(undefined, true);
-          console.log(
-            "After refresh, new conversations count:",
-            newConversations.length,
-          );
-          setConversations(newConversations);
-        } catch (error) {
-          console.error("Error refreshing conversations:", error);
-          // If refresh fails, stop trying
-        } finally {
-          setIsRefreshing(false);
-        }
-      } else {
-        console.log("Group not found and not refreshing");
-      }
-    } catch (error) {
-      console.error("Error fetching group ID:", error);
-      setErrorMessage("Failed to fetch group ID");
     }
   };
 
