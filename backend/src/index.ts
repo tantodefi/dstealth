@@ -1,70 +1,69 @@
-import fs from "fs";
-import { Client, type Group } from "@xmtp/node-sdk";
+import {
+  Client,
+  type Conversation,
+  type Group,
+  type XmtpEnv,
+} from "@xmtp/node-sdk";
 import cors from "cors";
+import "dotenv/config";
 import express, { type Request, type Response } from "express";
 import helmet from "helmet";
 import {
+  appendToEnv,
   createSigner,
-  env,
-  generateEncryptionKeyHex,
+  defaultInboxes,
+  getDbPath,
   getEncryptionKeyFromHex,
+  validateEnvironment,
 } from "./helper";
 
+const { WALLET_KEY, API_SECRET_KEY, ENCRYPTION_KEY, XMTP_ENV, PORT } =
+  validateEnvironment([
+    "WALLET_KEY",
+    "API_SECRET_KEY",
+    "ENCRYPTION_KEY",
+    "XMTP_ENV",
+    "PORT",
+  ]);
+
+let GROUP_ID = process.env.GROUP_ID;
 // Global XMTP client
 let xmtpClient: Client;
 
 // Initialize XMTP client
 const initializeXmtpClient = async () => {
-  const signer = createSigner(env.XMTP_PRIVATE_KEY);
-  const encryptionKey = env.XMTP_ENCRYPTION_KEY || generateEncryptionKeyHex();
-
-  const volumePath = process.env.RAILWAY_VOLUME_MOUNT_PATH ?? ".data/xmtp";
-  fs.mkdirSync(volumePath, { recursive: true });
-
-  const identifier = await signer.getIdentifier();
-  const address = identifier.identifier;
-  const dbPath = `${volumePath}/${address}-${env.XMTP_ENV}`;
-  const dbEncryptionKey = getEncryptionKeyFromHex(encryptionKey);
+  // Create wallet signer and encryption key
+  const signer = createSigner(WALLET_KEY);
+  const dbEncryptionKey = getEncryptionKeyFromHex(ENCRYPTION_KEY);
+  const dbPath = getDbPath(XMTP_ENV);
+  // Create installation A (receiver) client
   xmtpClient = await Client.create(signer, {
-    env: env.XMTP_ENV,
-    dbPath,
     dbEncryptionKey,
+    env: XMTP_ENV as XmtpEnv,
+    dbPath,
   });
 
   console.log("XMTP Client initialized with inbox ID:", xmtpClient.inboxId);
   await xmtpClient.conversations.sync();
-  await ensureSuperAdmin();
-};
+  let conversation: Conversation | undefined;
+  if (GROUP_ID) {
+    conversation = await xmtpClient.conversations.getConversationById(GROUP_ID);
+  } else {
+    conversation = await xmtpClient.conversations.newGroup(defaultInboxes);
 
-// Ensure the client is a super admin of the default group
-const ensureSuperAdmin = async () => {
-  try {
-    await xmtpClient.conversations.sync();
-    const conversation = await xmtpClient.conversations.getConversationById(
-      env.XMTP_DEFAULT_CONVERSATION_ID,
-    );
-
-    if (!conversation) {
-      throw new Error(
-        `Conversation not found with id: ${env.XMTP_DEFAULT_CONVERSATION_ID} on env: ${env.XMTP_ENV}`,
-      );
-    }
-
-    const metadata = await conversation.metadata();
-    if (metadata.conversationType !== "group") {
-      throw new Error("Conversation is not a group");
-    }
-
-    const group = conversation as Group;
-    try {
-      const isAdmin = group.isSuperAdmin(xmtpClient.inboxId);
-      console.log("Client is admin of the group:", isAdmin);
-    } catch {
-      console.log("Continuing with existing permissions");
-    }
-  } catch (error) {
-    console.error("Error ensuring admin status:", error);
+    GROUP_ID = conversation.id;
+    appendToEnv("GROUP_ID", GROUP_ID);
   }
+
+  if (!conversation) {
+    console.error("Failed to initialize XMTP client");
+    return;
+  }
+
+  await xmtpClient.conversations.sync();
+
+  const isAdmin = (conversation as Group).isSuperAdmin(xmtpClient.inboxId);
+  console.log("Client is admin of the group:", isAdmin);
 };
 
 // XMTP Service Functions
@@ -73,28 +72,28 @@ const addUserToDefaultGroupChat = async (
 ): Promise<boolean> => {
   try {
     const conversation = await xmtpClient.conversations.getConversationById(
-      env.XMTP_DEFAULT_CONVERSATION_ID,
+      GROUP_ID ?? "",
     );
 
     if (!conversation) {
       throw new Error(
-        `Conversation not found with id: ${env.XMTP_DEFAULT_CONVERSATION_ID} on env: ${env.XMTP_ENV}`,
+        `Conversation not found with id: ${GROUP_ID} on env: ${XMTP_ENV}`,
       );
     }
-
-    const metadata = await conversation.metadata();
-    if (metadata.conversationType !== "group") {
-      throw new Error("Conversation is not a group");
-    }
-
-    const group = conversation as Group;
-    const groupMembers = await group.members();
+    await conversation.sync();
+    console.log("conversation", conversation.id);
+    const groupMembers = await (conversation as Group).members();
     const isMember = groupMembers.some(
       (member) => member.inboxId === newUserInboxId,
     );
-
     if (!isMember) {
-      await group.addMembers([newUserInboxId]);
+      await conversation.sync();
+      await (conversation as Group).addMembers([newUserInboxId]);
+      console.log("Added user to group");
+    } else {
+      await conversation.sync();
+      await (conversation as Group).removeMembers([newUserInboxId]);
+      console.log("Removed user from group");
     }
 
     return true;
@@ -104,33 +103,10 @@ const addUserToDefaultGroupChat = async (
   }
 };
 
-const removeUserFromDefaultGroupChat = async (
-  userInboxId: string,
-): Promise<boolean> => {
-  try {
-    const conversation = await xmtpClient.conversations.getConversationById(
-      env.XMTP_DEFAULT_CONVERSATION_ID,
-    );
-
-    if (!conversation) {
-      throw new Error(
-        `Conversation not found with id: ${env.XMTP_DEFAULT_CONVERSATION_ID} on env: ${env.XMTP_ENV}`,
-      );
-    }
-
-    const group = conversation as Group;
-    await group.removeMembers([userInboxId]);
-    return true;
-  } catch (error) {
-    console.error("Error removing user from default group chat:", error);
-    return false;
-  }
-};
-
 // API Middleware
 const validateApiSecret = (req: Request, res: Response, next: () => void) => {
   const apiSecret = req.headers["x-api-secret"];
-  if (apiSecret !== env.API_SECRET_KEY) {
+  if (apiSecret !== API_SECRET_KEY) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
@@ -155,6 +131,12 @@ app.post(
     void (async () => {
       try {
         const { inboxId } = req.body as { inboxId: string };
+        console.log(
+          "Adding user to default group chat with id:",
+          GROUP_ID,
+          "and inboxId:",
+          inboxId,
+        );
         const result = await addUserToDefaultGroupChat(inboxId);
         res.status(200).json({
           success: result,
@@ -180,7 +162,7 @@ app.post(
     void (async () => {
       try {
         const { inboxId } = req.body as { inboxId: string };
-        const result = await removeUserFromDefaultGroupChat(inboxId);
+        const result = await addUserToDefaultGroupChat(inboxId);
         res.status(200).json({
           success: result,
           message: result
@@ -202,7 +184,7 @@ app.get(
   "/api/xmtp/get-group-id",
   validateApiSecret,
   (req: Request, res: Response) => {
-    res.json({ groupId: env.XMTP_DEFAULT_CONVERSATION_ID });
+    res.json({ groupId: process.env.GROUP_ID });
   },
 );
 
@@ -210,8 +192,8 @@ app.get(
 void (async () => {
   try {
     await initializeXmtpClient();
-    app.listen(env.PORT, () => {
-      console.log(`Server is running on port ${env.PORT}`);
+    app.listen(PORT, () => {
+      console.log(`Server is running on port ${PORT}`);
     });
   } catch (error) {
     console.error("Failed to initialize XMTP client:", error);
