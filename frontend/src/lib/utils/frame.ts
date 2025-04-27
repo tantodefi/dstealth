@@ -13,14 +13,16 @@ export async function getFonts(): Promise<
     style: "normal" | "italic";
   }[]
 > {
+  // Use Google Fonts directly
   const [font, fontBold] = await Promise.all([
-    ky
-      .get(`${env.NEXT_PUBLIC_URL}/fonts/inter-latin-ext-400-normal.woff`)
-      .then((res) => res.arrayBuffer()),
-    ky
-      .get(`${env.NEXT_PUBLIC_URL}/fonts/inter-latin-ext-700-normal.woff`)
-      .then((res) => res.arrayBuffer()),
+    fetch(
+      "https://fonts.gstatic.com/s/inter/v13/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuLyfAZ9hjp-Ek-_0ew.woff",
+    ).then((res) => res.arrayBuffer()),
+    fetch(
+      "https://fonts.gstatic.com/s/inter/v13/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuFuYAZ9hjp-Ek-_0ew.woff",
+    ).then((res) => res.arrayBuffer()),
   ]);
+
   return [
     {
       name: "Inter",
