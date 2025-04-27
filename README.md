@@ -1,16 +1,12 @@
-# XMTP Mini-App Debugger
+# XMTP mini-app examples
 
 This repository provides a debugging toolkit for mini-apps built with the [XMTP](https://docs.xmtp.org/) network and Farcaster Frames.
 
-## Why XMTP?
-
-- **End-to-end & compliant**: Data is encrypted in transit and at rest, meeting strict security and regulatory standards.
-- **Open-source & trustless**: Built on top of the [MLS](https://messaginglayersecurity.rocks/) protocol, it replaces trust in centralized certificate authorities with cryptographic proofs.
-- **Privacy & metadata protection**: Offers anonymous usage through SDKs and pseudonymous usage with nodes tracking minimum metadata.
-- **Decentralized**: Operates on a peer-to-peer network, eliminating single points of failure and ensuring continued operation even if some nodes go offline.
-- **Multi-agent**: Allows confidential communication between multiple agents and humans through MLS group chats.
-
 ## Getting started
+
+> [!TIP]
+> See XMTP's [xmtp-agents-examples](https://github.com/xmtp/xmtp-agents-examples) for vibe coding agents and best practices.
+
 
 This debugging toolkit includes a full-stack mini-app example with both frontend and backend components.
 
@@ -59,9 +55,10 @@ NEXT_PUBLIC_ENCRYPTION_KEY= # XMTP encryption key for the browser
 
 ## Debugging Examples
 
-- [Wallet Connection](./frontend/src/examples/WalletConnection.tsx)
-- [Connection Info](./frontend/src/examples/ConnectionInfo.tsx)
-- [Group Management](./frontend/src/examples/GroupManagement.tsx) 
+- [Wallet Connection](./frontend/src/examples/WalletConnection.tsx): Connect a wallet to the mini-app.
+- [Connection Info](./frontend/src/examples/ConnectionInfo.tsx): Display information about the current connection.
+- [Group Management](./frontend/src/examples/GroupManagement.tsx): Join a group chat and send messages through the XMTP express backend.
+- [Bot Chat](./frontend/src/examples/BotChat.tsx): A simple example of a bot chat using the XMTP client.
 
 ## Deployment of Your Debugged App
 
