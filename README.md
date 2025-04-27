@@ -29,6 +29,21 @@ The repository is structured as follows:
 - Docker (optional, for local network)
 - A Farcaster account (for Frames integration)
 
+### Installation
+
+```bash
+# Clone repository
+git clone https://github.com/xmtp/xmtp-mini-app-examples.git
+# Navigate to backend directory
+cd xmtp-mini-app-examples/backend
+# Install dependencies
+yarn install
+# Create .env file
+cp .env.example .env
+# Run in development mode
+yarn run dev
+```
+
 ### Running the mini-app
 
 Create a `.env` file in the `frontend` directory with the following variables:
@@ -70,16 +85,6 @@ To use the mini-app with Farcaster:
    - Generate domain manifest
 2. Update the `accountAssociation` in your code
 3. Configure your frame with proper URLs and metadata
-
-## API Endpoints
-
-All protected endpoints require the `API_SECRET_KEY` to be provided in the request headers as `x-api-secret`.
-
-- `GET /health`: Health check endpoint
-- `POST /api/xmtp/add-inbox`: Add a user to the default group chat
-- `POST /api/xmtp/remove-inbox`: Remove a user from the default group chat
-- `POST /api/xmtp/add-inbox`: Add a user to the default group chat
-- `GET /api/xmtp/get-group-id`: Get the default group chat ID
 
 
 ## Work with Local XMTP Network
