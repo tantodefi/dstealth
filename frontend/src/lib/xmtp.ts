@@ -3,16 +3,8 @@ import { toBytes, type Hex, type WalletClient } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 export const createEphemeralSigner = (privateKey: Hex): Signer => {
-  console.log("Creating ephemeral signer with key type:", typeof privateKey);
-  console.log("Private key format:", {
-    length: privateKey.length,
-    startsWithHex: privateKey.startsWith("0x"),
-    preview: `${privateKey.substring(0, 6)}...${privateKey.substring(privateKey.length - 6)}`
-  });
-  
-  try {
+ 
     const account = privateKeyToAccount(privateKey);
-    console.log("Successfully created account from private key:", account.address);
     
     return {
       type: "EOA",
@@ -32,16 +24,14 @@ export const createEphemeralSigner = (privateKey: Hex): Signer => {
         }
       },
     };
-  } catch (error) {
-    console.error("Error creating account from private key:", error);
-    throw error;
-  }
 };
 
 export const createEOASigner = (
   address: `0x${string}`,
   walletClient: WalletClient,
 ): Signer => {
+  console.log("Creating EOA signer for address:", address);
+  
   return {
     type: "EOA",
     getIdentifier: () => ({
@@ -49,11 +39,19 @@ export const createEOASigner = (
       identifierKind: "Ethereum",
     }),
     signMessage: async (message: string) => {
-      const signature = await walletClient.signMessage({
-        account: address,
-        message,
-      });
-      return toBytes(signature);
+      try {
+        console.log("EOA signer signing message");
+        const signature = await walletClient.signMessage({
+          account: address,
+          message,
+        });
+        console.log("EOA message signed successfully");
+        return toBytes(signature);
+      } catch (error) {
+        console.error("Error in EOA signer when signing message:", error);
+        // Rethrow the error so the caller can handle it
+        throw error;
+      }
     },
   };
 };
