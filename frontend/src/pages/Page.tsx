@@ -9,9 +9,6 @@ import ConnectionInfo from "@/examples/ConnectionInfo";
 import WalletConnection from "@/examples/WalletConnection";
 import GroupChat from "@/examples/GroupChat";
 
-// Force dynamic rendering with no caching
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
 
 export default function ExamplePage() {
   const { client, initializing, disconnect } = useXMTP();
@@ -36,13 +33,7 @@ export default function ExamplePage() {
     setShowLoader(initializing);
   }, [initializing]);
 
-  // Handle logout
-  const handleLogout = () => {
-    if (client) {
-      disconnect();
-      window.location.href = "/";
-    }
-  };
+ 
 
   // Show loader while not mounted
   if (!mounted) {
@@ -59,8 +50,7 @@ export default function ExamplePage() {
     <SafeAreaContainer>
       <div className="flex flex-col w-full max-w-md mx-auto h-screen bg-black">
         <Header 
-          isConnected={isConnected || !!client} 
-          onLogout={isConnected || !!client ? handleLogout : undefined} 
+          isConnected={isConnected || !!client}  
         />
         
         {showLoader ? (

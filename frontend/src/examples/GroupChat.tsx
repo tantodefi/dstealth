@@ -4,9 +4,11 @@ import { useCallback, useState, useEffect } from "react";
 import { Group } from "@xmtp/browser-sdk";
 import { Button } from "@/components/Button";
 import { useXMTP } from "@/context/xmtp-context";
+import { useBackendHealth } from "@/context/backend-health-context";
 
 export default function GroupManagement() {
   const { client, conversations, setConversations, setGroupConversation } = useXMTP();
+  const { backendStatus } = useBackendHealth();
   
   // Group Chat State
   const [joining, setJoining] = useState(false);
@@ -16,7 +18,7 @@ export default function GroupManagement() {
   const [groupMemberCount, setGroupMemberCount] = useState(0);
   const [groupMessageCount, setGroupMessageCount] = useState(0);
   const [latestMessage, setLatestMessage] = useState<string | null>(null);
-  const [backendStatus, setBackendStatus] = useState<"unknown" | "online" | "offline">("unknown");
+  const [groupName, setGroupName] = useState<string | null>(null);
 
   // Message sending state
   const [message, setMessage] = useState("");
@@ -35,53 +37,36 @@ export default function GroupManagement() {
     setIsRefreshing(true);
     
     try {
-      // Sync conversations to ensure we have the latest data
-      await client.conversations.sync();
       
       // Get group info from API
       const response = await fetch(`/api/proxy/get-group-id?inboxId=${client.inboxId}`);
       
       if (!response.ok) {
-        // If we receive a 500 error, mark the backend as offline to prevent continuous retries
-        if (response.status === 500) {
-          setBackendStatus("offline");
-          throw new Error(`Backend error: ${response.status}`);
-        }
         throw new Error(`Backend error: ${response.status}`);
       }
       
       const data = await response.json();
-      
-      setBackendStatus("online");
+      console.log("API response:", data);
       
       const groupId = data.groupId;
       const isMember = data.isMember;
-      
       setIsGroupJoined(isMember);
 
-      if (!isMember || !groupId) {
-        setLocalGroupConversation(null);
-        setGroupMemberCount(0);
-        setGroupMessageCount(0);
-        setLatestMessage(null);
-        setIsRefreshing(false);
-        return;
-      }
+      // Sync conversations to make sure we have the latest data
+      await client.conversations.sync();
+      const newConversations = await client.conversations.list();
+      setConversations(newConversations);
       
       // Find the group in existing conversations
-      let group = conversations.find(conv => conv.id === groupId) as Group | undefined;
-
-      if (!group) {
-        // If not found, refresh conversations and try again
-        await client.conversations.sync();
-        const newConversations = await client.conversations.list();
-        setConversations(newConversations);
-        
-        group = newConversations.find(conv => conv.id === groupId) as Group | undefined;
-      }
+      let group = newConversations.find(conv => conv.id === groupId) as Group | undefined;
       
+      console.log("Found group:", group?.id, "Is Active:", group?.isActive);
+
       if (group && group.isActive) {
         setLocalGroupConversation(group);
+        setGroupName(group.name || ""); 
+      
+
         
         // Get group members
         const members = await group.members();
@@ -98,18 +83,26 @@ export default function GroupManagement() {
       }
     } catch (error) {
       console.error("Error fetching group data:", error);
-      setBackendStatus("offline");
     } finally {
       setIsRefreshing(false);
     }
-  }, [client, conversations, isRefreshing, setConversations]);
+  }, [client, conversations]);
 
-  // Fetch group data when client is available - we stop retrying if backend is down
+  // Initial data fetch on mount
   useEffect(() => {
-    if (client && client.inboxId && backendStatus !== "offline") {
+    if (client && client.inboxId) {
       fetchGroupData();
     }
-  }, [client, client?.inboxId, fetchGroupData, backendStatus]); // Added backendStatus to dependencies
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fetch when client changes (e.g., new login)
+  useEffect(() => {
+    if (client && client.inboxId) {
+      fetchGroupData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client]);
 
   // Join group handler
   const handleJoinGroup = async () => {
@@ -125,18 +118,14 @@ export default function GroupManagement() {
       });
       
       if (!response.ok) {
-        setBackendStatus("offline");
         throw new Error(`Backend error: ${response.status}`);
       }
       
       const data = await response.json();
-      setBackendStatus("online");
 
       if (data.success) {
         setIsGroupJoined(true);
         
-        // Sync after joining
-        await client.conversations.sync();
         const newConversations = await client.conversations.list();
         setConversations(newConversations);
         
@@ -164,16 +153,12 @@ export default function GroupManagement() {
       });
       
       if (!response.ok) {
-        setBackendStatus("offline");
         throw new Error(`Backend error: ${response.status}`);
       }
       
       const data = await response.json();
-      setBackendStatus("online");
 
       if (data.success) {
-        // Update state after leaving
-        await client.conversations.sync();
         const newConversations = await client.conversations.list();
         setConversations(newConversations);
         
@@ -182,6 +167,7 @@ export default function GroupManagement() {
         setGroupMemberCount(0);
         setGroupMessageCount(0);
         setLatestMessage(null);
+        setGroupName(null);
       }
     } catch (error) {
       console.error("Error leaving group:", error);
@@ -197,22 +183,12 @@ export default function GroupManagement() {
     setIsRefreshing(true);
     
     try {
-      // First check if backend is responsive
-      const healthCheck = await fetch(`/api/proxy/get-group-id?inboxId=${client.inboxId}`);
-      
-      if (!healthCheck.ok) {
-        if (healthCheck.status === 500) {
-          setBackendStatus("offline");
-          throw new Error(`Backend error: ${healthCheck.status}`);
-        }
-      } else {
-        setBackendStatus("online");
-        // Continue with regular refresh
+      // Continue with regular refresh if backend is available
+      if (backendStatus === "online") {
         await fetchGroupData();
       }
     } catch (error) {
-      console.error("Error checking backend:", error);
-      setBackendStatus("offline");
+      console.error("Error refreshing:", error);
     } finally {
       setIsRefreshing(false);
     }
@@ -220,6 +196,7 @@ export default function GroupManagement() {
 
   // Message sending handler
   const handleSendMessage = async () => {
+    console.log("Sending message:", groupConversation);
     if (!client || !groupConversation || !message.trim()) return;
 
     setSending(true);
@@ -274,23 +251,16 @@ export default function GroupManagement() {
               <span className="text-red-500"> Not a member</span>
             )}
           </p>
-         
-          {isGroupJoined && groupConversation && (
-            <>
-              <p><span className="text-gray-500">Group Name:</span> {groupConversation.name || "XMTP Group"}</p>
-              <p><span className="text-gray-500">Group ID:</span> {groupConversation.id.slice(0, 8)}...{groupConversation.id.slice(-8)}</p>
-              <p><span className="text-gray-500">Members:</span> {groupMemberCount}</p>
-              <p><span className="text-gray-500">Messages:</span> {groupMessageCount}</p>
-              {latestMessage && (
-                <p className="mt-1">
-                  <span className="text-gray-500">Latest Message:</span>{" "}
-                  <span className="text-gray-300 italic">
-                    {latestMessage.length > 50 ? `${latestMessage.substring(0, 50)}...` : latestMessage}
-                  </span>
-                </p>
-              )}
-            </>
-          )}
+          <p><span className="text-gray-500">Group Name:</span> {groupName || "No group"}</p>
+          <p><span className="text-gray-500">Group ID:</span> {groupConversation?.id ?? "No ID"}</p>
+          <p><span className="text-gray-500">Members:</span> {groupMemberCount || 0}</p>
+          <p><span className="text-gray-500">Messages:</span> {groupMessageCount || 0}</p>
+          <p className="mt-1">
+            <span className="text-gray-500">Latest Message:</span>{" "}
+            <span className="text-gray-300 italic">
+              {latestMessage ? (latestMessage.length > 50 ? `${latestMessage.substring(0, 50)}...` : latestMessage) : "No messages"}
+            </span>
+          </p>
         </div>
         <Button
           className="w-full mt-3"
@@ -302,12 +272,12 @@ export default function GroupManagement() {
       </div>
 
       {/* Group Chat Section - Only show when in a group */}
-      {client && isGroupJoined && groupConversation && groupConversation.isActive && (
+      {client && isGroupJoined  && (
         <div className="w-full bg-gray-900 p-3 rounded-md">
           <div className="flex justify-between items-center">
             <h2 className="text-white text-sm font-medium">Group Chat</h2>
             <span className="text-gray-400 text-xs">
-              {groupConversation.name || "XMTP Group"}
+              {groupName || "XMTP Group"}
             </span>
           </div>
           
