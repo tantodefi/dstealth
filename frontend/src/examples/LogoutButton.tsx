@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useDisconnect } from "wagmi";
 import { Button } from "@/components/Button";
 import { useXMTP } from "@/context/xmtp-context";
+import { clearWagmiCookies } from "@/providers/wagmi";
 
 // Key XMTP storage keys
 const XMTP_KEYS = ["xmtp:hasConnected", "xmtp:connectionType", "xmtp:ephemeralKey"];
@@ -33,6 +34,12 @@ export default function LogoutButton() {
         }
       });
       
+      // Clear all storage
+      localStorage.clear();
+      sessionStorage.clear();
+
+      // Clear wagmi cookies
+      clearWagmiCookies();
 
       // Disconnect services
       disconnectXmtp();
