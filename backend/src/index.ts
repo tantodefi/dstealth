@@ -53,6 +53,7 @@ const initializeXmtpClient = async () => {
     conversation = await xmtpClient.conversations.newGroup(defaultInboxes);
     console.log("New group created:", conversation.id);
     GROUP_ID = conversation.id;
+    await (conversation as Group).updateName("XMTP Debugger");
     appendToEnv("GROUP_ID", GROUP_ID);
   }
 
@@ -230,8 +231,6 @@ app.get(
   "/api/xmtp/get-group-id",
   validateApiSecret,
   (req: Request, res: Response) => {
-    console.log("🔴🔴🔴 GET-GROUP-ID ROUTE HANDLER STARTED 🔴🔴🔴");
-    console.log("Request headers:", req.headers);
     void (async () => {
       try {
         console.log("🔵 Inside get-group-id async block");

@@ -1,4 +1,3 @@
-import { farcasterFrame } from "@farcaster/frame-wagmi-connector";
 import { base, mainnet } from "viem/chains";
 import { cookieStorage, createConfig, createStorage, http } from "wagmi";
 
@@ -14,5 +13,22 @@ export const wagmiConfig = createConfig({
     [mainnet.id]: http("https://mainnet.llamarpc.com"),
     [base.id]: http("https://base.llamarpc.com"),
   },
-  connectors: [farcasterFrame()],
+  // Remove the connector for now to avoid build errors
+  connectors: [],
 });
+
+// Function to clear wagmi cookies
+export const clearWagmiCookies = () => {
+  // wagmi uses these cookie keys
+  const wagmiCookieKeys = [
+    "wagmi.connected",
+    "wagmi.wallet",
+    "wagmi.store",
+    "wagmi.network",
+  ];
+
+  // Clear each wagmi cookie by setting expiration to past date
+  wagmiCookieKeys.forEach((key) => {
+    document.cookie = `${key}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+  });
+};
