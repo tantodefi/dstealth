@@ -2,17 +2,25 @@
 
 This repository contains examples of mini-apps built with the [XMTP](https://docs.xmtp.org/) network and Farcaster Frames.
 
-## Why XMTP for Mini-Apps?
+## Why XMTP?
 
-- **End-to-end encryption**: All data is encrypted in transit and at rest, ensuring user privacy and security.
+- **End-to-end & compliant**: Data is encrypted in transit and at rest, meeting strict security and regulatory standards.
 - **Open-source & trustless**: Built on top of the [MLS](https://messaginglayersecurity.rocks/) protocol, it replaces trust in centralized certificate authorities with cryptographic proofs.
 - **Privacy & metadata protection**: Offers anonymous usage through SDKs and pseudonymous usage with nodes tracking minimum metadata.
 - **Decentralized**: Operates on a peer-to-peer network, eliminating single points of failure and ensuring continued operation even if some nodes go offline.
-- **Group messaging**: Enables rich group chat experiences between users through MLS group chats.
+- **Multi-agent**: Allows confidential communication between multiple agents and humans through MLS group chats.
+
 
 ## Getting Started
 
 This repository contains a full-stack mini-app example with both frontend and backend components.
+
+### Repository Structure
+
+The repository is structured as follows:
+
+- [frontend](./frontend): The frontend is a Next.js application with Farcaster Frames integration.
+- [backend](./backend): The backend is a Node.js application that handles a group chat for the mini-app.
 
 ### Requirements
 
@@ -21,12 +29,9 @@ This repository contains a full-stack mini-app example with both frontend and ba
 - Docker (optional, for local network)
 - A Farcaster account (for Frames integration)
 
-## Frontend Setup
+### Running the mini-app
 
-The frontend is a Next.js application with Farcaster Frames integration.
-
-### Environment Variables
-Create a `.env.local` file in the `frontend` directory with the following variables:
+Create a `.env` file in the `frontend` directory with the following variables:
 
 ```bash
 NEXT_PUBLIC_URL= # Your local/production URL
@@ -38,61 +43,13 @@ XMTP_ENV=dev # XMTP environment (dev/production)
 NEXT_PUBLIC_ENCRYPTION_KEY= # XMTP encryption key for the browser
 ```
 
-### Run the Frontend
+## Examples
 
-```bash
-# Navigate to frontend directory
-cd frontend
-# Install dependencies
-yarn install
-# Run in development mode
-yarn dev
-```
-
-## Backend Setup
-
-The backend handles XMTP operations for the mini-app.
-
-### Environment Variables
-
-Create a `.env` file in the `backend` directory with the following variables:
-
-```bash
-PORT=5001 # Server port
-API_SECRET_KEY= # Secret key for API authentication, generate with openssl rand -base64 32
-XMTP_PRIVATE_KEY= # XMTP private key
-XMTP_ENCRYPTION_KEY= # XMTP encryption key
-XMTP_ENV=dev # XMTP environment (dev/local/production)
-GROUP_ID= # Default XMTP conversation ID
-```
-
-### Run the Backend
-
-```bash
-# Navigate to backend directory
-cd backend
-# Install dependencies
-yarn install
-# Run in development mode
-yarn dev
-```
-
-## Work with Local XMTP Network
-
-`dev` and `production` networks are hosted by XMTP, while `local` network is hosted by yourself.
-
-1. Install Docker
-2. Start the XMTP service and database
-
-```bash
-./dev/up
-```
-
-3. Change the `.env` files to use the local network
-
-```bash
-XMTP_ENV=local
-```
+- [Wallet Connection](./frontend/src/examples/WalletConnection.tsx)
+- [Connection Info](./frontend/src/examples/ConnectionInfo.tsx)
+- [Group Management](./frontend/src/examples/GroupManagement.tsx) 
+- [Group Chat](./frontend/src/examples/GroupChat.tsx)
+- [Backend Info](./frontend/src/examples/BackendInfo.tsx)
 
 ## Deployment
 
@@ -116,19 +73,40 @@ To use the mini-app with Farcaster:
 
 ## API Endpoints
 
-The backend server provides these endpoints:
-
-### Public endpoints
-- `GET /health`: Health check endpoint
-
-### Protected endpoints
 All protected endpoints require the `API_SECRET_KEY` to be provided in the request headers as `x-api-secret`.
 
+- `GET /health`: Health check endpoint
+- `POST /api/xmtp/add-inbox`: Add a user to the default group chat
+- `POST /api/xmtp/remove-inbox`: Remove a user from the default group chat
 - `POST /api/xmtp/add-inbox`: Add a user to the default group chat
 - `GET /api/xmtp/get-group-id`: Get the default group chat ID
 
+
+## Work with Local XMTP Network
+
+`dev` and `production` networks are hosted by XMTP, while `local` network is hosted by yourself.
+
+1. Install Docker
+2. Start the XMTP service and database
+
+```bash
+./dev/up
+```
+
+3. Change the `.env` files to use the local network
+
+```bash
+XMTP_ENV=local
+```
+
+## Web inbox
+
+See web best practices with XMTP `browser-sdk` using [xmtp.chat](https://xmtp.chat), and it's open source version [xmtp-chat-web](https://github.com/xmtp/xmtp-js/tree/main/apps/xmtp.chat).
+
+![](./screenshot.png)
+
+
 ## Additional Resources
 
-- [XMTP Documentation](https://docs.xmtp.org/)
 - [Farcaster Frames Documentation](https://docs.farcaster.xyz/reference/frames/spec)
-- [XMTP Web Inbox](https://xmtp.chat/) - Test your mini-app integration
+- [Builders Garden miniapp template](https://github.com/builders-garden/miniapp-next-template)
