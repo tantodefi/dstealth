@@ -7759,6 +7759,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"lucide-react@npm:^0.511.0":
+  version: 0.511.0
+  resolution: "lucide-react@npm:0.511.0"
+  peerDependencies:
+    react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
+  checksum: 10/d712f4215a2e2563e145a6946f0e2be2cf6a081ac52d832e521996ba1c1fda91881445a4e78affa0bde520b3ad9f25ff83b8097f9baf2e192ce8f732d78e1402
+  languageName: node
+  linkType: hard
+
 "make-fetch-happen@npm:^14.0.3":
   version: 14.0.3
   resolution: "make-fetch-happen@npm:14.0.3"
@@ -11561,6 +11570,7 @@ __metadata:
     jiti: "npm:1.21.7"
     jose: "npm:^6.0.10"
     ky: "npm:^1.8.1"
+    lucide-react: "npm:^0.511.0"
     next: "npm:^15.3.2"
     pino-pretty: "npm:^13.0.0"
     prettier: "npm:^3.4.2"

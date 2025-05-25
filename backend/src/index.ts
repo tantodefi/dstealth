@@ -19,6 +19,7 @@ import {
 } from "./helper";
 import { env } from './config/env';
 import fkeyRoutes from './routes/fkey';
+import convosRoutes from './routes/convos';
 
 const { WALLET_KEY, API_SECRET_KEY, ENCRYPTION_KEY, XMTP_ENV, PORT } =
   validateEnvironment([
@@ -53,25 +54,34 @@ const initializeXmtpClient = async () => {
   if (GROUP_ID) {
     conversation = await xmtpClient.conversations.getConversationById(GROUP_ID);
   } else {
-    conversation = await xmtpClient.conversations.newGroup(defaultInboxes);
+    conversation = await xmtpClient.conversations.newGroup(defaultInboxes, {
+      groupName: "XMTP Debugger Group"
+    });
     console.log("New group created:", conversation.id);
     GROUP_ID = conversation.id;
     appendToEnv("GROUP_ID", GROUP_ID);
   }
-  await (conversation as Group).updateName("XMTP Debugger Group");
 
   if (!conversation) {
     console.error("Failed to initialize XMTP client");
     return;
   }
-  const message = await conversation.send("Test message");
-  console.log("Message sent:", message);
+
+  // Check if conversation is a Group before using Group-specific methods
+  if (conversation instanceof Group) {
+    const isAdmin = conversation.isSuperAdmin(xmtpClient.inboxId);
+    await conversation.sync();
+    console.log("Client is admin of the group:", isAdmin);
+    
+    // Send test message
+    const message = await conversation.send("Test message");
+    console.log("Message sent:", message);
+  } else {
+    console.error("Conversation is not a Group");
+    return;
+  }
 
   await xmtpClient.conversations.sync();
-
-  const isAdmin = (conversation as Group).isSuperAdmin(xmtpClient.inboxId);
-  await conversation.sync();
-  console.log("Client is admin of the group:", isAdmin);
 };
 
 // XMTP Service Functions
@@ -307,6 +317,7 @@ app.get(
 );
 
 app.use('/api/fkey', fkeyRoutes);
+app.use('/api/convos', convosRoutes);
 
 // Start Server
 void (async () => {

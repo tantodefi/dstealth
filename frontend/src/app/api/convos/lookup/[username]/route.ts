@@ -8,8 +8,8 @@ export async function GET(
   const username = await params.username;
   
   try {
-    console.log(`Proxying fkey lookup request for username: ${username}`);
-    const response = await fetch(`${env.BACKEND_URL}/api/fkey/lookup/${username}`, {
+    console.log(`Proxying convos lookup request for username: ${username}`);
+    const response = await fetch(`${env.BACKEND_URL}/api/convos/lookup/${username}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -23,7 +23,7 @@ export async function GET(
     const data = await response.json();
     return Response.json(data);
   } catch (error) {
-    console.error('Error in fkey lookup:', error);
+    console.error('Error in convos lookup:', error);
     return Response.json(
       { error: 'Failed to lookup profile', success: false },
       { status: 500 }
