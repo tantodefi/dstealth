@@ -9,6 +9,7 @@ import BotChat from "@/examples/BotChat";
 import ConnectionInfo from "@/examples/ConnectionInfo";
 import GroupChat from "@/examples/GroupChat";
 import WalletConnection from "@/examples/WalletConnection";
+import { FkeySearch } from "@/components/FkeySearch";
 
 export default function ExamplePage() {
   const { client, initializing, disconnect } = useXMTP();
@@ -54,6 +55,7 @@ export default function ExamplePage() {
         ) : (
           <div className="flex flex-col gap-4 px-4 py-4 h-full overflow-auto">
             <ConnectionInfo onConnectionChange={setIsConnected} />
+            <FkeySearch />
 
             {!client && <WalletConnection />}
 

@@ -17,6 +17,8 @@ import {
   getEncryptionKeyFromHex,
   validateEnvironment,
 } from "./helper";
+import { env } from './config/env';
+import fkeyRoutes from './routes/fkey';
 
 const { WALLET_KEY, API_SECRET_KEY, ENCRYPTION_KEY, XMTP_ENV, PORT } =
   validateEnvironment([
@@ -159,7 +161,10 @@ const validateApiSecret = (req: Request, res: Response, next: () => void) => {
 // Express App Setup
 const app = express();
 app.use(helmet());
-app.use(cors());
+app.use(cors({
+  origin: env.FRONTEND_URL,
+  credentials: true
+}));
 app.use(express.json());
 
 // Add global request logger
@@ -301,12 +306,14 @@ app.get(
   },
 );
 
+app.use('/api/fkey', fkeyRoutes);
+
 // Start Server
 void (async () => {
   try {
     await initializeXmtpClient();
-    app.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
+    app.listen(env.PORT, () => {
+      console.log(`Server is running on port ${env.PORT}`);
     });
   } catch (error) {
     console.error("Failed to initialize XMTP client:", error);
