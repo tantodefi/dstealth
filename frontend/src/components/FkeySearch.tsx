@@ -137,47 +137,71 @@ export function FkeySearch() {
     setConvosData(null); // Reset convos data when starting new search
 
     try {
-      // Fetch from our backend API which will parse the HTML
-      const response = await fetch(`/api/fkey/lookup/${username}`);
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || `Failed to lookup profile: ${response.status}`);
+      // First try fkey.id lookup
+      let fkeyProfile = null;
+      try {
+        const response = await fetch(`/api/fkey/lookup/${username}`);
+        const data = await response.json();
+        
+        if (response.ok && data.address) {
+          fkeyProfile = data;
+          setProfile(data);
+        }
+      } catch (fkeyError) {
+        console.error('fkey.id lookup error:', fkeyError);
+        // Don't set error - we'll continue with convos lookup
       }
 
-      if (data.error) {
-        throw new Error(data.error);
-      }
-
-      if (!data.address) {
-        throw new Error('No address found for this profile');
-      }
-
-      setProfile(data);
-
-      // Immediately try to lookup convos profile
+      // Always try convos lookup
       try {
         const convosResponse = await fetch(`/api/convos/lookup/${username}`);
         const convosData = await convosResponse.json();
         
         if (convosData.success && convosData.xmtpId) {
-          setConvosData({
+          const convosProfile = {
             xmtpId: convosData.xmtpId,
             username: convosData.username,
             url: convosData.url,
             profile: convosData.profile
-          });
+          };
+          setConvosData(convosProfile);
+
+          // If no fkey profile was found, show the suggestion message
+          if (!fkeyProfile) {
+            setError("fluidkey user not found");
+            // Create personalized invite message
+            const inviteMessage = `👋 hey ${convosProfile.profile.name || convosProfile.username}, check out fluidkey.com for better web3 privacy`;
+            
+            console.log("Dispatching invite message:", inviteMessage);
+            
+            // Dispatch event to pre-fill the message input
+            window.dispatchEvent(new CustomEvent('setInviteMessage', { 
+              detail: { message: inviteMessage }
+            }));
+
+            // Double-check event dispatch with a timeout
+            setTimeout(() => {
+              console.log("Re-dispatching invite message after delay");
+              window.dispatchEvent(new CustomEvent('setInviteMessage', { 
+                detail: { message: inviteMessage }
+              }));
+            }, 1000); // Try again after 1 second
+          }
+        } else if (!fkeyProfile) {
+          // Only show error if neither lookup succeeded
+          setError("No profile found on fkey.id or convos.org");
         }
       } catch (convosError) {
         console.error('Error looking up convos:', convosError);
-        // Don't throw here - we still want to show the fkey profile
+        if (!fkeyProfile) {
+          setError("Failed to lookup profiles");
+        }
       }
 
     } catch (error) {
       console.error('Search error:', error);
       setError(error instanceof Error ? error.message : 'Failed to lookup profile');
       setProfile(null);
-      setConvosData(null);
     } finally {
       setIsLoading(false);
     }
@@ -193,7 +217,7 @@ export function FkeySearch() {
   return (
     <div className="w-full flex flex-col gap-3">
       <div className="w-full max-w-md mx-auto p-4">
-        <div className={`bg-gray-900 rounded-lg p-6 border ${error ? 'border-red-500' : profile?.address ? 'border-green-500' : 'border-gray-800'}`}>
+        <div className={`bg-gray-900 rounded-lg p-6 border ${error?.includes('💡') ? 'border-yellow-500' : error ? 'border-red-500' : profile?.address ? 'border-green-500' : 'border-gray-800'}`}>
           <form onSubmit={handleSearch} className="space-y-4">
             <div className="flex items-center">
               <div className="relative flex-1">
@@ -217,7 +241,7 @@ export function FkeySearch() {
             </div>
 
             {error && (
-              <div className="text-red-500 text-sm mt-2">
+              <div className={`text-sm mt-2 ${error.includes('💡') ? 'text-yellow-500' : 'text-red-500'}`}>
                 {error}
               </div>
             )}
@@ -291,12 +315,21 @@ export function FkeySearch() {
 
       {/* Render ConvosChat if we have convos data */}
       {convosData && (
-        <ConvosChat
-          xmtpId={convosData.xmtpId}
-          username={convosData.username}
-          url={convosData.url}
-          profile={convosData.profile}
-        />
+        <>
+          {!profile?.address && (
+            <div className="w-full max-w-md mx-auto px-4 mb-2">
+              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 text-sm text-yellow-200">
+                <p>💡 Click the message input below to send an invite to {convosData.profile.name || convosData.username}</p>
+              </div>
+            </div>
+          )}
+          <ConvosChat
+            xmtpId={convosData.xmtpId}
+            username={convosData.username}
+            url={convosData.url}
+            profile={convosData.profile}
+          />
+        </>
       )}
     </div>
   );

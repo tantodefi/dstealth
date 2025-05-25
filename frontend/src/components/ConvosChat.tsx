@@ -33,6 +33,26 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
   // Use ref to track if stream is already started to prevent infinite loops
   const streamStartedRef = useRef(false);
 
+  // Listen for invite message event
+  useEffect(() => {
+    console.log("Setting up invite message listener");
+    
+    const handleInviteMessage = (event: Event) => {
+      const customEvent = event as CustomEvent<{ message: string }>;
+      console.log("Received invite message event:", customEvent.detail.message);
+      setMessage(customEvent.detail.message);
+    };
+
+    // Add event listener
+    window.addEventListener('setInviteMessage', handleInviteMessage);
+
+    // Cleanup
+    return () => {
+      console.log("Removing invite message listener");
+      window.removeEventListener('setInviteMessage', handleInviteMessage);
+    };
+  }, []);
+
   // Initialize the conversation
   const initializeConversation = useCallback(async () => {
     if (!client) return;
