@@ -3,6 +3,9 @@ import { getPortfolios } from '@coinbase/onchainkit/api';
 import { formatUnits } from 'viem';
 import { useXMTP } from '@/context/xmtp-context';
 import ConvosChat from "./ConvosChat";
+import { storage } from "@/lib/storage";
+import { Stats } from "./Stats";
+import { CollapsibleConnectionInfo } from "./CollapsibleConnectionInfo";
 
 interface Token {
   symbol: string;
@@ -58,6 +61,7 @@ export function FkeySearch() {
   const [selectedToken, setSelectedToken] = useState<Token>(DEFAULT_TOKENS[0]);
   const [availableTokens, setAvailableTokens] = useState<Token[]>(DEFAULT_TOKENS);
   const [isLoadingTokens, setIsLoadingTokens] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
   const [convosData, setConvosData] = useState<{
     xmtpId: string;
     username: string;
@@ -210,12 +214,23 @@ export function FkeySearch() {
   const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile?.address) return;
-    // TODO: Implement send transaction
-    console.log('Sending', amount, selectedToken.symbol, 'to', profile.address);
+    
+    try {
+      // TODO: Implement send transaction
+      console.log('Sending', amount, selectedToken.symbol, 'to', profile.address);
+      
+      // For now, simulate a successful payment
+      // In real implementation, this would be after transaction confirmation
+      storage.incrementStealthPayments();
+    } catch (error) {
+      console.error('Payment error:', error);
+    }
   };
 
   return (
     <div className="w-full flex flex-col gap-3">
+      <CollapsibleConnectionInfo onConnectionChange={setIsConnected} />
+      <Stats />
       <div className="w-full max-w-md mx-auto p-4">
         <div className={`bg-gray-900 rounded-lg p-6 border ${error?.includes('💡') ? 'border-yellow-500' : error ? 'border-red-500' : profile?.address ? 'border-green-500' : 'border-gray-800'}`}>
           <form onSubmit={handleSearch} className="space-y-4">

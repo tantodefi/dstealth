@@ -6,7 +6,6 @@ import { Header } from "@/components/Header";
 import { SafeAreaContainer } from "@/components/SafeAreaContainer";
 import { useXMTP } from "@/context/xmtp-context";
 import BotChat from "@/examples/BotChat";
-import ConnectionInfo from "@/examples/ConnectionInfo";
 import GroupChat from "@/examples/GroupChat";
 import WalletConnection from "@/examples/WalletConnection";
 import { FkeySearch } from "@/components/FkeySearch";
@@ -54,7 +53,6 @@ export default function ExamplePage() {
           <FullPageLoader />
         ) : (
           <div className="flex flex-col gap-4 px-4 py-4 h-full overflow-auto">
-            <ConnectionInfo onConnectionChange={setIsConnected} />
             <FkeySearch />
 
             {!client && <WalletConnection />}

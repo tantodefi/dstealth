@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/Button";
 import { useXMTP } from "@/context/xmtp-context";
 import { CheckCircle2 } from "lucide-react";
+import { storage } from "@/lib/storage";
 
 interface ConvosChatProps {
   xmtpId: string;
@@ -153,6 +154,10 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
 
     try {
       await conversation.send(message);
+      // Check if this was an invite message
+      if (message.includes('fluidkey.com') && message.toLowerCase().includes('hey')) {
+        storage.incrementInvites();
+      }
       setMessage("");
     } catch (error) {
       console.error("Failed to send message:", error);
