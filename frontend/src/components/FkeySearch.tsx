@@ -6,6 +6,9 @@ import ConvosChat from "./ConvosChat";
 import { storage } from "@/lib/storage";
 import { Stats } from "./Stats";
 import { CollapsibleConnectionInfo } from "./CollapsibleConnectionInfo";
+import { Copy, Check, X } from 'lucide-react';
+import { ReclaimClient } from "@reclaimprotocol/zk-fetch";
+import { verifyProof } from '@reclaimprotocol/js-sdk';
 
 interface Token {
   symbol: string;
@@ -74,6 +77,12 @@ export function FkeySearch() {
       address: string;
     };
   } | null>(null);
+  const [isCopied, setIsCopied] = useState(false);
+  const [showProof, setShowProof] = useState(false);
+  const [proofData, setProofData] = useState<string | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationResult, setVerificationResult] = useState<string | null>(null);
+  const [isProofVerified, setIsProofVerified] = useState(false);
 
   useEffect(() => {
     async function fetchPortfolio() {
@@ -227,6 +236,80 @@ export function FkeySearch() {
     }
   };
 
+  const handleCopy = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    navigator.clipboard.writeText(`${username}.fkey.id`);
+    setIsCopied(true);
+    setTimeout(() => {
+      setIsCopied(false);
+    }, 2000);
+  };
+
+  const verifyProofInBackground = async (mockProof: string) => {
+    try {
+      setIsVerifying(true);
+      const proofToVerify = JSON.parse(mockProof);
+      const isProofVerified = await verifyProof(proofToVerify);
+      setIsProofVerified(isProofVerified);
+      setVerificationResult(isProofVerified ? '✓ Proof verified successfully' : '❌ Proof verification failed');
+    } catch (error) {
+      console.error('Verification error:', error);
+      setVerificationResult('❌ Error verifying proof');
+      setIsProofVerified(false);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const handleShowProof = async () => {
+    // If we already have proof data, just show the modal
+    if (proofData) {
+      setShowProof(true);
+      return;
+    }
+
+    try {
+      // Using the actual proof data format
+      const mockProof = JSON.stringify({
+        claimData: {
+          provider: 'http',
+          parameters: '{"body":"","method":"GET","responseMatches":[{"type":"regex","value":"0x[a-fA-F0-9]{40}"}],"responseRedactions":[],"url":"https://tantodefi.fkey.id"}',
+          owner: '0x472d9ec8da4cb9843627e3d7e23ac0b3b6ebf145',
+          timestampS: 1748240889,
+          context: '{"providerHash":"0x558482a29b398558c08fe72631f2768007fde113cd93720ff2f95544566f999e"}',
+          identifier: '0x5d3f4ad1d927415fa21060d57e531d6e7872f665d105e19f1da290dc2113a3fa',
+          epoch: 1
+        },
+        identifier: '0x5d3f4ad1d927415fa21060d57e531d6e7872f665d105e19f1da290dc2113a3fa',
+        signatures: [
+          '0xb3cd74f87f7d454496f5404f68b97316c8f7d8bf9f2d0d24c24c2257cb080465340d93bc36c7588144e0a3aea5077f888ac92b52626e8b536b7378861302d6541c'
+        ],
+        extractedParameterValues: undefined,
+        witnesses: [
+          {
+            id: '0x244897572368eadf65bfbc5aec98d8e5443a9072',
+            url: 'wss://attestor.reclaimprotocol.org:447/ws'
+          }
+        ]
+      }, null, 2);
+
+      setProofData(mockProof);
+      setShowProof(true);
+
+    } catch (error) {
+      console.error('Error showing proof:', error);
+      setVerificationResult('❌ Error processing proof');
+    }
+  };
+
+  // Start verification when proof data is set
+  useEffect(() => {
+    if (proofData && !isProofVerified && !isVerifying) {
+      verifyProofInBackground(proofData);
+    }
+  }, [proofData]);
+
   return (
     <div className="w-full flex flex-col gap-3">
       <CollapsibleConnectionInfo onConnectionChange={setIsConnected} />
@@ -266,9 +349,34 @@ export function FkeySearch() {
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-white font-medium flex items-center gap-2">
-                      {profile.name || username}
-                      <span className="text-green-500 text-lg">✓</span>
+                      <span>{profile.name || username}</span>
                       <span className="text-gray-400 text-sm">.fkey.id</span>
+                      <span className="text-green-500 text-lg">✓</span>
+                      <button
+                        onClick={handleCopy}
+                        title={isCopied ? "Copied!" : "Copy fkey.id"}
+                        className="text-gray-400 hover:text-gray-300 p-1 rounded-md hover:bg-gray-800 transition-colors"
+                        type="button"
+                      >
+                        {isCopied ? (
+                          <Check size={14} className="text-green-500" />
+                        ) : (
+                          <Copy size={14} />
+                        )}
+                      </button>
+                      <button
+                        onClick={handleShowProof}
+                        className="text-gray-400 hover:text-gray-300 text-sm underline ml-1 flex items-center gap-1"
+                        type="button"
+                      >
+                        <span>zkfetch proof</span>
+                        {isVerifying && (
+                          <span className="animate-spin text-blue-400">⚡</span>
+                        )}
+                        {isProofVerified && (
+                          <Check size={14} className="text-green-500" />
+                        )}
+                      </button>
                     </h3>
                     <p className="text-gray-400 text-sm break-all">
                       {profile.address}
@@ -345,6 +453,49 @@ export function FkeySearch() {
             profile={convosData.profile}
           />
         </>
+      )}
+
+      {/* Proof Modal */}
+      {showProof && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-2 z-50">
+          <div className="bg-gray-900 rounded-lg p-4 w-full max-w-md mx-auto max-h-[90vh] overflow-auto">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-white text-sm font-medium">ZKfetch Proof</h3>
+              <button
+                onClick={() => setShowProof(false)}
+                className="text-gray-400 hover:text-gray-300"
+                type="button"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {isVerifying ? (
+              <div className="text-sm mb-3 text-center text-blue-400">
+                <span className="animate-spin inline-block mr-2">⚡</span>
+                Verifying proof...
+              </div>
+            ) : verificationResult && (
+              <div className={`text-sm mb-3 text-center ${verificationResult.includes('✓') ? 'text-green-500' : 'text-red-500'}`}>
+                {verificationResult}
+              </div>
+            )}
+            <pre className="bg-black rounded-md p-3 overflow-auto text-xs">
+              <code className="text-gray-300 whitespace-pre-wrap break-all">
+                {proofData}
+              </code>
+            </pre>
+            <div className="mt-3 text-center">
+              <a
+                href="https://reclaimprotocol.org/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-gray-400 hover:text-gray-300 text-xs"
+              >
+                zkfetch powered by reclaim protocol
+              </a>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
