@@ -14,6 +14,7 @@ router.get('/lookup/:username', async (req, res) => {
   const { username } = req.params;
   let xmtpId: string | null = null;
   let profile: any = null;
+  let zkProof = null;
 
   try {
     const url = `https://${username}.convos.org`;
@@ -33,12 +34,32 @@ router.get('/lookup/:username', async (req, res) => {
       html = await fetchResponse.text();
       
       // Then do the zkFetch verification
-      await reclaimClient.zkFetch(url, {
+      const response = await reclaimClient.zkFetch(url, {
         method: 'GET'
+      }, {
+        responseMatches: [{
+          type: 'regex',
+          value: '0x[a-fA-F0-9]{40}'
+        }]
       });
-      console.log('✅ zkfetch verification successful');
-      console.log('✅ HTML content fetched, length:', html.length);
+      console.log('✅ zkfetch successful');
+      console.log('Response:', response);
       
+      // Validate proof structure
+      if (response && 
+          response.claimData && 
+          response.signatures?.length && 
+          response.witnesses?.length) {
+        console.log('✅ Valid proof structure found');
+        zkProof = response;
+      } else {
+        console.log('❌ Invalid proof structure:', {
+          hasClaimData: !!response?.claimData,
+          signatureCount: response?.signatures?.length,
+          witnessCount: response?.witnesses?.length
+        });
+        zkProof = null;
+      }
     } catch (zkError) {
       // Fallback to regular fetch if zkfetch fails
       console.log('\n⚠️ zkfetch failed:', zkError);
@@ -91,7 +112,8 @@ router.get('/lookup/:username', async (req, res) => {
           description: profile.description,
           avatar: profile.avatar,
           address: profile.turnkeyAddress
-        }
+        },
+        proof: zkProof
       });
     } else {
       console.log('\n❌ No XMTP ID found');

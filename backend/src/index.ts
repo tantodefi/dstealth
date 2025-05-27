@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-misused-promises */
 import {
   Client,
-  type Conversation,
-  type Group,
+  Conversation,
+  Group,
   type XmtpEnv,
 } from "@xmtp/node-sdk";
 import cors from "cors";
@@ -20,6 +20,7 @@ import {
 import { env } from './config/env';
 import fkeyRoutes from './routes/fkey';
 import convosRoutes from './routes/convos';
+import personalDataRoutes from './routes/personalData';
 
 const { WALLET_KEY, API_SECRET_KEY, ENCRYPTION_KEY, XMTP_ENV, PORT } =
   validateEnvironment([
@@ -36,52 +37,69 @@ let xmtpClient: Client;
 
 // Initialize XMTP client
 const initializeXmtpClient = async () => {
-  // Create wallet signer and encryption key
-  const signer = createSigner(WALLET_KEY);
-  const dbEncryptionKey = getEncryptionKeyFromHex(ENCRYPTION_KEY);
-  const dbPath = getDbPath(XMTP_ENV);
-  // Create installation A (receiver) client
-  xmtpClient = await Client.create(signer, {
-    dbEncryptionKey,
-    env: XMTP_ENV as XmtpEnv,
-    dbPath,
-  });
-
-  console.log("XMTP Client initialized with inbox ID:", xmtpClient.inboxId);
-  await xmtpClient.conversations.sync();
-  let conversation: Conversation | undefined;
-  console.log("GROUP_ID", GROUP_ID);
-  if (GROUP_ID) {
-    conversation = await xmtpClient.conversations.getConversationById(GROUP_ID);
-  } else {
-    conversation = await xmtpClient.conversations.newGroup(defaultInboxes, {
-      groupName: "XMTP Debugger Group"
-    });
-    console.log("New group created:", conversation.id);
-    GROUP_ID = conversation.id;
-    appendToEnv("GROUP_ID", GROUP_ID);
-  }
-
-  if (!conversation) {
-    console.error("Failed to initialize XMTP client");
-    return;
-  }
-
-  // Check if conversation is a Group before using Group-specific methods
-  if (conversation instanceof Group) {
-    const isAdmin = conversation.isSuperAdmin(xmtpClient.inboxId);
-    await conversation.sync();
-    console.log("Client is admin of the group:", isAdmin);
+  try {
+    // Create wallet signer and encryption key
+    const signer = createSigner(WALLET_KEY);
+    const dbEncryptionKey = getEncryptionKeyFromHex(ENCRYPTION_KEY);
+    const dbPath = getDbPath(XMTP_ENV);
     
-    // Send test message
-    const message = await conversation.send("Test message");
-    console.log("Message sent:", message);
-  } else {
-    console.error("Conversation is not a Group");
-    return;
-  }
+    // Create installation A (receiver) client
+    xmtpClient = await Client.create(signer, {
+      dbEncryptionKey,
+      env: XMTP_ENV as XmtpEnv,
+      dbPath,
+    });
 
-  await xmtpClient.conversations.sync();
+    console.log("XMTP Client initialized with inbox ID:", xmtpClient.inboxId);
+    
+    try {
+      await xmtpClient.conversations.sync();
+      
+      let conversation: Conversation | undefined;
+      console.log("GROUP_ID", GROUP_ID);
+      
+      if (GROUP_ID) {
+        conversation = await xmtpClient.conversations.getConversationById(GROUP_ID);
+        // If group doesn't exist, create a new one
+        if (!conversation) {
+          console.log("Group not found, creating new group");
+          conversation = await xmtpClient.conversations.newGroup(defaultInboxes, {
+            groupName: "XMTP Debugger Group"
+          });
+          GROUP_ID = conversation.id;
+          appendToEnv("GROUP_ID", GROUP_ID);
+        }
+      } else {
+        conversation = await xmtpClient.conversations.newGroup(defaultInboxes, {
+          groupName: "XMTP Debugger Group"
+        });
+        console.log("New group created:", conversation.id);
+        GROUP_ID = conversation.id;
+        appendToEnv("GROUP_ID", GROUP_ID);
+      }
+
+      // Check if conversation is a Group before using Group-specific methods
+      if (conversation instanceof Group) {
+        const isAdmin = conversation.isSuperAdmin(xmtpClient.inboxId);
+        await conversation.sync();
+        console.log("Client is admin of the group:", isAdmin);
+        
+        // Send test message
+        const message = await conversation.send("Test message");
+        console.log("Message sent:", message);
+      } else {
+        console.warn("Conversation is not a Group - skipping group setup");
+      }
+    } catch (groupError) {
+      console.warn("Failed to setup group chat - continuing without group functionality:", groupError);
+    }
+
+    // The client is initialized, even if group setup failed
+    return;
+  } catch (error) {
+    console.error("Failed to initialize XMTP client:", error);
+    throw error; // Re-throw to prevent server from starting
+  }
 };
 
 // XMTP Service Functions
@@ -171,10 +189,15 @@ const validateApiSecret = (req: Request, res: Response, next: () => void) => {
 // Express App Setup
 const app = express();
 app.use(helmet());
-app.use(cors({
-  origin: env.FRONTEND_URL,
+
+// Configure CORS based on environment
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production' 
+    ? env.FRONTEND_URL 
+    : '*', // Allow all origins in development
   credentials: true
-}));
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Add global request logger
@@ -318,6 +341,7 @@ app.get(
 
 app.use('/api/fkey', fkeyRoutes);
 app.use('/api/convos', convosRoutes);
+app.use('/api/personal-data', personalDataRoutes);
 
 // Start Server
 void (async () => {
@@ -327,7 +351,7 @@ void (async () => {
       console.log(`Server is running on port ${env.PORT}`);
     });
   } catch (error) {
-    console.error("Failed to initialize XMTP client:", error);
+    console.error("Failed to start server:", error);
     process.exit(1);
   }
 })();

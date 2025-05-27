@@ -13,13 +13,16 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useAccount, useSignMessage } from "wagmi";
+import { createEOASigner, createSCWSigner, createEphemeralSigner } from "@/lib/xmtp";
 
 // Type definitions
 export type InitializeClientOptions = {
   dbEncryptionKey?: Uint8Array;
   env?: ClientOptions["env"];
   loggingLevel?: ClientOptions["loggingLevel"];
-  signer: Signer;
+  signer?: Signer;
+  connectionType?: string;
 };
 
 export type XMTPContextValue = {
@@ -39,9 +42,13 @@ export type XMTPProviderProps = React.PropsWithChildren & {
   client?: Client;
 };
 
-// Storage keys for localStorage
+// Storage keys
 const STORAGE_KEYS = {
   HAS_CONNECTED: "xmtp:hasConnected",
+  CONNECTION_TYPE: "xmtp:connectionType",
+  ENCRYPTION_KEY: "xmtp:encryptionKey",
+  FORCE_SCW: "xmtp:forceSCW",
+  EPHEMERAL_KEY: "xmtp:ephemeralKey",
 };
 
 // Create context with default values
@@ -116,15 +123,22 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
   children,
   client: initialClient,
 }) => {
+  const { address, connector } = useAccount();
+  const { signMessageAsync } = useSignMessage();
+  
   // State
   const [client, setClient] = useState<Client | undefined>(initialClient);
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [groupConversation, setGroupConversation] = useState<Group | null>(
-    null,
-  );
+  const [groupConversation, setGroupConversation] = useState<Group | null>(null);
   const [initializing, setInitializing] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const [signatureAttempts, setSignatureAttempts] = useState(0);
+  const [forceSCW, setForceSCW] = useState(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.FORCE_SCW) === "true";
+    } catch {
+      return false;
+    }
+  });
 
   // Debug logging on mount
   useEffect(() => {
@@ -139,24 +153,24 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
     logger.log("Client changed", { exists: !!client });
     if (!client) {
       setConversations([]);
+      setGroupConversation(null);
     }
   }, [client]);
 
-  /**
-   * Initialize an XMTP client
-   */
   const initialize = useCallback(
     async ({
       dbEncryptionKey,
       env,
       loggingLevel,
-      signer,
+      signer: providedSigner,
+      connectionType,
     }: InitializeClientOptions) => {
       logger.log("Initialize called with options", {
         hasDBEncryptionKey: !!dbEncryptionKey,
         env,
         loggingLevel,
-        hasSigner: !!signer,
+        hasSigner: !!providedSigner,
+        connectionType,
       });
 
       // Don't initialize if client exists
@@ -165,89 +179,77 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
         return client;
       }
 
-      // Don't proceed if already initializing (prevents double sign requests)
+      // Don't proceed if already initializing
       if (initializing) {
-        logger.log(
-          "XMTP client initialization already in progress, returning undefined",
-        );
-        return undefined;
-      }
-
-      // Check signature attempt threshold
-      if (signatureAttempts >= 3) {
-        logger.error("Too many signature attempts, not trying again");
-        setError(new Error("Too many signature attempts"));
+        logger.log("XMTP client initialization already in progress");
         return undefined;
       }
 
       // Set initializing state
-      logger.log("Setting initializing state");
-      setError(null);
       setInitializing(true);
-      setSignatureAttempts((prev) => prev + 1);
+      setError(null);
 
       try {
-        // Mark as connected in localStorage
-        storage.set(STORAGE_KEYS.HAS_CONNECTED, "true");
+        let xmtpSigner = providedSigner;
+        const isEphemeral = connectionType === "ephemeral";
+        const isCoinbaseWallet = connector?.id === "coinbaseWalletSDK";
 
-        logger.log("Creating XMTP client...");
+        if (!xmtpSigner) {
+          if (!address && !isEphemeral) {
+            throw new Error("Please connect your wallet first");
+          }
 
-        // Create client options
-        const clientOptions = {
-          env,
-          loggingLevel,
-          dbEncryptionKey,
-        };
-
-        // Create the client with a timeout to prevent hanging
-        logger.log("Calling Client.create - this will prompt for signature");
-
-        // Create a promise with timeout
-        const clientPromise = Promise.race([
-          Client.create(signer, clientOptions),
-          new Promise<never>((_, reject) => {
-            setTimeout(() => {
-              reject(new Error("Signature request timed out"));
-            }, 60000); // 60 second timeout
-          }),
-        ]);
-
-        const xmtpClient = (await clientPromise) as Client;
-        logger.log("XMTP client created successfully");
-
-        // Reset signature attempts counter on success
-        setSignatureAttempts(0);
-
-        // Perform initial sync
-        logger.log("Syncing conversations...");
-        await xmtpClient.conversations.sync();
-        logger.log("Initial conversations sync complete");
-
-        // Set the client
-        logger.log("Setting client in state");
-        setClient(xmtpClient);
-
-        return xmtpClient;
-      } catch (e) {
-        logger.error("Error creating XMTP client", e);
-        setClient(undefined);
-
-        // Format and set the error
-        const errorMessage = e instanceof Error ? e.message : "Unknown error";
-        setError(new Error(errorMessage));
-
-        // If it's a signature error, we'll need to handle it specially
-        if (errorMessage.includes("Signature")) {
-          logger.error("Signature error", errorMessage);
+          if (isEphemeral) {
+            logger.log("Creating ephemeral signer");
+            // Generate a random private key for ephemeral connection
+            const privateKeyBytes = new Uint8Array(32);
+            crypto.getRandomValues(privateKeyBytes);
+            const privateKey = Array.from(privateKeyBytes)
+              .map(b => b.toString(16).padStart(2, '0'))
+              .join('');
+            xmtpSigner = createEphemeralSigner(`0x${privateKey}` as `0x${string}`);
+            // Store the ephemeral key
+            localStorage.setItem(STORAGE_KEYS.EPHEMERAL_KEY, `0x${privateKey}`);
+          } else if (isCoinbaseWallet) {
+            logger.log("Using Coinbase Wallet signer");
+            xmtpSigner = createEOASigner(address as `0x${string}`, signMessageAsync);
+          } else if (forceSCW || connector?.id === "safe") {
+            logger.log("Using Smart Contract Wallet signer");
+            xmtpSigner = createSCWSigner(
+              address as `0x${string}`,
+              signMessageAsync,
+              BigInt(8453) // Base mainnet
+            );
+          } else {
+            logger.log("Using EOA signer");
+            xmtpSigner = createEOASigner(address as `0x${string}`, signMessageAsync);
+          }
         }
 
+        // Store connection type
+        if (connectionType) {
+          localStorage.setItem(STORAGE_KEYS.CONNECTION_TYPE, connectionType);
+        }
+
+        // Create XMTP client
+        const newClient = await Client.create(xmtpSigner, {
+          env: env || "production",
+          dbEncryptionKey,
+          loggingLevel,
+        });
+
+        logger.log("XMTP client created successfully");
+        setClient(newClient);
+        return newClient;
+      } catch (e) {
+        logger.error("Error initializing XMTP client:", e);
+        setError(e as Error);
         throw e;
       } finally {
-        logger.log("Setting initializing to false");
         setInitializing(false);
       }
     },
-    [client, initializing, signatureAttempts],
+    [address, connector?.id, client, initializing, signMessageAsync, forceSCW]
   );
 
   /**
@@ -263,8 +265,8 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
       logger.log("Setting client to undefined");
       setClient(undefined);
       setConversations([]);
+      setGroupConversation(null);
       setError(null);
-      setSignatureAttempts(0);
 
       // Clear XMTP storage
       const removedCount = storage.clearXMTPItems();
@@ -273,6 +275,46 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
       logger.log("No client to disconnect");
     }
   }, [client]);
+
+  // Restore connection on mount if previously connected
+  useEffect(() => {
+    const connectionType = localStorage.getItem(STORAGE_KEYS.CONNECTION_TYPE);
+    const hasConnected = localStorage.getItem(STORAGE_KEYS.HAS_CONNECTED);
+    const ephemeralKey = localStorage.getItem(STORAGE_KEYS.EPHEMERAL_KEY);
+    
+    // Only attempt to initialize if wallet is connected or we have an ephemeral key
+    if ((address || ephemeralKey) && !client && !initializing && !error) {
+      logger.log("Attempting to initialize XMTP", { 
+        connectionType,
+        hasConnected,
+        address,
+        hasEphemeralKey: !!ephemeralKey
+      });
+      
+      initialize({ 
+        connectionType: ephemeralKey ? "ephemeral" : (connectionType || "eoa"),
+        env: "production"
+      }).catch((e) => {
+        logger.error("Error initializing XMTP:", e);
+      });
+    }
+  }, [client, initializing, error, address, initialize]);
+
+  // Handle wallet disconnection
+  useEffect(() => {
+    if (!address && client && !localStorage.getItem(STORAGE_KEYS.EPHEMERAL_KEY)) {
+      logger.log("Wallet disconnected and no ephemeral key, cleaning up XMTP client");
+      disconnect();
+    }
+  }, [address, client, disconnect]);
+
+  // Handle successful initialization
+  useEffect(() => {
+    if (client && address) {
+      logger.log("XMTP initialized successfully", { address });
+      localStorage.setItem(STORAGE_KEYS.HAS_CONNECTED, 'true');
+    }
+  }, [client, address]);
 
   // Create context value
   const value = useMemo<XMTPContextValue>(

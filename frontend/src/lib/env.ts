@@ -23,6 +23,8 @@ export const env = createEnv({
     NEXT_PUBLIC_FARCASTER_SIGNATURE: z.string().min(1),
     // Whisk Identity Kit
     NEXT_PUBLIC_WHISK_API_KEY: z.string().min(1),
+    // OnchainKit API Key
+    NEXT_PUBLIC_ONCHAINKIT_API_KEY: z.string().min(1),
     // Backend URL
     NEXT_PUBLIC_BACKEND_URL: z.string().url().default('http://localhost:3001'),
   },
@@ -37,6 +39,7 @@ export const env = createEnv({
     NEXT_PUBLIC_FARCASTER_SIGNATURE:
       process.env.NEXT_PUBLIC_FARCASTER_SIGNATURE,
     NEXT_PUBLIC_WHISK_API_KEY: process.env.NEXT_PUBLIC_WHISK_API_KEY,
+    NEXT_PUBLIC_ONCHAINKIT_API_KEY: process.env.NEXT_PUBLIC_ONCHAINKIT_API_KEY,
     NEXT_PUBLIC_BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL,
   },
 });

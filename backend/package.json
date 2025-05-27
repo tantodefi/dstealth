@@ -14,6 +14,9 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
+    "@coinbase/onchainkit": "^0.38.13",
+    "@coinbase/x402": "^0.3.6",
+    "@reclaimprotocol/js-sdk": "^3.0.4",
     "@reclaimprotocol/zk-fetch": "^0.3.3",
     "@xmtp/node-sdk": "^2.0.6",
     "cors": "^2.8.5",
@@ -23,6 +26,7 @@
     "uint8arrays": "^5.1.0",
     "uuid": "^11.1.0",
     "viem": "^2.26.3",
+    "x402-express": "^0.3.4",
     "zod": "^3.24.2"
   },
   "devDependencies": {

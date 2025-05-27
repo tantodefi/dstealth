@@ -7,64 +7,180 @@ import { storage } from "@/lib/storage";
 import { Stats } from "./Stats";
 import { CollapsibleConnectionInfo } from "./CollapsibleConnectionInfo";
 import { Copy, Check, X } from 'lucide-react';
-import { ReclaimClient } from "@reclaimprotocol/zk-fetch";
 import { verifyProof } from '@reclaimprotocol/js-sdk';
+import { useWalletClient, useAccount, useChainId } from 'wagmi';
+import { type Token } from '@coinbase/onchainkit/token';
+import { PublicEndpoints } from './PublicEndpoints';
+import { TokenChip } from '@coinbase/onchainkit/token';
+import { Transaction } from '@coinbase/onchainkit/transaction';
 
-interface Token {
-  symbol: string;
-  name: string;
-  balance: string;
-  decimals: number;
-  address?: string;
-  value: number;
+interface ClaimData {
+  provider: string;
+  parameters: string;
+  owner: string;
+  timestampS: number;
+  context: string;
+  identifier: string;
+  epoch: number;
+}
+
+interface Proof {
+  claimData: ClaimData;
+  identifier: string;
+  signatures: any[];
+  witnesses: any[];
+}
+
+interface ProofData {
+  proof: Proof | null;
+  isVerifying: boolean;
+  isVerified: boolean;
+  verificationResult: string | null;
 }
 
 interface PortfolioToken {
   symbol: string;
   name: string;
-  balance: string;
+  address: `0x${string}`;
   decimals: number;
-  address?: string;
-  value?: number;
+  image?: string;
 }
 
 interface FkeyProfile {
   address: string;
+  name: string;
+  username: string;
+  description: string | undefined;
+  avatar: string;
   qrCode?: string;
-  name?: string;
-  isRegistered: boolean;
-  error?: string;
+}
+
+interface NewEndpoint {
+  resourceUrl: string;  // The resource URL to save and serve via zkfetch
+  endpointName: string; // The route name for zkfetch proof+verification
+  price: number;        // Price for x402 payment
+  description: string;  // Description of the resource
+}
+
+interface TokenSelectorModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSelect: (token: Token) => void;
+  tokens: Token[];
+}
+
+function TokenSelectorModal({ isOpen, onClose, onSelect, tokens }: TokenSelectorModalProps) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-gray-900 rounded-lg p-4 max-w-md w-full">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-medium text-gray-200">Select Token</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-300">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="space-y-2 max-h-60 overflow-y-auto">
+          {tokens.map((token) => (
+            <div
+              key={token.address}
+              onClick={() => {
+                onSelect(token);
+                onClose();
+              }}
+              className="w-full flex items-center p-3 hover:bg-gray-800 rounded-lg cursor-pointer transition-colors"
+            >
+              <div className="flex items-center flex-1 gap-3">
+                <div className="w-8 h-8 rounded-full overflow-hidden bg-gray-800 flex items-center justify-center">
+                  <img
+                    src={token.image}
+                    alt={token.symbol}
+                    className="w-full h-full object-contain"
+                    onError={(e) => {
+                      // Fallback for failed image loads
+                      (e.target as HTMLImageElement).src = `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${token.address}/logo.png`;
+                    }}
+                  />
+                </div>
+                <div>
+                  <div className="font-medium text-gray-200">{token.symbol}</div>
+                  <div className="text-sm text-gray-400">{token.name}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 const DEFAULT_TOKENS: Token[] = [
   {
-    symbol: 'ETH',
     name: 'Ethereum',
-    balance: '0',
+    symbol: 'ETH',
+    address: '0x4200000000000000000000000000000000000006' as `0x${string}`, // Base ETH
     decimals: 18,
-    value: 0
+    chainId: 8453, // Base mainnet
+    image: 'https://wallet-api-production.s3.amazonaws.com/uploads/tokens/eth_288.png'
   },
   {
-    symbol: 'USDC',
     name: 'USD Coin',
-    balance: '0',
+    symbol: 'USDC',
+    address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as `0x${string}`, // Base USDC
     decimals: 6,
-    address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // Base USDC
-    value: 0
+    chainId: 8453, // Base mainnet
+    image: 'https://d3r81g40ycuhqg.cloudfront.net/wallet/wais/44/2b/442b80bd16af0c0d9b22e03a16753823fe826e5bfd457292b55fa0ba8c1ba213-ZWUzYjJmZGUtMDYxNy00NDcyLTg0NjQtMWI4OGEwYjBiODE2'
+  },
+  {
+    name: 'Dai',
+    symbol: 'DAI',
+    address: '0x50c5725949a6f0c72e6c4a641f24049a917db0cb' as `0x${string}`, // Base DAI
+    decimals: 18,
+    chainId: 8453, // Base mainnet
+    image: 'https://d3r81g40ycuhqg.cloudfront.net/wallet/wais/d0/d7/d0d7784975771dbbac9a22c8c0c12928cc6f658cbcf2bbbf7c909f0fa2426dec-NmU4ZWViMDItOTQyYy00Yjk5LTkzODUtNGJlZmJiMTUxOTgy'
+  }
+];
+
+// Base Sepolia test tokens
+const TEST_TOKENS: Token[] = [
+  {
+    name: 'Ethereum',
+    symbol: 'ETH',
+    address: '0x4200000000000000000000000000000000000006' as `0x${string}`, // Base Sepolia ETH
+    decimals: 18,
+    chainId: 84532, // Base Sepolia
+    image: 'https://wallet-api-production.s3.amazonaws.com/uploads/tokens/eth_288.png'
+  },
+  {
+    name: 'USD Coin',
+    symbol: 'USDC',
+    address: '0x036CbD53842c5426634e7929541eC2018491cf77' as `0x${string}`, // Base Sepolia USDC
+    decimals: 6,
+    chainId: 84532, // Base Sepolia
+    image: 'https://d3r81g40ycuhqg.cloudfront.net/wallet/wais/44/2b/442b80bd16af0c0d9b22e03a16753823fe826e5bfd457292b55fa0ba8c1ba213-ZWUzYjJmZGUtMDYxNy00NDcyLTg0NjQtMWI4OGEwYjBiODE2'
   }
 ];
 
 export function FkeySearch() {
   const { client } = useXMTP();
+  const { data: walletClient } = useWalletClient();
+  const chainId = useChainId();
+  const { isConnected: wagmiIsConnected } = useAccount();
+  const [isConnected, setIsConnected] = useState(wagmiIsConnected);
   const [username, setUsername] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<FkeyProfile | null>(null);
-  const [amount, setAmount] = useState('');
-  const [selectedToken, setSelectedToken] = useState<Token>(DEFAULT_TOKENS[0]);
-  const [availableTokens, setAvailableTokens] = useState<Token[]>(DEFAULT_TOKENS);
+  const [amount, setAmount] = useState<number>(0);
+  const [selectedToken, setSelectedToken] = useState<Token>(
+    chainId === 84532 ? TEST_TOKENS[0] : DEFAULT_TOKENS[0]
+  );
+  const [availableTokens, setAvailableTokens] = useState<Token[]>(
+    chainId === 84532 ? TEST_TOKENS : DEFAULT_TOKENS
+  );
   const [isLoadingTokens, setIsLoadingTokens] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
   const [convosData, setConvosData] = useState<{
     xmtpId: string;
     username: string;
@@ -79,66 +195,92 @@ export function FkeySearch() {
   } | null>(null);
   const [isCopied, setIsCopied] = useState(false);
   const [showProof, setShowProof] = useState(false);
-  const [proofData, setProofData] = useState<string | null>(null);
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [verificationResult, setVerificationResult] = useState<string | null>(null);
-  const [isProofVerified, setIsProofVerified] = useState(false);
+  const [selectedProofType, setSelectedProofType] = useState<'fkey' | 'convos'>('fkey');
+  const [proofs, setProofs] = useState<{
+    fkey: ProofData | null;
+    convos: ProofData | null;
+  }>({
+    fkey: null,
+    convos: null
+  });
+  const [showEndpointForm, setShowEndpointForm] = useState(false);
+  const [newEndpoint, setNewEndpoint] = useState<NewEndpoint>({
+    resourceUrl: '',
+    endpointName: '',
+    price: 0.01,
+    description: ''
+  });
+  const [claimingFkey, setClaimingFkey] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
+    setIsConnected(wagmiIsConnected);
+  }, [wagmiIsConnected]);
+
+  // Update tokens when chain changes
+  useEffect(() => {
+    setSelectedToken(chainId === 84532 ? TEST_TOKENS[0] : DEFAULT_TOKENS[0]);
+    setAvailableTokens(chainId === 84532 ? TEST_TOKENS : DEFAULT_TOKENS);
+  }, [chainId]);
+
+  // Try to fetch portfolio from Base mainnet
+  useEffect(() => {
     async function fetchPortfolio() {
-      if (!client?.signer) return;
+      if (!client?.signer || chainId !== 8453) {
+        // Only attempt to fetch portfolio on Base mainnet
+        if (chainId === 84532) {
+          console.log('Using test tokens for Base Sepolia - getPortfolios API only works on Base mainnet');
+        }
+        return;
+      }
 
       try {
         setIsLoadingTokens(true);
-        // Get the address from the XMTP client's signer identifier
         const identifier = await client.signer.getIdentifier();
         if (identifier.identifierKind === 'Ethereum') {
           const response = await getPortfolios({
             addresses: [identifier.identifier as `0x${string}`],
           });
 
-          // Check if response is an error
           if ('error' in response) {
             console.error('API Error:', response.error);
             return;
           }
 
-          const portfolio = response.portfolios?.[0];
-          if (portfolio?.tokens) {
-            const userTokens = portfolio.tokens.map((token: PortfolioToken) => ({
-              symbol: token.symbol,
-              name: token.name,
-              balance: token.balance,
-              decimals: token.decimals,
-              address: token.address,
-              value: token.value || 0
-            }));
+          // Convert portfolio data to Token type
+          const userTokens = Object.entries(response.portfolios?.[0] || {}).map(([symbol, data]: [string, any]) => ({
+            symbol,
+            name: data.name || symbol,
+            address: data.address as `0x${string}`,
+            decimals: data.decimals || 18,
+            chainId: 8453, // Base mainnet
+            image: data.image || DEFAULT_TOKENS[0].image
+          }));
 
-            // Merge with default tokens, preferring user balances when available
-            const mergedTokens = DEFAULT_TOKENS.map(defaultToken => {
-              const userToken = userTokens.find((t: Token) => t.symbol === defaultToken.symbol);
-              return userToken || defaultToken;
-            });
+          // Merge with default tokens, preferring user balances when available
+          const mergedTokens = DEFAULT_TOKENS.map(defaultToken => {
+            const userToken = userTokens.find(t => t.symbol === defaultToken.symbol);
+            return userToken || defaultToken;
+          });
 
-            // Add any additional tokens the user has
-            const additionalTokens = userTokens.filter(
-              (token: Token) => !DEFAULT_TOKENS.some(d => d.symbol === token.symbol)
-            );
+          // Add any additional tokens the user has
+          const additionalTokens = userTokens.filter(
+            token => !DEFAULT_TOKENS.some(d => d.symbol === token.symbol)
+          );
 
-            setAvailableTokens([...mergedTokens, ...additionalTokens]);
-          }
-        } else {
-          console.error('Unexpected identifier kind:', identifier.identifierKind);
+          setAvailableTokens([...mergedTokens, ...additionalTokens]);
         }
       } catch (error) {
         console.error('Error fetching portfolio:', error);
+        // Fallback to default tokens on error
+        setAvailableTokens(DEFAULT_TOKENS);
       } finally {
         setIsLoadingTokens(false);
       }
     }
 
     fetchPortfolio();
-  }, [client]);
+  }, [client, chainId]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -147,28 +289,48 @@ export function FkeySearch() {
     setIsLoading(true);
     setError(null);
     setProfile(null);
-    setConvosData(null); // Reset convos data when starting new search
+    setConvosData(null);
+    setProofs({ fkey: null, convos: null });
 
     try {
-      // First try fkey.id lookup
+      // Run both lookups in parallel
+      const [fkeyResponse, convosResponse] = await Promise.all([
+        fetch(`/api/fkey/lookup/${username}`),
+        fetch(`/api/convos/lookup/${username}`)
+      ]);
+
+      // Process fkey.id response
       let fkeyProfile = null;
       try {
-        const response = await fetch(`/api/fkey/lookup/${username}`);
-        const data = await response.json();
+        const fkeyData = await fkeyResponse.json();
+        console.log('Received fkey.id data:', fkeyData);
         
-        if (response.ok && data.address) {
-          fkeyProfile = data;
-          setProfile(data);
+        if (fkeyResponse.ok && fkeyData.address) {
+          fkeyProfile = fkeyData;
+          setProfile(fkeyData);
+          
+          // Store fkey proof if available
+          if (fkeyData.proof) {
+            console.log('Received fkey.id zkfetch proof:', fkeyData.proof);
+            setProofs(prev => ({
+              ...prev,
+              fkey: {
+                proof: fkeyData.proof,
+                isVerifying: false,
+                isVerified: false,
+                verificationResult: null
+              }
+            }));
+          }
         }
       } catch (fkeyError) {
-        console.error('fkey.id lookup error:', fkeyError);
-        // Don't set error - we'll continue with convos lookup
+        console.error('fkey.id data parsing error:', fkeyError);
       }
 
-      // Always try convos lookup
+      // Process convos.org response
       try {
-        const convosResponse = await fetch(`/api/convos/lookup/${username}`);
         const convosData = await convosResponse.json();
+        console.log('Received convos.org data:', convosData);
         
         if (convosData.success && convosData.xmtpId) {
           const convosProfile = {
@@ -178,6 +340,20 @@ export function FkeySearch() {
             profile: convosData.profile
           };
           setConvosData(convosProfile);
+
+          // Store convos proof if available
+          if (convosData.proof) {
+            console.log('Received convos.org zkfetch proof:', convosData.proof);
+            setProofs(prev => ({
+              ...prev,
+              convos: {
+                proof: convosData.proof,
+                isVerifying: false,
+                isVerified: false,
+                verificationResult: null
+              }
+            }));
+          }
 
           // If no fkey profile was found, show the suggestion message
           if (!fkeyProfile) {
@@ -198,14 +374,14 @@ export function FkeySearch() {
               window.dispatchEvent(new CustomEvent('setInviteMessage', { 
                 detail: { message: inviteMessage }
               }));
-            }, 1000); // Try again after 1 second
+            }, 1000);
           }
         } else if (!fkeyProfile) {
           // Only show error if neither lookup succeeded
           setError("No profile found on fkey.id or convos.org");
         }
       } catch (convosError) {
-        console.error('Error looking up convos:', convosError);
+        console.error('convos.org data parsing error:', convosError);
         if (!fkeyProfile) {
           setError("Failed to lookup profiles");
         }
@@ -222,9 +398,10 @@ export function FkeySearch() {
 
   const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.address) return;
+    if (!profile?.address || !isConnected || !walletClient) return;
     
     try {
+      setIsLoading(true);
       // TODO: Implement send transaction
       console.log('Sending', amount, selectedToken.symbol, 'to', profile.address);
       
@@ -233,6 +410,9 @@ export function FkeySearch() {
       storage.incrementStealthPayments();
     } catch (error) {
       console.error('Payment error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to send payment');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -246,69 +426,242 @@ export function FkeySearch() {
     }, 2000);
   };
 
-  const verifyProofInBackground = async (mockProof: string) => {
+  const verifyProofInBackground = async (proofData: any, proofType: 'fkey' | 'convos') => {
     try {
-      setIsVerifying(true);
-      const proofToVerify = JSON.parse(mockProof);
-      const isProofVerified = await verifyProof(proofToVerify);
-      setIsProofVerified(isProofVerified);
-      setVerificationResult(isProofVerified ? '✓ Proof verified successfully' : '❌ Proof verification failed');
+      setProofs(prev => ({
+        ...prev,
+        [proofType]: {
+          ...prev[proofType]!,
+          isVerifying: true
+        }
+      }));
+      
+      console.log(`\n=== Starting ${proofType} proof verification ===`);
+      console.log('Proof data:', proofData);
+      
+      // Validate proof structure
+      if (!proofData?.claimData || !proofData?.signatures?.length || !proofData?.witnesses?.length) {
+        console.error('Proof is missing required fields:', {
+          hasClaimData: !!proofData?.claimData,
+          signatureCount: proofData?.signatures?.length,
+          witnessCount: proofData?.witnesses?.length
+        });
+        throw new Error('Invalid proof structure');
+      }
+      
+      console.log('\nAttempting proof verification...');
+      const isProofVerified = await verifyProof(proofData);
+      console.log(`Verification completed. Result: ${isProofVerified ? 'SUCCESS' : 'FAILED'}`);
+      
+      setProofs(prev => ({
+        ...prev,
+        [proofType]: {
+          ...prev[proofType]!,
+          isVerifying: false,
+          isVerified: isProofVerified,
+          verificationResult: isProofVerified ? '✓ Proof verified successfully' : '❌ Proof verification failed'
+        }
+      }));
+
+      console.log(`=== ${proofType} proof verification complete ===\n`);
     } catch (error) {
-      console.error('Verification error:', error);
-      setVerificationResult('❌ Error verifying proof');
-      setIsProofVerified(false);
-    } finally {
-      setIsVerifying(false);
+      console.error(`\n❌ ${proofType} verification error:`, error);
+      console.error('Error details:', {
+        name: error instanceof Error ? error.name : 'Unknown',
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      
+      setProofs(prev => ({
+        ...prev,
+        [proofType]: {
+          ...prev[proofType]!,
+          isVerifying: false,
+          isVerified: false,
+          verificationResult: `❌ Error verifying proof: ${error instanceof Error ? error.message : String(error)}`
+        }
+      }));
     }
   };
 
-  const handleShowProof = async () => {
-    // If we already have proof data, just show the modal
-    if (proofData) {
-      setShowProof(true);
+  useEffect(() => {
+    const fkeyProof = proofs.fkey?.proof;
+    const convosProof = proofs.convos?.proof;
+    
+    if (fkeyProof && !proofs.fkey?.isVerifying && !proofs.fkey?.isVerified) {
+      verifyProofInBackground(fkeyProof, 'fkey');
+    }
+    
+    if (convosProof && !proofs.convos?.isVerifying && !proofs.convos?.isVerified) {
+      verifyProofInBackground(convosProof, 'convos');
+    }
+  }, [proofs.fkey?.proof, proofs.convos?.proof]);
+
+  const handleShowProof = () => {
+    setShowProof(true);
+  };
+
+  const handleClaimFkey = async () => {
+    if (!walletClient) {
+      console.error('Wallet not connected');
+      return;
+    }
+
+    if (!profile?.address || !convosData?.xmtpId) {
+      console.error('Both fkey.id and convos.org profiles are required');
+      setError('Both fkey.id and convos.org profiles must be found before claiming');
+      return;
+    }
+
+    // Verify that both proofs are successful
+    if (!proofs.fkey?.isVerified || !proofs.convos?.isVerified) {
+      console.error('Both proofs must be verified');
+      setError('Please wait for both proofs to be verified before claiming');
       return;
     }
 
     try {
-      // Using the actual proof data format
-      const mockProof = JSON.stringify({
-        claimData: {
-          provider: 'http',
-          parameters: '{"body":"","method":"GET","responseMatches":[{"type":"regex","value":"0x[a-fA-F0-9]{40}"}],"responseRedactions":[],"url":"https://tantodefi.fkey.id"}',
-          owner: '0x472d9ec8da4cb9843627e3d7e23ac0b3b6ebf145',
-          timestampS: 1748240889,
-          context: '{"providerHash":"0x558482a29b398558c08fe72631f2768007fde113cd93720ff2f95544566f999e"}',
-          identifier: '0x5d3f4ad1d927415fa21060d57e531d6e7872f665d105e19f1da290dc2113a3fa',
-          epoch: 1
+      setClaimingFkey(true);
+      setError(null);
+      
+      // First claim the fkey.id
+      const claimResponse = await fetch('/api/fkey/claim', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
         },
-        identifier: '0x5d3f4ad1d927415fa21060d57e531d6e7872f665d105e19f1da290dc2113a3fa',
-        signatures: [
-          '0xb3cd74f87f7d454496f5404f68b97316c8f7d8bf9f2d0d24c24c2257cb080465340d93bc36c7588144e0a3aea5077f888ac92b52626e8b536b7378861302d6541c'
-        ],
-        extractedParameterValues: undefined,
-        witnesses: [
-          {
-            id: '0x244897572368eadf65bfbc5aec98d8e5443a9072',
-            url: 'wss://attestor.reclaimprotocol.org:447/ws'
-          }
-        ]
-      }, null, 2);
+        body: JSON.stringify({
+          fkeyId: username,
+          owner: walletClient.account.address,
+          convosUsername: convosData.username,
+          convosXmtpId: convosData.xmtpId,
+          fkeyProof: proofs.fkey.proof,
+          convosProof: proofs.convos.proof
+        })
+      });
 
-      setProofData(mockProof);
-      setShowProof(true);
+      if (!claimResponse.ok) {
+        const errorData = await claimResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${claimResponse.status}`);
+      }
 
+      const claimData = await claimResponse.json();
+      if (!claimData.success) {
+        throw new Error(claimData.error || 'Failed to claim .fkey.id');
+      }
+
+      // Store the fkey.id in localStorage
+      localStorage.setItem('fkey:id', username);
+
+      // Create the public endpoint
+      const endpointResponse = await fetch('/api/personal-data/endpoints', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url: `/api/fkey/public/${username}`,
+          price: 0.01,
+          description: `Public endpoint for ${username}.fkey.id`,
+          owner: walletClient.account.address
+        })
+      });
+
+      if (!endpointResponse.ok) {
+        const errorData = await endpointResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${endpointResponse.status}`);
+      }
+
+      const endpointData = await endpointResponse.json();
+      if (!endpointData.success) {
+        throw new Error(endpointData.error || 'Failed to create endpoint');
+      }
+
+      // Increment the endpoints stat
+      storage.incrementEndpoints();
+
+      console.log('Successfully claimed .fkey.id and created endpoint');
+      setClaimingFkey(false);
+      setUsername('');
+      setProfile(null);
+      setConvosData(null);
+      setProofs({ fkey: null, convos: null });
+
+      // Show success message
+      setError('✓ Successfully claimed .fkey.id and created public endpoint');
+      setTimeout(() => setError(null), 5000);
     } catch (error) {
-      console.error('Error showing proof:', error);
-      setVerificationResult('❌ Error processing proof');
+      console.error('Error claiming .fkey.id:', error);
+      setClaimingFkey(false);
+      setError(error instanceof Error ? error.message : 'Failed to claim .fkey.id');
     }
   };
 
-  // Start verification when proof data is set
-  useEffect(() => {
-    if (proofData && !isProofVerified && !isVerifying) {
-      verifyProofInBackground(proofData);
+  const handleCreateEndpoint = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!walletClient) {
+      console.error('Wallet not connected');
+      return;
     }
-  }, [proofData]);
+
+    // Validate required fields
+    if (!newEndpoint.resourceUrl || !newEndpoint.endpointName) {
+      setError('Resource URL and Endpoint Name are required');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      // Create the protected endpoint
+      const response = await fetch('/api/personal-data/endpoints', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          resourceUrl: newEndpoint.resourceUrl,
+          endpointPath: `/api/${newEndpoint.endpointName}`,
+          price: newEndpoint.price,
+          description: newEndpoint.description,
+          owner: walletClient.account.address,
+          requiresZkfetch: true
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.success) {
+        // Increment the endpoints stat
+        storage.incrementEndpoints();
+        
+        console.log('Successfully created protected endpoint');
+        setShowEndpointForm(false);
+        setNewEndpoint({
+          resourceUrl: '',
+          endpointName: '',
+          price: 0.01,
+          description: ''
+        });
+
+        // Show success message
+        setError(`✓ Successfully created protected endpoint at /api/${newEndpoint.endpointName}`);
+        setTimeout(() => setError(null), 5000);
+      } else {
+        throw new Error(data.error || 'Failed to create endpoint');
+      }
+    } catch (error) {
+      console.error('Error creating endpoint:', error);
+      setError(error instanceof Error ? error.message : 'Failed to create endpoint');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <div className="w-full flex flex-col gap-3">
@@ -370,10 +723,10 @@ export function FkeySearch() {
                         type="button"
                       >
                         <span>zkfetch proof</span>
-                        {isVerifying && (
+                        {proofs.fkey?.isVerifying && (
                           <span className="animate-spin text-blue-400">⚡</span>
                         )}
-                        {isProofVerified && (
+                        {proofs.fkey?.isVerified && (
                           <Check size={14} className="text-green-500" />
                         )}
                       </button>
@@ -395,19 +748,16 @@ export function FkeySearch() {
                   <label className="block text-sm font-medium text-gray-300 mb-2">
                     Token
                   </label>
-                  <select
-                    value={selectedToken.symbol}
-                    onChange={(e) => {
-                      const token = availableTokens.find(t => t.symbol === e.target.value);
-                      if (token) setSelectedToken(token);
-                    }}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-white">
-                    {availableTokens.map((token) => (
-                      <option key={token.symbol} value={token.symbol}>
-                        {token.symbol} - Balance: {formatUnits(BigInt(token.balance || '0'), token.decimals)}
-                      </option>
-                    ))}
-                  </select>
+                  <TokenChip
+                    token={selectedToken}
+                    onClick={() => setIsModalOpen(true)}
+                  />
+                  <TokenSelectorModal
+                    isOpen={isModalOpen}
+                    onClose={() => setIsModalOpen(false)}
+                    onSelect={setSelectedToken}
+                    tokens={availableTokens}
+                  />
                 </div>
 
                 <div>
@@ -417,23 +767,141 @@ export function FkeySearch() {
                   <input
                     type="number"
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
+                    onChange={(e) => setAmount(parseFloat(e.target.value))}
                     placeholder="0.00"
                     className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-white"
                     step="any"
                   />
                 </div>
 
-                <button
-                  onClick={handlePaymentSubmit}
-                  disabled={!amount || isLoadingTokens || !client}
-                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white font-bold py-2 px-4 rounded">
-                  {isLoadingTokens ? 'Loading Tokens...' : client ? 'Send Payment' : 'Connect Wallet to Send'}
-                </button>
+                <Transaction
+                  chainId={8453} // Base mainnet
+                  calls={[{
+                    abi: [{
+                      name: 'transfer',
+                      type: 'function',
+                      stateMutability: 'nonpayable',
+                      inputs: [
+                        { name: 'recipient', type: 'address' },
+                        { name: 'amount', type: 'uint256' }
+                      ],
+                      outputs: [{ type: 'bool' }]
+                    }],
+                    address: selectedToken.address as `0x${string}`,
+                    args: [
+                      profile.address as `0x${string}`,
+                      // Convert amount to token decimals
+                      BigInt(Math.floor(amount * 10 ** selectedToken.decimals))
+                    ],
+                    functionName: 'transfer'
+                  }]}
+                  className={`w-full ${!isConnected ? 'bg-gray-600 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'} text-white font-bold py-2 px-4 rounded mb-4`}
+                >
+                  {!isConnected ? 'Connect Wallet to Send' : `Send ${selectedToken.symbol}`}
+                </Transaction>
+
+                {/* Claim .fkey.id button */}
+                {walletClient && (
+                  <button
+                    onClick={handleClaimFkey}
+                    disabled={claimingFkey}
+                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white font-bold py-2 px-4 rounded mb-4">
+                    {claimingFkey ? 'Claiming...' : 'Claim .fkey.id'}
+                  </button>
+                )}
+
+                {/* Create new endpoint button */}
+                {walletClient && (
+                  <button
+                    onClick={() => setShowEndpointForm(!showEndpointForm)}
+                    className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded mb-4">
+                    {showEndpointForm ? 'Cancel' : 'Create New Endpoint'}
+                  </button>
+                )}
               </div>
             )}
           </form>
         </div>
+      </div>
+
+      {/* Endpoint creation form */}
+      {showEndpointForm && profile?.address && (
+        <div className="mt-4">
+          <div className="flex flex-col gap-4 p-4 bg-gray-800 rounded border border-gray-700">
+            <div>
+              <label className="block text-sm font-medium text-gray-300">Resource URL</label>
+              <input
+                type="url"
+                value={newEndpoint.resourceUrl}
+                onChange={(e) => setNewEndpoint({ ...newEndpoint, resourceUrl: e.target.value })}
+                className="mt-1 block w-full rounded-md bg-gray-700 border-gray-600 text-white focus:border-blue-500 focus:ring-blue-500"
+                placeholder="https://api.example.com/resource-to-protect"
+                required
+              />
+              <p className="mt-1 text-sm text-gray-400">The resource that will be protected and served via zkfetch</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300">Endpoint Name</label>
+              <div className="mt-1 flex rounded-md shadow-sm">
+                <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-600 bg-gray-700 text-gray-400 sm:text-sm">
+                  /api/
+                </span>
+                <input
+                  type="text"
+                  value={newEndpoint.endpointName}
+                  onChange={(e) => setNewEndpoint({ ...newEndpoint, endpointName: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-') })}
+                  className="flex-1 block w-full rounded-none rounded-r-md bg-gray-700 border-gray-600 text-white focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                  placeholder="my-protected-endpoint"
+                  required
+                />
+              </div>
+              <p className="mt-1 text-sm text-gray-400">The endpoint path where zkfetch will verify and serve the resource</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300">Price (in USD)</label>
+              <div className="mt-1 relative rounded-md shadow-sm">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <span className="text-gray-400 sm:text-sm">$</span>
+                </div>
+                <input
+                  type="number"
+                  value={newEndpoint.price}
+                  onChange={(e) => setNewEndpoint({ ...newEndpoint, price: parseFloat(e.target.value) })}
+                  className="block w-full pl-7 rounded-md bg-gray-700 border-gray-600 text-white focus:border-blue-500 focus:ring-blue-500"
+                  min="0.01"
+                  step="0.01"
+                  required
+                />
+              </div>
+              <p className="mt-1 text-sm text-gray-400">Price in USD for x402 payment to access the resource</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300">Description</label>
+              <textarea
+                value={newEndpoint.description}
+                onChange={(e) => setNewEndpoint({ ...newEndpoint, description: e.target.value })}
+                className="mt-1 block w-full rounded-md bg-gray-700 border-gray-600 text-white focus:border-blue-500 focus:ring-blue-500"
+                rows={3}
+                placeholder="Describe what data this endpoint provides and any usage instructions..."
+                required
+              />
+            </div>
+
+            <button
+              onClick={handleCreateEndpoint}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors">
+              Create Protected Endpoint
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Add PublicEndpoints component */}
+      <div className="w-full max-w-md mx-auto px-4">
+        <PublicEndpoints />
       </div>
 
       {/* Render ConvosChat if we have convos data */}
@@ -459,8 +927,38 @@ export function FkeySearch() {
       {showProof && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-2 z-50">
           <div className="bg-gray-900 rounded-lg p-4 w-full max-w-md mx-auto max-h-[90vh] overflow-auto">
-            <div className="flex justify-between items-center mb-2">
-              <h3 className="text-white text-sm font-medium">ZKfetch Proof</h3>
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-4">
+                <h3 className="text-white text-sm font-medium">ZKfetch Proof</h3>
+                <div className="flex rounded-md overflow-hidden border border-gray-700">
+                  <button
+                    onClick={() => setSelectedProofType('fkey')}
+                    className={`px-3 py-1 text-xs ${
+                      selectedProofType === 'fkey'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                    }`}
+                  >
+                    fkey.id
+                    {proofs.fkey?.isVerified && (
+                      <Check size={12} className="inline ml-1 text-green-500" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setSelectedProofType('convos')}
+                    className={`px-3 py-1 text-xs ${
+                      selectedProofType === 'convos'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                    }`}
+                  >
+                    convos.org
+                    {proofs.convos?.isVerified && (
+                      <Check size={12} className="inline ml-1 text-green-500" />
+                    )}
+                  </button>
+                </div>
+              </div>
               <button
                 onClick={() => setShowProof(false)}
                 className="text-gray-400 hover:text-gray-300"
@@ -469,30 +967,54 @@ export function FkeySearch() {
                 <X size={16} />
               </button>
             </div>
-            {isVerifying ? (
+            
+            {proofs[selectedProofType]?.isVerifying ? (
               <div className="text-sm mb-3 text-center text-blue-400">
                 <span className="animate-spin inline-block mr-2">⚡</span>
-                Verifying proof...
+                Verifying {selectedProofType} proof...
               </div>
-            ) : verificationResult && (
-              <div className={`text-sm mb-3 text-center ${verificationResult.includes('✓') ? 'text-green-500' : 'text-red-500'}`}>
-                {verificationResult}
+            ) : proofs[selectedProofType]?.verificationResult && (
+              <div className={`text-sm mb-3 text-center ${
+                proofs[selectedProofType]?.verificationResult?.includes('✓')
+                  ? 'text-green-500'
+                  : 'text-red-500'
+              }`}>
+                {proofs[selectedProofType]?.verificationResult}
               </div>
             )}
-            <pre className="bg-black rounded-md p-3 overflow-auto text-xs">
-              <code className="text-gray-300 whitespace-pre-wrap break-all">
-                {proofData}
-              </code>
-            </pre>
+
+            {proofs[selectedProofType]?.proof ? (
+              <pre className="bg-black rounded-md p-3 overflow-auto text-xs">
+                <code className="text-gray-300 whitespace-pre-wrap break-all">
+                  {JSON.stringify(proofs[selectedProofType]?.proof, null, 2)}
+                </code>
+              </pre>
+            ) : (
+              <div className="text-center text-gray-400 text-sm py-4">
+                No proof available for {selectedProofType}
+              </div>
+            )}
+
             <div className="mt-3 text-center">
-              <a
-                href="https://reclaimprotocol.org/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-gray-400 hover:text-gray-300 text-xs"
-              >
-                zkfetch powered by reclaim protocol
-              </a>
+              <span className="text-gray-400 text-xs">
+                <a
+                  href="https://zkfetch.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-400 hover:text-blue-300 underline"
+                >
+                  zkfetch
+                </a>
+                {" "}powered by{" "}
+                <a
+                  href="https://reclaimprotocol.org/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-400 hover:text-blue-300 underline"
+                >
+                  Reclaim protocol
+                </a>
+              </span>
             </div>
           </div>
         </div>

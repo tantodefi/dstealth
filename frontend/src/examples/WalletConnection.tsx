@@ -114,6 +114,7 @@ export default function WalletConnection() {
           env: env.NEXT_PUBLIC_XMTP_ENV,
           loggingLevel: "off",
           signer,
+          connectionType: connectionType === "Ephemeral Wallet" ? "ephemeral" : "eoa",
         });
       } catch (error) {
         console.error("Error initializing XMTP:", error);

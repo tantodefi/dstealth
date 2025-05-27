@@ -18,8 +18,8 @@ interface ConnectionInfoProps {
 export function CollapsibleConnectionInfo({
   onConnectionChange,
 }: ConnectionInfoProps) {
-  const { client, conversations } = useXMTP();
-  const { isConnected, address, connector } = useAccount();
+  const { client, conversations, isInitializing } = useXMTP();
+  const { isConnected: isWalletConnected, address, connector } = useAccount();
   const [isOpen, setIsOpen] = useState(false);
   const [connectionType, setConnectionType] = useState<string>("");
   const [ephemeralAddress, setEphemeralAddress] = useState<string>("");
@@ -146,14 +146,27 @@ export function CollapsibleConnectionInfo({
   // Determine actual connection status
   useEffect(() => {
     const newConnectionState =
-      isConnected || (client && connectionType === "Ephemeral Wallet" && ephemeralAddress !== "");
+      isWalletConnected || (client && connectionType === "Ephemeral Wallet" && ephemeralAddress !== "");
 
     setIsActuallyConnected(newConnectionState || false);
 
     if (typeof onConnectionChange === "function") {
       onConnectionChange(newConnectionState || false);
     }
-  }, [isConnected, client, connectionType, ephemeralAddress, onConnectionChange]);
+  }, [isWalletConnected, client, connectionType, ephemeralAddress, onConnectionChange]);
+
+  useEffect(() => {
+    if (isWalletConnected && address && !client && !isInitializing) {
+      // Trigger XMTP connection when wallet is connected
+      window.dispatchEvent(new CustomEvent('connectXmtp', { 
+        detail: { connectionType: 'EOA' }
+      }));
+    }
+  }, [isWalletConnected, address, client, isInitializing]);
+
+  useEffect(() => {
+    onConnectionChange?.(!!client);
+  }, [client, onConnectionChange]);
 
   return (
     <div className="w-full max-w-md mx-auto">

@@ -33,6 +33,8 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
 
   // Use ref to track if stream is already started to prevent infinite loops
   const streamStartedRef = useRef(false);
+  const streamRef = useRef<AsyncGenerator<DecodedMessage> | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   // Listen for invite message event
   useEffect(() => {
@@ -74,20 +76,20 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
 
   // Start a stream to listen for new messages
   const startMessageStream = useCallback(async () => {
-    if (!client || !conversation || streamActive || streamStartedRef.current)
-      return;
+    if (!client || !conversation || streamStartedRef.current) return;
 
     try {
       console.log("Starting message stream for convos conversation");
       streamStartedRef.current = true;
       setStreamActive(true);
 
-      const streamPromise = conversation.stream();
-      const stream = await streamPromise;
+      const stream = await conversation.stream();
+      streamRef.current = stream;
 
       const streamMessages = async () => {
         try {
           for await (const message of stream) {
+            if (!streamStartedRef.current) break; // Exit if stream should stop
             console.log("Received message:", message);
             if (message) {
               setMessages((prevMessages) => [...prevMessages, message]);
@@ -95,27 +97,37 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
           }
         } catch (error) {
           console.error("Error in message stream:", error);
-          setStreamActive(false);
-          streamStartedRef.current = false;
+          if (streamStartedRef.current) { // Only reset if we haven't already cleaned up
+            setStreamActive(false);
+            streamStartedRef.current = false;
+          }
         }
       };
 
+      // Start streaming messages
       streamMessages();
 
-      return () => {
-        if (stream && typeof stream.return === "function") {
-          stream.return(undefined);
+      // Store cleanup function
+      const cleanup = () => {
+        console.log("Cleaning up stream");
+        if (streamRef.current && typeof streamRef.current.return === "function") {
+          streamRef.current.return(undefined);
         }
-        setStreamActive(false);
+        streamRef.current = null;
         streamStartedRef.current = false;
+        setStreamActive(false);
       };
+      
+      cleanupRef.current = cleanup;
+      return cleanup;
+
     } catch (error) {
       console.error("Error starting message stream:", error);
-      setStreamActive(false);
       streamStartedRef.current = false;
+      setStreamActive(false);
       return undefined;
     }
-  }, [client, conversation, streamActive]);
+  }, [client, conversation]); // Removed streamActive from dependencies
 
   // Initialize conversation when client is available
   useEffect(() => {
@@ -126,25 +138,18 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
 
   // Start stream when conversation is available
   useEffect(() => {
-    let cleanup: (() => void) | undefined;
-
-    if (
-      client &&
-      conversation &&
-      !streamActive &&
-      !streamStartedRef.current
-    ) {
-      startMessageStream().then((cleanupFn) => {
-        cleanup = cleanupFn;
-      });
+    // Start stream if conditions are met
+    if (client && conversation && !streamStartedRef.current) {
+      startMessageStream();
     }
 
+    // Cleanup function
     return () => {
-      if (cleanup) {
-        cleanup();
+      if (cleanupRef.current) {
+        cleanupRef.current();
       }
     };
-  }, [client, conversation, streamActive, startMessageStream]);
+  }, [client, conversation, startMessageStream]);
 
   // Send message
   const handleSendMessage = async () => {

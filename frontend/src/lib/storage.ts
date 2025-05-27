@@ -1,6 +1,7 @@
 interface AppStats {
   invitesSent: number;
   stealthPaymentsSent: number;
+  endpoints: number;
 }
 
 const STORAGE_KEY = 'xmtp-mini-stats';
@@ -9,10 +10,10 @@ export const storage = {
   getStats: (): AppStats => {
     try {
       const stats = localStorage.getItem(STORAGE_KEY);
-      return stats ? JSON.parse(stats) : { invitesSent: 0, stealthPaymentsSent: 0 };
+      return stats ? JSON.parse(stats) : { invitesSent: 0, stealthPaymentsSent: 0, endpoints: 0 };
     } catch (e) {
       console.error('Error reading stats:', e);
-      return { invitesSent: 0, stealthPaymentsSent: 0 };
+      return { invitesSent: 0, stealthPaymentsSent: 0, endpoints: 0 };
     }
   },
 
@@ -40,9 +41,21 @@ export const storage = {
     }
   },
 
+  incrementEndpoints: () => {
+    try {
+      const stats = storage.getStats();
+      stats.endpoints += 1;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stats));
+      return stats;
+    } catch (e) {
+      console.error('Error incrementing endpoints:', e);
+      return storage.getStats();
+    }
+  },
+
   resetStats: () => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ invitesSent: 0, stealthPaymentsSent: 0 }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ invitesSent: 0, stealthPaymentsSent: 0, endpoints: 0 }));
     } catch (e) {
       console.error('Error resetting stats:', e);
     }
