@@ -3,15 +3,13 @@ import { env } from '@/lib/env';
 
 export const dynamic = 'force-static';
 
-type Props = {
-  params: {
-    username: string;
-  };
-};
+interface RouteParams {
+  username: string;
+}
 
 export async function GET(
   request: NextRequest,
-  { params }: Props
+  { params }: { params: RouteParams }
 ) {
   const { username } = params;
   

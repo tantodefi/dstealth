@@ -1,15 +1,13 @@
 import { NextRequest } from 'next/server';
 import { env } from '@/lib/env';
 
-type Props = {
-  params: {
-    username: string;
-  };
-};
+interface RouteParams {
+  username: string;
+}
 
 export async function GET(
   request: NextRequest,
-  { params }: Props
+  { params }: { params: RouteParams }
 ) {
   const { username } = params;
   
