@@ -1,11 +1,19 @@
 import { NextRequest } from 'next/server';
 import { env } from '@/lib/env';
 
+export const dynamic = 'force-static';
+
+type Props = {
+  params: {
+    username: string;
+  };
+};
+
 export async function GET(
   request: NextRequest,
-  { params }: { params: { username: string } }
+  { params }: Props
 ) {
-  const username = await params.username;
+  const { username } = params;
   
   try {
     console.log(`Proxying fkey lookup request for username: ${username}`);

@@ -1,20 +1,22 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 
-type Props = {
-  params: {
-    username: string;
-  };
-};
+export const dynamic = 'force-dynamic';
 
 export async function GET(
   request: NextRequest,
-  { params }: Props
+  {
+    params,
+  }: {
+    params: Promise<{
+      username: string;
+    }>;
+  }
 ) {
-  const { username } = params;
-  
   try {
+    const { username } = await params;
     console.log(`Proxying convos lookup request for username: ${username}`);
+    
     const response = await fetch(`${env.BACKEND_URL}/api/convos/lookup/${username}`, {
       method: 'GET',
       headers: {
@@ -27,10 +29,10 @@ export async function GET(
     }
 
     const data = await response.json();
-    return Response.json(data);
+    return NextResponse.json(data);
   } catch (error) {
     console.error('Error in convos lookup:', error);
-    return Response.json(
+    return NextResponse.json(
       { error: 'Failed to lookup profile', success: false },
       { status: 500 }
     );
