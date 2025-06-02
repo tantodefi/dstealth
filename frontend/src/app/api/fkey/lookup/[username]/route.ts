@@ -1,17 +1,20 @@
-import { NextRequest } from 'next/server';
-import { env } from '@/lib/env';
+import { type NextRequest } from 'next/server';
 
 export const dynamic = 'force-static';
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { username: string } }
-) {
-  const { username } = params;
+type Props = {
+  params: { username: string }
+}
+
+export const GET = async (
+  req: NextRequest,
+  props: Props
+): Promise<Response> => {
+  const { username } = props.params;
   
   try {
     console.log(`Proxying fkey lookup request for username: ${username}`);
-    const response = await fetch(`${env.BACKEND_URL}/api/fkey/lookup/${username}`, {
+    const response = await fetch(`${process.env.BACKEND_URL}/api/fkey/lookup/${username}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
