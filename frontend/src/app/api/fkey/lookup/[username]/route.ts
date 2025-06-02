@@ -3,11 +3,16 @@ import { env } from '@/lib/env';
 
 export const dynamic = 'force-static';
 
+type RouteContext = {
+  params: { username: string };
+  searchParams: { [key: string]: string | string[] | undefined };
+};
+
 export async function GET(
   request: NextRequest,
-  { params }: { params: Record<string, string> }
+  context: RouteContext
 ) {
-  const username = params.username;
+  const { username } = context.params;
   
   try {
     console.log(`Proxying fkey lookup request for username: ${username}`);
