@@ -1,16 +1,17 @@
 import { NextRequest } from 'next/server';
 import { env } from '@/lib/env';
 
-type RouteContext = {
-  params: { username: string };
-  searchParams: { [key: string]: string | string[] | undefined };
-};
+interface RouteSegmentConfig {
+  params: {
+    username: string;
+  };
+}
 
 export async function GET(
   request: NextRequest,
-  context: RouteContext
+  { params }: RouteSegmentConfig
 ) {
-  const { username } = context.params;
+  const { username } = params;
   
   try {
     console.log(`Proxying convos lookup request for username: ${username}`);
