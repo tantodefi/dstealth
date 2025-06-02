@@ -1,15 +1,9 @@
 import { NextRequest } from 'next/server';
 import { env } from '@/lib/env';
 
-interface RouteSegmentConfig {
-  params: {
-    username: string;
-  };
-}
-
 export async function GET(
   request: NextRequest,
-  { params }: RouteSegmentConfig
+  { params }: { params: { username: string } }
 ) {
   const { username } = params;
   

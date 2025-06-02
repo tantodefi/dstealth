@@ -3,15 +3,9 @@ import { env } from '@/lib/env';
 
 export const dynamic = 'force-static';
 
-interface RouteSegmentConfig {
-  params: {
-    username: string;
-  };
-}
-
 export async function GET(
   request: NextRequest,
-  { params }: RouteSegmentConfig
+  { params }: { params: { username: string } }
 ) {
   const { username } = params;
   
