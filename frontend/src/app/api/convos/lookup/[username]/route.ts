@@ -1,15 +1,11 @@
 import { NextRequest } from 'next/server';
 import { env } from '@/lib/env';
 
-interface RouteParams {
-  username: string;
-}
-
 export async function GET(
   request: NextRequest,
-  { params }: { params: RouteParams }
+  { params }: { params: Record<string, string> }
 ) {
-  const { username } = params;
+  const username = params.username;
   
   try {
     console.log(`Proxying convos lookup request for username: ${username}`);
