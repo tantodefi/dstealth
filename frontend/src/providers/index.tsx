@@ -4,9 +4,7 @@ import dynamic from "next/dynamic";
 import { FrameProvider } from "@/context/frame-context";
 import { XMTPProvider } from "@/context/xmtp-context";
 import MiniAppWalletProvider from "@/providers/miniapp-wallet-provider";
-import { WhiskSdkProvider } from "@paperclip-labs/whisk-sdk";
-import { IdentityResolver } from "@paperclip-labs/whisk-sdk/identity";
-import { env } from "@/lib/env";
+import { type ReactNode } from 'react';
 
 const ErudaProvider = dynamic(
   () => import("@/providers/eruda").then((c) => c.ErudaProvider),
@@ -15,30 +13,34 @@ const ErudaProvider = dynamic(
   },
 );
 
+// Initialize navigator.wallets on the client side
+if (typeof window !== 'undefined') {
+  try {
+    if (!window.navigator.wallets || !Array.isArray(window.navigator.wallets)) {
+      Object.defineProperty(window.navigator, 'wallets', {
+        value: [],
+        writable: true,
+        configurable: true,
+        enumerable: true
+      });
+    }
+  } catch (error) {
+    // Silent fail - not critical
+  }
+}
+
 export const Providers = ({
   children,
-  cookies,
+  cookies = null,
 }: {
-  children: React.ReactNode;
-  cookies: string | null;
+  children: ReactNode;
+  cookies?: string | null;
 }) => {
   return (
     <ErudaProvider>
       <FrameProvider>
         <MiniAppWalletProvider cookies={cookies}>
-          <WhiskSdkProvider
-            apiKey={env.NEXT_PUBLIC_WHISK_API_KEY}
-            config={{
-              identity: {
-                resolverOrder: [
-                  IdentityResolver.Farcaster,
-                  IdentityResolver.Ens,
-                  IdentityResolver.Base,
-                ],
-              },
-            }}>
           <XMTPProvider>{children}</XMTPProvider>
-          </WhiskSdkProvider>
         </MiniAppWalletProvider>
       </FrameProvider>
     </ErudaProvider>

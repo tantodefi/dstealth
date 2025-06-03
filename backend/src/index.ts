@@ -20,7 +20,6 @@ import {
 import { env } from './config/env';
 import fkeyRoutes from './routes/fkey';
 import convosRoutes from './routes/convos';
-import personalDataRoutes from './routes/personalData';
 
 const { WALLET_KEY, API_SECRET_KEY, ENCRYPTION_KEY, XMTP_ENV, PORT } =
   validateEnvironment([
@@ -341,7 +340,6 @@ app.get(
 
 app.use('/api/fkey', fkeyRoutes);
 app.use('/api/convos', convosRoutes);
-app.use('/api/personal-data', personalDataRoutes);
 
 // Start Server
 void (async () => {

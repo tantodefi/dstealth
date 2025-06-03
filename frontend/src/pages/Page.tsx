@@ -5,10 +5,8 @@ import { FullPageLoader } from "@/components/FullPageLoader";
 import { Header } from "@/components/Header";
 import { SafeAreaContainer } from "@/components/SafeAreaContainer";
 import { useXMTP } from "@/context/xmtp-context";
-import BotChat from "@/examples/BotChat";
-import GroupChat from "@/examples/GroupChat";
 import WalletConnection from "@/examples/WalletConnection";
-import { FkeySearch } from "@/components/FkeySearch";
+import MainInterface from "@/components/MainInterface";
 
 export default function ExamplePage() {
   const { client, initializing, disconnect } = useXMTP();
@@ -53,20 +51,10 @@ export default function ExamplePage() {
           <FullPageLoader />
         ) : (
           <div className="flex flex-col gap-4 px-4 py-4 h-full overflow-auto">
-            <FkeySearch />
-
-            {!client && <WalletConnection />}
-
-            {client && (
-              <>
-                <div className="w-full">
-                  <GroupChat />
-                </div>
-
-                <div className="w-full mt-6">
-                  <BotChat />
-                </div>
-              </>
+            {!client ? (
+              <WalletConnection />
+            ) : (
+              <MainInterface />
             )}
           </div>
         )}

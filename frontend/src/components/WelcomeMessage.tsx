@@ -1,4 +1,3 @@
-import { useAvatar, useName, IdentityResolver } from "@paperclip-labs/whisk-sdk/identity";
 import { useFrame } from "@/context/frame-context";
 import { useAccount, useDisconnect, useSignMessage } from "wagmi";
 import Image from "next/image";
@@ -60,30 +59,6 @@ export function WelcomeMessage() {
       localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "Coinbase Smart Wallet");
     }
   }, [connector]);
-
-  // Get the user's name and avatar from Whisk Identity Kit
-  const { data: name, isLoading: nameLoading } = useName({ 
-    address: (connectionType === "Ephemeral Wallet" ? ephemeralAddress : address) as `0x${string}`,
-    resolverOrder: [
-      IdentityResolver.Farcaster,
-      IdentityResolver.Ens,
-      IdentityResolver.Base
-    ]
-  });
-
-  const { data: avatar, isLoading: avatarLoading } = useAvatar({ 
-    address: (connectionType === "Ephemeral Wallet" ? ephemeralAddress : address) as `0x${string}`,
-    resolverOrder: [
-      IdentityResolver.Farcaster,
-      IdentityResolver.Ens,
-      IdentityResolver.Base
-    ]
-  });
-
-  const displayName = connectionType === "Ephemeral Wallet" 
-    ? (ephemeralAddress ? `${ephemeralAddress.slice(0, 6)}...${ephemeralAddress.slice(-4)}` : "anon")
-    : (address ? (name || `${address.slice(0, 6)}...${address.slice(-4)}`) : "anon");
-  const isLoading = nameLoading || avatarLoading;
 
   // Show wallet UI for any connected wallet or ephemeral connection
   const showWalletUI = (isConnected && address) || (connectionType === "Ephemeral Wallet" && ephemeralAddress);
