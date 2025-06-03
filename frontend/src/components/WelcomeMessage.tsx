@@ -19,12 +19,17 @@ import {
 } from '@coinbase/onchainkit/identity';
 import { useEffect, useState } from 'react';
 import { privateKeyToAccount } from 'viem/accounts';
+import { Proxy402Balance } from './Proxy402Balance';
 
 // Storage keys
 const XMTP_CONNECTION_TYPE_KEY = "xmtp:connectionType";
 const XMTP_EPHEMERAL_KEY = "xmtp:ephemeralKey";
 
-export function WelcomeMessage() {
+interface WelcomeMessageProps {
+  onShowEarningsChart?: () => void;
+}
+
+export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
   const { context } = useFrame();
   const { address, connector, isConnected } = useAccount();
   const { disconnect: disconnectWallet } = useDisconnect();
@@ -108,6 +113,11 @@ export function WelcomeMessage() {
               Welcome, <span className="font-medium text-white">anon</span>
             </p>
           )}
+        </div>
+        
+        {/* Proxy402 Balance - Far right in green */}
+        <div className="flex items-center">
+          <Proxy402Balance onShowChart={onShowEarningsChart} />
         </div>
       </div>
     </div>

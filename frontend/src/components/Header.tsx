@@ -8,9 +8,10 @@ import { useXMTP } from "@/context/xmtp-context";
 interface HeaderProps {
   onLogout?: () => void;
   isConnected?: boolean;
+  onShowEarningsChart?: () => void;
 }
 
-export function Header({ onLogout, isConnected }: HeaderProps) {
+export function Header({ onLogout, isConnected, onShowEarningsChart }: HeaderProps) {
   // Use the Eruda context to access toggle functionality
   const { isVisible, toggleEruda } = useEruda();
   const { client } = useXMTP();
@@ -34,7 +35,7 @@ export function Header({ onLogout, isConnected }: HeaderProps) {
           {client && <LogoutButton />}
       </div>
     </header>
-      <WelcomeMessage />
+      <WelcomeMessage onShowEarningsChart={onShowEarningsChart} />
     </>
   );
 }

@@ -25,14 +25,14 @@ export const env = createEnv({
     NEXT_PUBLIC_ONCHAINKIT_API_KEY: z.string().min(1).optional(),
     // Backend URL
     NEXT_PUBLIC_BACKEND_URL: z.string().url().default('http://localhost:5001'),
-    // Make these optional to prevent crashes
-    NEXT_PUBLIC_ETHERSCAN_API_KEY: z.string().optional(),
-    NEXT_PUBLIC_FARCASTER_APP_FID: z.string().optional(),
-    NEXT_PUBLIC_FARCASTER_DEVELOPER_MNEMONIC: z.string().optional(),
-    NEXT_PUBLIC_FARCASTER_DEVELOPER_FID: z.string().optional(),
-    NEXT_PUBLIC_PROXY402_JWT: z.string().optional(),
-    NEXT_PUBLIC_HUB_HTTP_URL: z.string().optional(),
-    NEXT_PUBLIC_HUB_FALLBACK_URL: z.string().optional(),
+    // Add defaults to prevent crashes during development
+    NEXT_PUBLIC_ETHERSCAN_API_KEY: z.string().default("development_key"),
+    NEXT_PUBLIC_FARCASTER_APP_FID: z.string().default("0"),
+    NEXT_PUBLIC_FARCASTER_DEVELOPER_MNEMONIC: z.string().default("development_mnemonic"),
+    NEXT_PUBLIC_FARCASTER_DEVELOPER_FID: z.string().default("0"),
+    NEXT_PUBLIC_PROXY402_JWT: z.string().default(""),
+    NEXT_PUBLIC_HUB_HTTP_URL: z.string().default("https://nemes.farcaster.xyz:2281"),
+    NEXT_PUBLIC_HUB_FALLBACK_URL: z.string().default("https://hoyt.farcaster.xyz:2281"),
   },
   // For Next.js >= 13.4.4, you only need to destructure client variables:
   experimental__runtimeEnv: {

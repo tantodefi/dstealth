@@ -11,7 +11,7 @@ const montserrat = Montserrat({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "XMTP MiniApp",
   description: "XMTP MiniApp",
-  metadataBase: new URL(env.NEXT_PUBLIC_URL),
+  metadataBase: new URL(env.NEXT_PUBLIC_URL || 'https://localhost:3000'),
 };
 
 export const revalidate = 0;

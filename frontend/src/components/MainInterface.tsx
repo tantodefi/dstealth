@@ -10,12 +10,24 @@ import ZkReceipts from "./ZkReceipts";
 import GroupChat from "@/examples/GroupChat";
 import BotChat from "@/examples/BotChat";
 import Proxy402Settings from "./Proxy402Settings";
+import { EarningsChart } from "./EarningsChart";
 
-type ViewType = "main" | "search" | "bot" | "chat" | "receipts" | "settings";
+type ViewType = "main" | "search" | "bot" | "chat" | "receipts" | "settings" | "earnings";
 
-export default function MainInterface() {
+interface MainInterfaceProps {
+  showEarningsChart?: boolean;
+  onCloseEarningsChart?: () => void;
+}
+
+export default function MainInterface({ showEarningsChart, onCloseEarningsChart }: MainInterfaceProps) {
   const [currentView, setCurrentView] = useState<ViewType>("main");
   const [showSettings, setShowSettings] = useState(false);
+
+  // Set view to earnings when showEarningsChart becomes true
+  if (showEarningsChart && currentView !== "earnings") {
+    setCurrentView("earnings");
+    setShowSettings(false);
+  }
 
   const renderView = () => {
     switch (currentView) {
@@ -60,6 +72,17 @@ export default function MainInterface() {
               <h2 className="text-xl font-bold text-white">ZK Receipts</h2>
             </div>
             <ZkReceipts />
+          </div>
+        );
+      case "earnings":
+        return (
+          <div className="space-y-4">
+            <EarningsChart onClose={() => {
+              if (onCloseEarningsChart) {
+                onCloseEarningsChart();
+              }
+              setCurrentView("main");
+            }} />
           </div>
         );
       default:

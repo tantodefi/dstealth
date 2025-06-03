@@ -13,6 +13,7 @@ export default function ExamplePage() {
   const [isConnected, setIsConnected] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [showLoader, setShowLoader] = useState(true);
+  const [showEarningsChart, setShowEarningsChart] = useState(false);
 
   // Mark as mounted on client-side
   useEffect(() => {
@@ -45,7 +46,10 @@ export default function ExamplePage() {
   return (
     <SafeAreaContainer>
       <div className="flex flex-col w-full max-w-md mx-auto h-screen bg-black">
-        <Header isConnected={isConnected || !!client} />
+        <Header 
+          isConnected={isConnected || !!client} 
+          onShowEarningsChart={() => setShowEarningsChart(true)}
+        />
 
         {showLoader ? (
           <FullPageLoader />
@@ -54,7 +58,10 @@ export default function ExamplePage() {
             {!client ? (
               <WalletConnection />
             ) : (
-              <MainInterface />
+              <MainInterface 
+                showEarningsChart={showEarningsChart}
+                onCloseEarningsChart={() => setShowEarningsChart(false)}
+              />
             )}
           </div>
         )}

@@ -32,9 +32,6 @@ export const clearWagmiCookies = () => {
 
 // Create wagmi config with Daimo Pay defaults
 export const wagmiConfig = createConfig({
-  ...getDefaultConfig({
-    appName: "XMTP Mini App",
-  }),
   chains: [mainnet, base],
   transports: {
     [base.id]: http(),

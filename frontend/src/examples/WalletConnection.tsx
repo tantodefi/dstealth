@@ -58,7 +58,7 @@ export default function WalletConnection() {
     if (!isConnected || !walletData) return null;
 
     if (connectionType === "EOA Wallet") {
-      return createEOASigner(walletData.account.address, walletData);
+      return createEOASigner(walletData.account.address, signMessageAsync);
     }
 
     if (
@@ -74,7 +74,7 @@ export default function WalletConnection() {
 
     return null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionType, isConnected, walletData, connector]);
+  }, [connectionType, isConnected, walletData, connector, signMessageAsync]);
 
   // Initialize XMTP client with wallet signer
   const initializeXmtp = useCallback(
@@ -110,7 +110,7 @@ export default function WalletConnection() {
       try {
         console.log("Initializing XMTP with signer");
         await initialize({
-          dbEncryptionKey: hexToUint8Array(env.NEXT_PUBLIC_ENCRYPTION_KEY),
+          dbEncryptionKey: env.NEXT_PUBLIC_ENCRYPTION_KEY ? hexToUint8Array(env.NEXT_PUBLIC_ENCRYPTION_KEY) : undefined,
           env: env.NEXT_PUBLIC_XMTP_ENV,
           loggingLevel: "off",
           signer,

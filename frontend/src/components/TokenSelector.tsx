@@ -1,6 +1,14 @@
 "use client";
 
-import { type SupportedToken, SUPPORTED_TOKENS } from "./SendButton";
+// Define token types locally since they're not exported from SendButton
+type SupportedToken = "USDC" | "EURC" | "WETH" | "cbBTC";
+
+const SUPPORTED_TOKENS = {
+  USDC: { symbol: "USDC", name: "USD Coin" },
+  EURC: { symbol: "EURC", name: "Euro Coin" },
+  WETH: { symbol: "WETH", name: "Wrapped Ether" },
+  cbBTC: { symbol: "cbBTC", name: "Coinbase Wrapped BTC" }
+};
 
 interface TokenSelectorProps {
   selectedToken: SupportedToken;

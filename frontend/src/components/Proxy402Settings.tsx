@@ -6,6 +6,7 @@ import { SpinnerIcon } from "@/components/icons/SpinnerIcon";
 import { CheckIcon } from "@/components/icons/CheckIcon";
 import { XIcon } from "@/components/icons/XIcon";
 import { Copy, ExternalLink } from 'lucide-react';
+import { useAccount } from 'wagmi';
 
 interface Proxy402Link {
   id: string | number;
@@ -35,13 +36,45 @@ export default function Proxy402Settings() {
   const [price, setPrice] = useState("0.01");
   const [creatingLink, setCreatingLink] = useState(false);
 
-  // Load saved data from localStorage on mount
+  const { address, isConnected } = useAccount();
+
+  // Get user-specific storage keys
+  const getJWTKey = (userAddress: string) => `proxy402_jwt_${userAddress.toLowerCase()}`;
+  const getLinksKey = (userAddress: string) => `proxy402_links_${userAddress.toLowerCase()}`;
+  const getEndpointsKey = (userAddress: string) => `proxy402_endpoints_${userAddress.toLowerCase()}`;
+  const getActivityStatsKey = (userAddress: string) => `proxy402_activity_stats_${userAddress.toLowerCase()}`;
+
+  // Load saved data from localStorage on mount and when wallet changes
   useEffect(() => {
-    const savedJwt = localStorage.getItem('proxy402_jwt');
-    const savedLinks = localStorage.getItem('proxy402_links');
+    if (!isConnected || !address) {
+      // Clear state when wallet disconnects
+      setJwt("");
+      setLinks([]);
+      setError("");
+      setSuccess("");
+      return;
+    }
+
+    const jwtKey = getJWTKey(address);
+    const linksKey = getLinksKey(address);
+    const endpointsKey = getEndpointsKey(address);
+    const activityStatsKey = getActivityStatsKey(address);
+    
+    const savedJwt = localStorage.getItem(jwtKey);
+    const savedLinks = localStorage.getItem(linksKey);
+    const savedEndpoints = localStorage.getItem(endpointsKey);
+    const savedActivityStats = localStorage.getItem(activityStatsKey);
+    
+    console.log('Loading data for wallet:', address);
+    console.log('Saved JWT exists:', !!savedJwt);
+    console.log('Saved links count:', savedLinks ? JSON.parse(savedLinks).length : 0);
+    console.log('Saved endpoints:', savedEndpoints);
+    console.log('Saved activity stats:', savedActivityStats);
     
     if (savedJwt) {
       setJwt(savedJwt);
+    } else {
+      setJwt("");
     }
     
     if (savedLinks) {
@@ -52,9 +85,12 @@ export default function Proxy402Settings() {
         }
       } catch (error) {
         console.error('Failed to parse saved links:', error);
+        setLinks([]);
       }
+    } else {
+      setLinks([]);
     }
-  }, []);
+  }, [address, isConnected]);
 
   const testConnection = async () => {
     if (!jwt.trim()) {
@@ -62,9 +98,22 @@ export default function Proxy402Settings() {
       return;
     }
 
-    // Save JWT to localStorage immediately
-    localStorage.setItem('proxy402_jwt', jwt);
-    setSuccess("✅ JWT token saved!");
+    if (!address) {
+      setError("Please connect your wallet first");
+      return;
+    }
+
+    // Save JWT to localStorage for this specific user
+    const jwtKey = getJWTKey(address);
+    localStorage.setItem(jwtKey, jwt);
+    
+    // Dispatch custom event to notify other components
+    const event = new CustomEvent('proxy402JWTSaved', {
+      detail: { address: address.toLowerCase(), jwt }
+    });
+    window.dispatchEvent(event);
+    
+    setSuccess("✅ JWT token saved for this wallet!");
 
     setLoading(true);
     setError("");
@@ -81,8 +130,32 @@ export default function Proxy402Settings() {
         const linksArray = Array.isArray(data) ? data : [];
         setLinks(linksArray);
         
-        // Save endpoints to localStorage
-        localStorage.setItem('proxy402_links', JSON.stringify(linksArray));
+        // Save links to localStorage for this specific user
+        const linksKey = getLinksKey(address);
+        localStorage.setItem(linksKey, JSON.stringify(linksArray));
+        
+        // Store endpoints count
+        const endpointsKey = getEndpointsKey(address);
+        const endpointsCount = linksArray.length;
+        localStorage.setItem(endpointsKey, endpointsCount.toString());
+        
+        // Calculate and store activity stats
+        const activityStats = {
+          totalLinks: linksArray.length,
+          totalPurchases: linksArray.reduce((sum, link) => sum + (link.access_count || 0), 0),
+          totalRevenue: linksArray.reduce((sum, link) => {
+            const price = typeof link.price === 'number' ? link.price : parseFloat(link.price) || 0;
+            const purchases = link.access_count || 0;
+            return sum + (price * purchases);
+          }, 0),
+          lastUpdated: new Date().toISOString()
+        };
+        
+        const activityStatsKey = getActivityStatsKey(address);
+        localStorage.setItem(activityStatsKey, JSON.stringify(activityStats));
+        
+        console.log('Stored endpoints count:', endpointsCount);
+        console.log('Stored activity stats:', activityStats);
         
         setSuccess("✅ Connected to Proxy402 successfully!");
       } else {
@@ -104,6 +177,11 @@ export default function Proxy402Settings() {
 
     if (!jwt.trim()) {
       setError("Please connect with your JWT token first");
+      return;
+    }
+
+    if (!address) {
+      setError("Please connect your wallet first");
       return;
     }
 
@@ -132,8 +210,32 @@ export default function Proxy402Settings() {
         const newLinks = [data, ...links];
         setLinks(newLinks);
         
-        // Save updated links to localStorage
-        localStorage.setItem('proxy402_links', JSON.stringify(newLinks));
+        // Save updated links to localStorage for this specific user
+        const linksKey = getLinksKey(address);
+        localStorage.setItem(linksKey, JSON.stringify(newLinks));
+        
+        // Update endpoints count
+        const endpointsKey = getEndpointsKey(address);
+        const endpointsCount = newLinks.length;
+        localStorage.setItem(endpointsKey, endpointsCount.toString());
+        
+        // Update activity stats
+        const activityStats = {
+          totalLinks: newLinks.length,
+          totalPurchases: newLinks.reduce((sum, link) => sum + (link.access_count || 0), 0),
+          totalRevenue: newLinks.reduce((sum, link) => {
+            const price = typeof link.price === 'number' ? link.price : parseFloat(link.price) || 0;
+            const purchases = link.access_count || 0;
+            return sum + (price * purchases);
+          }, 0),
+          lastUpdated: new Date().toISOString()
+        };
+        
+        const activityStatsKey = getActivityStatsKey(address);
+        localStorage.setItem(activityStatsKey, JSON.stringify(activityStats));
+        
+        console.log('Updated endpoints count after new link:', endpointsCount);
+        console.log('Updated activity stats after new link:', activityStats);
         
         setTargetUrl("");
         setSuccess("✅ Payment-gated link created successfully!");
@@ -157,12 +259,29 @@ export default function Proxy402Settings() {
     }
   };
 
+  // Don't render if wallet is not connected
+  if (!isConnected || !address) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h3 className="text-lg font-semibold text-white mb-2">Proxy402 Settings</h3>
+          <div className="text-yellow-400 bg-yellow-500/10 border border-yellow-500/20 rounded p-3">
+            <p className="text-sm">Please connect your wallet to configure Proxy402 settings.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div>
         <h3 className="text-lg font-semibold text-white mb-2">Proxy402 Settings</h3>
-        <p className="text-gray-400 text-sm">
+        <p className="text-gray-400 text-sm mb-2">
           Create payment-gated links using Proxy402
+        </p>
+        <p className="text-gray-500 text-xs">
+          Connected wallet: {address.slice(0, 6)}...{address.slice(-4)}
         </p>
       </div>
 
@@ -204,92 +323,103 @@ export default function Proxy402Settings() {
         </div>
       )}
 
-      {/* Link Creation */}
-      {jwt && !error && (
-        <div>
-          <h4 className="text-md font-medium text-white mb-2">Create Payment-Gated Link</h4>
-          <div className="space-y-2">
-            <input
-              type="url"
-              value={targetUrl}
-              onChange={(e) => setTargetUrl(e.target.value)}
-              placeholder="Enter URL to make payment-gated"
-              className="w-full bg-gray-800 border border-gray-700 text-white rounded p-2 text-sm"
-            />
-            <div className="flex gap-2">
+      {/* Create Payment-Gated Link */}
+      {jwt && (
+        <div className="border-t border-gray-700 pt-4">
+          <h4 className="text-md font-medium text-white mb-3">Create Payment-Gated Link</h4>
+          
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Target URL
+              </label>
+              <input
+                type="url"
+                value={targetUrl}
+                onChange={(e) => setTargetUrl(e.target.value)}
+                placeholder="https://example.com/premium-content"
+                className="w-full bg-gray-800 border border-gray-700 text-white rounded p-2 text-sm"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Price (USD)
+              </label>
               <input
                 type="number"
+                step="0.01"
+                min="0"
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
-                placeholder="Price (USD)"
-                min="0.01"
-                step="0.01"
-                className="w-24 bg-gray-800 border border-gray-700 text-white rounded p-2 text-sm"
+                className="w-full bg-gray-800 border border-gray-700 text-white rounded p-2 text-sm"
               />
-              <Button
-                onClick={createPaymentGatedLink}
-                disabled={creatingLink || !targetUrl.trim()}
-                className="bg-green-600 hover:bg-green-700 text-white flex-1"
-              >
-                {creatingLink ? <SpinnerIcon className="animate-spin h-4 w-4" /> : "Create Link"}
-              </Button>
             </div>
+            
+            <Button
+              onClick={createPaymentGatedLink}
+              disabled={creatingLink || !targetUrl.trim()}
+              className="w-full bg-green-600 hover:bg-green-700 text-white"
+            >
+              {creatingLink ? (
+                <>
+                  <SpinnerIcon className="animate-spin h-4 w-4 mr-2" />
+                  Creating Link...
+                </>
+              ) : (
+                "Create Payment-Gated Link"
+              )}
+            </Button>
           </div>
         </div>
       )}
 
-      {/* Links List */}
+      {/* Display Links */}
       {links.length > 0 && (
-        <div>
-          <h4 className="text-md font-medium text-white mb-2">Your Payment-Gated Links</h4>
-          <div className="space-y-2">
+        <div className="border-t border-gray-700 pt-4">
+          <h4 className="text-md font-medium text-white mb-3">Your Payment-Gated Links</h4>
+          <div className="space-y-3">
             {links.map((link) => (
-              <div key={link.id} className="bg-gray-800 rounded p-2">
-                <div className="flex items-center justify-between mb-1">
+              <div key={link.id || link.short_code} className="bg-gray-800 rounded p-3">
+                <div className="flex items-start justify-between mb-2">
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-medium truncate">
-                      {link.access_url || link.url || `proxy402.com/${link.short_code}`}
-                    </p>
-                    <p className="text-gray-400 text-xs truncate">
-                      Target: {link.target || link.target_url}
+                      {link.target_url || link.target}
                     </p>
                     <p className="text-gray-400 text-xs">
-                      ${link.price} • {link.access_count || link.visits || 0} visits
+                      Price: ${typeof link.price === 'number' ? link.price.toFixed(2) : link.price}
+                      {link.access_count !== undefined && ` • ${link.access_count} purchases`}
                     </p>
                   </div>
-                  <div className="flex gap-1">
+                  <div className="flex gap-2 ml-2">
                     <button
-                      onClick={() => copyToClipboard(link.access_url || link.url || `https://proxy402.com/${link.short_code}`)}
-                      className="text-gray-400 hover:text-blue-400 p-1"
-                      title="Copy link"
+                      onClick={() => copyToClipboard(link.access_url)}
+                      className="text-gray-400 hover:text-white p-1"
+                      title="Copy payment link"
                     >
                       <Copy className="h-4 w-4" />
                     </button>
-                    <button
-                      onClick={() => window.open(link.access_url || link.url || `https://proxy402.com/${link.short_code}`, '_blank')}
-                      className="text-gray-400 hover:text-blue-400 p-1"
-                      title="Open link"
+                    <a
+                      href={link.access_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-gray-400 hover:text-white p-1"
+                      title="Open payment link"
                     >
                       <ExternalLink className="h-4 w-4" />
-                    </button>
+                    </a>
                   </div>
+                </div>
+                <div className="bg-gray-900 rounded p-2">
+                  <p className="text-gray-300 text-xs font-mono break-all">
+                    {link.access_url}
+                  </p>
                 </div>
               </div>
             ))}
           </div>
         </div>
       )}
-
-      {/* Help Text */}
-      <div className="text-xs text-gray-500 bg-gray-800/50 rounded p-2">
-        <p className="mb-1">💡 <strong>How to use Proxy402:</strong></p>
-        <ul className="space-y-0.5 ml-3">
-          <li>• Get your JWT token from proxy402.com</li>
-          <li>• Enter any URL to create a payment-gated version</li>
-          <li>• Set a price and share the link</li>
-          <li>• Users pay to access the original URL</li>
-        </ul>
-      </div>
     </div>
   );
 } 

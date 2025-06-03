@@ -15,7 +15,6 @@
   },
   "dependencies": {
     "@coinbase/onchainkit": "^0.38.13",
-    "@coinbase/x402": "^0.3.6",
     "@daimo/contract": "^1.6.0",
     "@daimo/pay": "^1.9.0",
     "@farcaster/auth-client": "^0.4.0",
@@ -24,10 +23,6 @@
     "@farcaster/frame-sdk": "^0.0.41",
     "@farcaster/frame-wagmi-connector": "^0.0.30",
     "@next/env": "^14.2.5",
-    "@onchainkit/fund": "^0.36.6",
-    "@onchainkit/swap": "^0.36.6",
-    "@paperclip-labs/types": "^0.4.0",
-    "@parcel/watcher": "^2.4.1",
     "@reclaimprotocol/js-sdk": "^3.0.4",
     "@t3-oss/env-nextjs": "^0.12.0",
     "@tanstack/react-query": "^5.56.2",

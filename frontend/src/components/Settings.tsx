@@ -43,7 +43,7 @@ export function Settings({ isOpen, onClose }: SettingsProps) {
             placeholder="Enter your Proxy402 API key"
           />
           <p className="mt-1 text-sm text-gray-400">
-            Your API key will be stored securely in your browser's local storage.
+            Your API key will be stored securely in your browser&apos;s local storage.
           </p>
         </div>
 

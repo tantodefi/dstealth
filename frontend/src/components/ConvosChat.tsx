@@ -33,7 +33,7 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
 
   // Use ref to track if stream is already started to prevent infinite loops
   const streamStartedRef = useRef(false);
-  const streamRef = useRef<AsyncGenerator<DecodedMessage> | null>(null);
+  const streamRef = useRef<any>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
 
   // Listen for invite message event
