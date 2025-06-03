@@ -60,20 +60,31 @@ export const getDbPath = (env: string) => {
   if (isVercel) {
     // Vercel allows writes to /tmp
     volumePath = "/tmp/xmtp";
+    
+    // Create database directory if it doesn't exist (and we have permission)
+    try {
+      if (!fs.existsSync(volumePath)) {
+        fs.mkdirSync(volumePath, { recursive: true });
+      }
+    } catch (error) {
+      console.warn(`Could not create directory ${volumePath}:`, error);
+      // Use a direct file path in /tmp if directory creation fails
+      const dbPath = `/tmp/${env}-xmtp.db3`;
+      console.log(`Using fallback database path: ${dbPath}`);
+      return dbPath;
+    }
   } else {
     // Local development - use Railway path or local .data
     volumePath = process.env.RAILWAY_VOLUME_MOUNT_PATH ?? ".data/xmtp";
-  }
-  
-  // Create database directory if it doesn't exist (and we have permission)
-  try {
-    if (!fs.existsSync(volumePath)) {
-      fs.mkdirSync(volumePath, { recursive: true });
-    }
-  } catch (error) {
-    console.warn(`Could not create directory ${volumePath}:`, error);
-    // Fallback to /tmp if directory creation fails
-    if (!isVercel) {
+    
+    // Create database directory if it doesn't exist (and we have permission)
+    try {
+      if (!fs.existsSync(volumePath)) {
+        fs.mkdirSync(volumePath, { recursive: true });
+      }
+    } catch (error) {
+      console.warn(`Could not create directory ${volumePath}:`, error);
+      // Fallback to /tmp if directory creation fails
       volumePath = "/tmp/xmtp";
       try {
         if (!fs.existsSync(volumePath)) {
@@ -82,7 +93,9 @@ export const getDbPath = (env: string) => {
       } catch (fallbackError) {
         console.error("Failed to create fallback directory:", fallbackError);
         // Last resort - use current directory
-        volumePath = "./";
+        const dbPath = `./${env}-xmtp.db3`;
+        console.log(`Using current directory database path: ${dbPath}`);
+        return dbPath;
       }
     }
   }

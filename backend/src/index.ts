@@ -42,6 +42,11 @@ const initializeXmtpClient = async () => {
     const dbEncryptionKey = getEncryptionKeyFromHex(ENCRYPTION_KEY);
     const dbPath = getDbPath(XMTP_ENV);
     
+    console.log("🔄 Initializing XMTP client...");
+    console.log("📁 Database path:", dbPath);
+    console.log("🌍 Environment:", XMTP_ENV);
+    console.log("🔧 Is Vercel:", !!(process.env.VERCEL || process.env.NODE_ENV === 'production'));
+    
     // Create installation A (receiver) client
     xmtpClient = await Client.create(signer, {
       dbEncryptionKey,
@@ -49,55 +54,70 @@ const initializeXmtpClient = async () => {
       dbPath,
     });
 
-    console.log("XMTP Client initialized with inbox ID:", xmtpClient.inboxId);
+    console.log("✅ XMTP Client initialized with inbox ID:", xmtpClient.inboxId);
     
-    try {
-      await xmtpClient.conversations.sync();
-      
-      let conversation: Conversation | undefined;
-      console.log("GROUP_ID", GROUP_ID);
-      
-      if (GROUP_ID) {
-        conversation = await xmtpClient.conversations.getConversationById(GROUP_ID);
-        // If group doesn't exist, create a new one
-        if (!conversation) {
-          console.log("Group not found, creating new group");
+    // Only try to setup group functionality if not in Vercel (to avoid memory issues)
+    const isVercel = process.env.VERCEL || process.env.NODE_ENV === 'production';
+    if (!isVercel) {
+      try {
+        await xmtpClient.conversations.sync();
+        
+        let conversation: Conversation | undefined;
+        console.log("GROUP_ID", GROUP_ID);
+        
+        if (GROUP_ID) {
+          conversation = await xmtpClient.conversations.getConversationById(GROUP_ID);
+          // If group doesn't exist, create a new one
+          if (!conversation) {
+            console.log("Group not found, creating new group");
+            conversation = await xmtpClient.conversations.newGroup(defaultInboxes, {
+              groupName: "XMTP Debugger Group"
+            });
+            GROUP_ID = conversation.id;
+            appendToEnv("GROUP_ID", GROUP_ID);
+          }
+        } else {
           conversation = await xmtpClient.conversations.newGroup(defaultInboxes, {
             groupName: "XMTP Debugger Group"
           });
+          console.log("New group created:", conversation.id);
           GROUP_ID = conversation.id;
           appendToEnv("GROUP_ID", GROUP_ID);
         }
-      } else {
-        conversation = await xmtpClient.conversations.newGroup(defaultInboxes, {
-          groupName: "XMTP Debugger Group"
-        });
-        console.log("New group created:", conversation.id);
-        GROUP_ID = conversation.id;
-        appendToEnv("GROUP_ID", GROUP_ID);
-      }
 
-      // Check if conversation is a Group before using Group-specific methods
-      if (conversation instanceof Group) {
-        const isAdmin = conversation.isSuperAdmin(xmtpClient.inboxId);
-        await conversation.sync();
-        console.log("Client is admin of the group:", isAdmin);
-        
-        // Send test message
-        const message = await conversation.send("Test message");
-        console.log("Message sent:", message);
-      } else {
-        console.warn("Conversation is not a Group - skipping group setup");
+        // Check if conversation is a Group before using Group-specific methods
+        if (conversation instanceof Group) {
+          const isAdmin = conversation.isSuperAdmin(xmtpClient.inboxId);
+          await conversation.sync();
+          console.log("Client is admin of the group:", isAdmin);
+          
+          // Send test message
+          const message = await conversation.send("Test message");
+          console.log("Message sent:", message);
+        } else {
+          console.warn("Conversation is not a Group - skipping group setup");
+        }
+      } catch (groupError) {
+        console.warn("Failed to setup group chat - continuing without group functionality:", groupError);
       }
-    } catch (groupError) {
-      console.warn("Failed to setup group chat - continuing without group functionality:", groupError);
+    } else {
+      console.log("🚀 Running in Vercel - skipping group setup to avoid memory constraints");
     }
 
     // The client is initialized, even if group setup failed
     return;
   } catch (error) {
     console.error("Failed to initialize XMTP client:", error);
-    throw error; // Re-throw to prevent server from starting
+    
+    // In Vercel, we might want to continue without XMTP for API routes that don't need it
+    const isVercel = process.env.VERCEL || process.env.NODE_ENV === 'production';
+    if (isVercel) {
+      console.warn("⚠️ XMTP client initialization failed in Vercel - API will work but XMTP features will be disabled");
+      xmtpClient = null as any; // Set to null so we can check for it in routes
+      return; // Don't throw, let the server start
+    }
+    
+    throw error; // Re-throw for local development
   }
 };
 
@@ -208,13 +228,28 @@ app.use((req, res, next) => {
 // Routes
 app.get("/health", (req, res) => {
   console.log("✅ HEALTH CHECK ENDPOINT HIT");
-  res.json({ status: "ok" });
+  const isVercel = process.env.VERCEL || process.env.NODE_ENV === 'production';
+  res.json({ 
+    status: "ok",
+    xmtp: xmtpClient ? "available" : "unavailable",
+    environment: XMTP_ENV,
+    platform: isVercel ? "vercel" : "local",
+    timestamp: new Date().toISOString()
+  });
 });
 
 app.post(
   "/api/xmtp/add-inbox",
   validateApiSecret,
   async (req: Request, res: Response) => {
+    if (!xmtpClient) {
+      return res.status(503).json({
+        success: false,
+        message: "XMTP client not available",
+        error: "XMTP service is temporarily unavailable"
+      });
+    }
+
     try {
       const { inboxId } = req.body as { inboxId: string };
       console.log(
@@ -245,6 +280,14 @@ app.post(
   "/api/xmtp/remove-inbox",
   validateApiSecret,
   async (req: Request, res: Response) => {
+    if (!xmtpClient) {
+      return res.status(503).json({
+        success: false,
+        message: "XMTP client not available",
+        error: "XMTP service is temporarily unavailable"
+      });
+    }
+
     try {
       const { inboxId } = req.body as { inboxId: string };
       console.log("Removing user from group with inboxId:", inboxId);
@@ -269,6 +312,14 @@ app.get(
   "/api/xmtp/get-group-id",
   validateApiSecret,
   async (req: Request, res: Response) => {
+    if (!xmtpClient) {
+      return res.status(503).json({
+        success: false,
+        message: "XMTP client not available",
+        error: "XMTP service is temporarily unavailable"
+      });
+    }
+
     try {
       console.log("🔵 Inside get-group-id async block");
       console.log("Current client inbox ID:", req.query.inboxId);
@@ -331,7 +382,7 @@ app.get(
 
       res.json(responseObject);
       console.log("⚪ Response sent for get-group-id");
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("❌ Error in get-group-id:", error);
       res.status(500).json({ error: "Failed to fetch group info" });
     }
