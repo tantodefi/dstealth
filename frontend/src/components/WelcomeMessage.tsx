@@ -3,7 +3,6 @@ import { useAccount, useDisconnect, useSignMessage } from "wagmi";
 import Image from "next/image";
 import { useXMTP } from "@/context/xmtp-context";
 import {
-  ConnectWallet,
   Wallet,
   WalletDropdown,
   WalletDropdownDisconnect,
@@ -75,11 +74,12 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
           {showWalletUI && (
             <div className="relative [--ock-font-family:inherit] [--ock-border-radius:6px] [--ock-text-primary:#fff] [--ock-text-inverse:#000] [--ock-text-foreground:#fff] [--ock-text-foreground-muted:#999] [--ock-text-error:#ff4d4d] [--ock-text-success:#00cc66] [--ock-text-warning:#ffcc00] [--ock-text-disabled:#666] [--ock-bg-default:#111] [--ock-bg-default-hover:#222] [--ock-bg-default-active:#333] [--ock-bg-alternate:#222] [--ock-bg-alternate-hover:#333] [--ock-bg-alternate-active:#444] [--ock-bg-inverse:#fff] [--ock-bg-inverse-hover:#f5f5f5] [--ock-bg-inverse-active:#e5e5e5] [--ock-bg-primary:#3898FF] [--ock-bg-primary-hover:#1a7aff] [--ock-bg-primary-active:#0066ff] [--ock-bg-primary-washed:rgba(56,152,255,0.1)] [--ock-bg-primary-disabled:rgba(56,152,255,0.5)] [--ock-bg-secondary:#222] [--ock-bg-secondary-hover:#333] [--ock-bg-secondary-active:#444] [--ock-bg-error:#ff4d4d] [--ock-bg-warning:#ffcc00] [--ock-bg-success:#00cc66] [--ock-bg-default-reverse:#fff] [--ock-icon-color-primary:#3898FF] [--ock-icon-color-foreground:#fff] [--ock-icon-color-foreground-muted:#999] [--ock-icon-color-inverse:#000] [--ock-icon-color-error:#ff4d4d] [--ock-icon-color-success:#00cc66] [--ock-icon-color-warning:#ffcc00] [--ock-border-line-primary:#3898FF] [--ock-border-line-default:#333] [--ock-border-line-heavy:#444] [--ock-border-line-inverse:#fff] [--ock-dropdown-width:300px]">
               <Wallet>
-                <ConnectWallet>
+                {/* Only show the wallet info when connected, don't show ConnectWallet button */}
+                <div className="flex items-center gap-2 cursor-pointer">
                   <p className="text-gray-200 mr-2">Welcome,</p>
                   <WalletAvatar className="h-6 w-6" />
                   <WalletName className="text-white text-sm" />
-                </ConnectWallet>
+                </div>
                 <WalletDropdown className="!absolute !left-0 !top-12 !z-50 !max-w-[calc(100vw-2rem)] !w-[300px]">
                   <Identity
                     className="px-4 pt-3 pb-2"
