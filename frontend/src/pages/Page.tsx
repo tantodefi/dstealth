@@ -17,23 +17,47 @@ export default function ExamplePage() {
 
   // Mark as mounted on client-side
   useEffect(() => {
+    console.log("📱 Page: Mounting...");
     setMounted(true);
 
-    // Add a safety timeout
+    // Add a safety timeout to ensure app always loads
     const timeoutId = setTimeout(() => {
+      console.log("⏰ Page: Force hiding loader after timeout");
       setShowLoader(false);
-    }, 5000); // Reduced to 5 seconds for better UX
+    }, 3000); // Reduced to 3 seconds for better UX
 
-    return () => clearTimeout(timeoutId);
+    return () => {
+      console.log("📱 Page: Unmounting...");
+      clearTimeout(timeoutId);
+    };
   }, []);
 
   // Update loader state based on initializing
   useEffect(() => {
-    setShowLoader(initializing);
+    console.log("🔄 Page: XMTP initializing state changed:", initializing);
+    
+    // Only show loader if XMTP is actively initializing
+    // If not initializing, hide loader immediately
+    if (!initializing) {
+      setShowLoader(false);
+    }
   }, [initializing]);
+
+  // Debug logging for client state
+  useEffect(() => {
+    console.log("🌐 Page: XMTP client state:", !!client);
+  }, [client]);
+
+  console.log("🎯 Page: Render state:", { 
+    mounted, 
+    showLoader, 
+    initializing, 
+    hasClient: !!client 
+  });
 
   // Show loader while not mounted
   if (!mounted) {
+    console.log("⏳ Page: Not mounted - showing loader");
     return (
       <SafeAreaContainer>
         <div className="flex flex-col w-full max-w-md mx-auto h-screen bg-black">
@@ -52,7 +76,12 @@ export default function ExamplePage() {
         />
 
         {showLoader ? (
-          <FullPageLoader />
+          <>
+            <FullPageLoader />
+            <div className="text-white text-xs text-center mt-2">
+              Loading... (XMTP: {initializing ? 'initializing' : 'ready'})
+            </div>
+          </>
         ) : (
           <div className="flex flex-col gap-4 px-4 py-4 h-full overflow-auto">
             {!client ? (
