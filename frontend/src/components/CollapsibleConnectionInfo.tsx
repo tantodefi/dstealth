@@ -17,6 +17,40 @@ export function CollapsibleConnectionInfo({
   const [isActuallyConnected, setIsActuallyConnected] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [connectionDetails, setConnectionDetails] = useState<any>({});
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
+
+  // Check backend connection status
+  const checkBackendStatus = async () => {
+    try {
+      setBackendStatus('checking');
+      const response = await fetch('/api/proxy/get-group-id?inboxId=test', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      // If we get any response (even 404 for test inboxId), backend is running
+      if (response.status === 404 || response.status === 200 || response.status === 500) {
+        setBackendStatus('connected');
+      } else {
+        setBackendStatus('disconnected');
+      }
+    } catch (error) {
+      console.error('Backend check failed:', error);
+      setBackendStatus('disconnected');
+    }
+  };
+
+  // Check backend status on mount and periodically
+  useEffect(() => {
+    checkBackendStatus();
+    
+    // Check every 30 seconds
+    const interval = setInterval(checkBackendStatus, 30000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   // Determine actual connection status and gather details
   useEffect(() => {
@@ -55,6 +89,24 @@ export function CollapsibleConnectionInfo({
     }
   };
 
+  const getBackendStatusColor = () => {
+    switch (backendStatus) {
+      case 'connected': return 'text-green-400';
+      case 'disconnected': return 'text-red-400';
+      case 'checking': return 'text-yellow-400';
+      default: return 'text-gray-400';
+    }
+  };
+
+  const getBackendStatusText = () => {
+    switch (backendStatus) {
+      case 'connected': return '✓ Connected';
+      case 'disconnected': return '✗ Disconnected';
+      case 'checking': return '⏳ Checking...';
+      default: return '? Unknown';
+    }
+  };
+
   return (
     <div className="relative">
       {/* Connection Status Indicator - Clickable */}
@@ -82,12 +134,29 @@ export function CollapsibleConnectionInfo({
           <h3 className="text-white font-medium mb-3">Connection Details</h3>
           
           <div className="space-y-2 text-sm">
-            {/* Connection Status */}
+            {/* Frontend Connection Status */}
             <div className="flex justify-between items-center">
-              <span className="text-gray-400">Status:</span>
+              <span className="text-gray-400">Frontend:</span>
               <span className={`${isActuallyConnected ? "text-green-400" : "text-red-400"}`}>
                 {isActuallyConnected ? "✓ Connected" : "✗ Disconnected"}
               </span>
+            </div>
+
+            {/* Backend Connection Status */}
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400">Backend:</span>
+              <div className="flex items-center gap-2">
+                <span className={getBackendStatusColor()}>
+                  {getBackendStatusText()}
+                </span>
+                <button
+                  onClick={checkBackendStatus}
+                  className="text-xs text-blue-400 hover:text-blue-300"
+                  title="Refresh backend status"
+                >
+                  ↻
+                </button>
+              </div>
             </div>
 
             {/* Wallet Connection */}
@@ -163,6 +232,15 @@ export function CollapsibleConnectionInfo({
             </div>
           </div>
 
+          {/* Backend Error Notice */}
+          {backendStatus === 'disconnected' && (
+            <div className="mt-3 p-2 bg-red-500/10 border border-red-500/20 rounded">
+              <p className="text-red-400 text-xs">
+                ⚠️ Backend service is not available. Group chat features may not work.
+              </p>
+            </div>
+          )}
+
           {/* Close button */}
           <button
             onClick={() => setIsExpanded(false)}
@@ -204,4 +282,4 @@ export function ConnectionStatus({ onConnectionChange }: ConnectionStatusProps) 
       title={isActuallyConnected ? "Connected" : "Not connected"}
     />
   );
-} 
+}

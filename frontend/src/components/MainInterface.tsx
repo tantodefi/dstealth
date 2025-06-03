@@ -92,29 +92,41 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
             <div className="p-6 bg-gray-800 rounded-lg text-center">
               <h2 className="text-xl font-bold text-white mb-4">Welcome to XMTP Mini App</h2>
               <p className="text-gray-400 mb-4">
-                Select an option from the navigation bar to get started
+                Select an option from the navigation bar or click below to get started
               </p>
               <div className="grid grid-cols-2 gap-4 text-sm">
-                <div className="p-3 bg-gray-700 rounded-lg">
-                  <Search className="h-6 w-6 text-blue-400 mx-auto mb-2" />
-                  <p className="text-white font-medium">Search</p>
-                  <p className="text-gray-400 text-xs">Find .fkey.id users</p>
-                </div>
-                <div className="p-3 bg-gray-700 rounded-lg">
-                  <Bot className="h-6 w-6 text-green-400 mx-auto mb-2" />
-                  <p className="text-white font-medium">Bot</p>
-                  <p className="text-gray-400 text-xs">Chat with AI bot</p>
-                </div>
-                <div className="p-3 bg-gray-700 rounded-lg">
-                  <MessageCircle className="h-6 w-6 text-purple-400 mx-auto mb-2" />
-                  <p className="text-white font-medium">Chat</p>
-                  <p className="text-gray-400 text-xs">Group & dev chat</p>
-                </div>
-                <div className="p-3 bg-gray-700 rounded-lg">
-                  <List className="h-6 w-6 text-yellow-400 mx-auto mb-2" />
-                  <p className="text-white font-medium">Receipts</p>
-                  <p className="text-gray-400 text-xs">ZK payment proofs</p>
-                </div>
+                <button
+                  onClick={() => setCurrentView("search")}
+                  className="p-3 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors cursor-pointer group"
+                >
+                  <Search className="h-6 w-6 text-blue-400 mx-auto mb-2 group-hover:text-blue-300 transition-colors" />
+                  <p className="text-white font-medium group-hover:text-blue-100">Search</p>
+                  <p className="text-gray-400 text-xs group-hover:text-gray-300">Find .fkey.id users</p>
+                </button>
+                <button
+                  onClick={() => setCurrentView("bot")}
+                  className="p-3 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors cursor-pointer group"
+                >
+                  <Bot className="h-6 w-6 text-green-400 mx-auto mb-2 group-hover:text-green-300 transition-colors" />
+                  <p className="text-white font-medium group-hover:text-green-100">Bot</p>
+                  <p className="text-gray-400 text-xs group-hover:text-gray-300">Chat with AI bot</p>
+                </button>
+                <button
+                  onClick={() => setCurrentView("chat")}
+                  className="p-3 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors cursor-pointer group"
+                >
+                  <MessageCircle className="h-6 w-6 text-purple-400 mx-auto mb-2 group-hover:text-purple-300 transition-colors" />
+                  <p className="text-white font-medium group-hover:text-purple-100">Chat</p>
+                  <p className="text-gray-400 text-xs group-hover:text-gray-300">Group & dev chat</p>
+                </button>
+                <button
+                  onClick={() => setCurrentView("receipts")}
+                  className="p-3 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors cursor-pointer group"
+                >
+                  <List className="h-6 w-6 text-yellow-400 mx-auto mb-2 group-hover:text-yellow-300 transition-colors" />
+                  <p className="text-white font-medium group-hover:text-yellow-100">Receipts</p>
+                  <p className="text-gray-400 text-xs group-hover:text-gray-300">ZK payment proofs</p>
+                </button>
               </div>
             </div>
           </div>

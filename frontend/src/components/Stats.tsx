@@ -6,7 +6,7 @@ import { useAccount } from 'wagmi';
 interface AppStats {
   invitesSent: number;
   stealthPaymentsSent: number;
-  endpoints: number;
+  endpoints: number; // Keep for backward compatibility but won't display
 }
 
 interface Proxy402ActivityStats {
@@ -103,6 +103,12 @@ export function Stats() {
     };
   }, [address, isConnected]);
 
+  // Calculate totals
+  const hasProxy402Data = isConnected && address && (proxy402Stats || proxy402EndpointsCount > 0);
+  const totalPaymentLinks = proxy402EndpointsCount;
+  const totalPurchases = (proxy402Stats?.totalPurchases || 0);
+  const totalRevenue = (proxy402Stats?.totalRevenue || 0);
+
   return (
     <div className="w-full max-w-md mx-auto">
       <button
@@ -115,10 +121,10 @@ export function Stats() {
 
       {isOpen && (
         <div className="mt-2 p-4 bg-gray-900 rounded-md space-y-4">
-          {/* General Activity Stats */}
+          {/* Main Activity Stats */}
           <div>
-            <h4 className="text-sm font-medium text-gray-300 mb-2">General Activity</h4>
-            <div className="grid grid-cols-3 gap-3">
+            <h4 className="text-sm font-medium text-gray-300 mb-3">Activity Overview</h4>
+            <div className="grid grid-cols-2 gap-3">
               <div className="text-center">
                 <div className="text-xl font-bold text-blue-500">{stats.invitesSent}</div>
                 <div className="text-xs text-gray-400">Invites Sent</div>
@@ -128,32 +134,24 @@ export function Stats() {
                 <div className="text-xs text-gray-400">Stealth Payments</div>
               </div>
               <div className="text-center">
-                <div className="text-xl font-bold text-[#ff6b4a]">{stats.endpoints}</div>
-                <div className="text-xs text-gray-400">Endpoints</div>
+                <div className="text-xl font-bold text-purple-500">{totalPaymentLinks}</div>
+                <div className="text-xs text-gray-400">Payment Links</div>
+              </div>
+              <div className="text-center">
+                <div className="text-xl font-bold text-yellow-500">{totalPurchases}</div>
+                <div className="text-xs text-gray-400">Total Purchases</div>
               </div>
             </div>
           </div>
 
-          {/* Proxy402 Activity Stats */}
-          {isConnected && address && (proxy402Stats || proxy402EndpointsCount > 0) && (
+          {/* Revenue Summary */}
+          {hasProxy402Data && totalRevenue > 0 && (
             <div className="border-t border-gray-700 pt-4">
-              <h4 className="text-sm font-medium text-gray-300 mb-2">Proxy402 Activity</h4>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="text-center">
-                  <div className="text-xl font-bold text-purple-500">{proxy402EndpointsCount}</div>
-                  <div className="text-xs text-gray-400">Payment Links</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-xl font-bold text-yellow-500">{proxy402Stats?.totalPurchases || 0}</div>
-                  <div className="text-xs text-gray-400">Total Purchases</div>
-                </div>
+              <h4 className="text-sm font-medium text-gray-300 mb-2">Revenue Summary</h4>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-green-400">${totalRevenue.toFixed(2)}</div>
+                <div className="text-xs text-gray-400">Total Earnings</div>
               </div>
-              {proxy402Stats && proxy402Stats.totalRevenue > 0 && (
-                <div className="mt-3 text-center">
-                  <div className="text-lg font-bold text-green-400">${proxy402Stats.totalRevenue.toFixed(2)}</div>
-                  <div className="text-xs text-gray-400">Total Revenue</div>
-                </div>
-              )}
               {proxy402Stats?.lastUpdated && (
                 <div className="mt-2 text-center">
                   <div className="text-xs text-gray-500">
@@ -164,11 +162,11 @@ export function Stats() {
             </div>
           )}
 
-          {/* Show message when wallet not connected but Proxy402 stats would be available */}
+          {/* Connect wallet message */}
           {!isConnected && (
             <div className="border-t border-gray-700 pt-4 text-center">
               <div className="text-xs text-gray-500">
-                Connect wallet to see Proxy402 activity
+                Connect wallet to see payment link activity
               </div>
             </div>
           )}

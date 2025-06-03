@@ -177,6 +177,7 @@ export function FkeySearch() {
   const [zkVerification, setZkVerification] = useState<{fkey?: VerificationResult, convos?: VerificationResult}>({});
   const [showZkModal, setShowZkModal] = useState(false);
   const [selectedProofType, setSelectedProofType] = useState<'fkey' | 'convos'>('fkey');
+  const [zkFetchingMessage, setZkFetchingMessage] = useState("ZK Fetching user accounts...");
 
   // Convos data
   const [convosData, setConvosData] = useState<ConvosProfile | null>(null);
@@ -197,11 +198,17 @@ export function FkeySearch() {
     setProfile(null);
     setConvosData(null);
     
-    // Start ZK fetching immediately
+    // Start ZK fetching immediately with progressive messaging
     setZkFetching(true);
     setZkSuccess(false);
     setZkProofs({});
     setZkVerification({});
+    setZkFetchingMessage("ZK Fetching user accounts...");
+    
+    // Set up progressive messaging
+    const messageTimer = setTimeout(() => {
+      setZkFetchingMessage("Generating proof...");
+    }, 5000); // Change message after 5 seconds
     
     try {
       // Fetch profile and convos data from backend (which includes real ZK proofs)
@@ -271,13 +278,15 @@ export function FkeySearch() {
         console.log('⚠️ No ZK proofs received from backend - this means Reclaim zkFetch failed');
       }
 
-      // Simulate ZK verification process (2 seconds)
+      // Clear the message timer and complete the zkfetching process
+      clearTimeout(messageTimer);
       setTimeout(() => {
         setZkFetching(false);
         setZkSuccess(true);
       }, 2000);
 
     } catch (error) {
+      clearTimeout(messageTimer);
       setError("Search failed");
       setZkFetching(false);
     } finally {
@@ -382,7 +391,7 @@ export function FkeySearch() {
       {zkFetching && (
         <div className="flex items-center gap-2 text-blue-400 bg-gray-800 p-3 rounded-lg">
           <SpinnerIcon className="animate-spin h-5 w-5" />
-          <span>ZK Fetching user accounts...</span>
+          <span>{zkFetchingMessage}</span>
         </div>
       )}
 
