@@ -14,9 +14,9 @@ export const env = createEnv({
     NEXT_PUBLIC_APP_ENV: z
       .enum(["development", "production"])
       .optional()
-      .default("development"),
+      .default("production"),
     NEXT_PUBLIC_ENCRYPTION_KEY: z.string().min(1).optional(),
-    NEXT_PUBLIC_XMTP_ENV: z.enum(["production", "local", "dev"]).default("dev"),
+    NEXT_PUBLIC_XMTP_ENV: z.enum(["production", "local", "dev"]).default("production"),
     // Farcaster Manifest
     NEXT_PUBLIC_FARCASTER_HEADER: z.string().min(1).optional(),
     NEXT_PUBLIC_FARCASTER_PAYLOAD: z.string().min(1).optional(),

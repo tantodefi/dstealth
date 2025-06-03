@@ -15,6 +15,7 @@ import {
 } from "react";
 import { useAccount, useSignMessage } from "wagmi";
 import { createEOASigner, createSCWSigner, createEphemeralSigner } from "@/lib/xmtp";
+import { env as envConfig } from "@/lib/env";
 
 // Type definitions
 export type InitializeClientOptions = {
@@ -233,7 +234,7 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
 
         // Create XMTP client
         const newClient = await Client.create(xmtpSigner, {
-          env: env || "production",
+          env: env || envConfig.NEXT_PUBLIC_XMTP_ENV,
           dbEncryptionKey,
           loggingLevel,
         });
@@ -242,9 +243,20 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
         setClient(newClient);
         return newClient;
       } catch (e) {
-        logger.error("Error initializing XMTP client:", e);
-        setError(e as Error);
-        throw e;
+        const error = e as Error;
+        logger.error("Error initializing XMTP client:", error);
+        
+        // Check for specific error types that shouldn't trigger retries
+        if (error.message?.includes('rejected due to a change in selected network') ||
+            error.message?.includes('User rejected') ||
+            error.message?.includes('User denied')) {
+          logger.log("User-related error, not setting permanent error state");
+          // Don't set permanent error state for user rejections
+        } else {
+          setError(error);
+        }
+        
+        throw error;
       } finally {
         setInitializing(false);
       }
@@ -282,8 +294,14 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
     const hasConnected = localStorage.getItem(STORAGE_KEYS.HAS_CONNECTED);
     const ephemeralKey = localStorage.getItem(STORAGE_KEYS.EPHEMERAL_KEY);
     
+    // Check if there's already an error to avoid retry loops
+    if (error) {
+      logger.log("Error detected, not restoring connection:", error);
+      return;
+    }
+    
     // Only attempt to initialize if wallet is connected or we have an ephemeral key
-    if ((address || ephemeralKey) && !client && !initializing && !error) {
+    if ((address || ephemeralKey) && !client && !initializing) {
       logger.log("Attempting to initialize XMTP", { 
         connectionType,
         hasConnected,
@@ -293,12 +311,13 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
       
       initialize({ 
         connectionType: ephemeralKey ? "ephemeral" : (connectionType || "eoa"),
-        env: "production"
+        env: envConfig.NEXT_PUBLIC_XMTP_ENV
       }).catch((e) => {
-        logger.error("Error initializing XMTP:", e);
+        logger.log("Error detected, not initializing XMTP:", e);
+        // Don't retry immediately - let user manually retry
       });
     }
-  }, [client, initializing, error, address, initialize]);
+  }, [client, initializing, address, initialize, error]);
 
   // Handle wallet disconnection
   useEffect(() => {

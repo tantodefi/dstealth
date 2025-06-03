@@ -1,70 +1,67 @@
 'use client';
 
-// Initialize navigator.wallets IMMEDIATELY at module level with comprehensive checks
-if (typeof window !== 'undefined') {
-  // Multiple initialization attempts to ensure compatibility
-  const initializeWallets = () => {
-    try {
-      // Ensure navigator exists
-      if (!window.navigator) {
-        (window as any).navigator = {};
-      }
-      
-      // Check if wallets already exists and is properly set
-      if (!window.navigator.wallets || !Array.isArray(window.navigator.wallets)) {
-        // Method 1: Try Object.defineProperty
-        try {
-          Object.defineProperty(window.navigator, 'wallets', {
-            value: [],
-            writable: true,
-            configurable: true,
-            enumerable: false
-          });
-        } catch (defineError) {
-          // Method 2: Direct assignment
-          try {
-            (window.navigator as any).wallets = [];
-          } catch (assignError) {
-            // Method 3: Force delete and reassign
-            try {
-              delete (window.navigator as any).wallets;
-              (window.navigator as any).wallets = [];
-            } catch (forceError) {
-              console.warn('Failed to initialize navigator.wallets:', forceError);
-            }
-          }
-        }
-      }
-      
-      // Final verification
-      if (Array.isArray(window.navigator.wallets)) {
-        console.log('✅ navigator.wallets successfully initialized');
-        return true;
-      } else {
-        console.warn('⚠️ navigator.wallets is not an array after initialization');
-        return false;
-      }
-    } catch (error) {
-      console.error('❌ Error initializing navigator.wallets:', error);
-      return false;
-    }
-  };
+// More robust navigator.wallets initialization
+let walletInitialized = false;
 
-  // Try multiple times if needed
-  let attempts = 0;
-  const maxAttempts = 3;
-  
-  while (attempts < maxAttempts && !Array.isArray(window.navigator?.wallets)) {
-    attempts++;
-    console.log(`Attempting to initialize navigator.wallets (attempt ${attempts}/${maxAttempts})`);
-    if (initializeWallets()) {
-      break;
-    }
-    // Brief delay between attempts
-    if (attempts < maxAttempts) {
-      setTimeout(() => {}, 10);
-    }
+function initializeNavigatorWallets() {
+  if (typeof window === 'undefined' || walletInitialized) {
+    return walletInitialized;
   }
+
+  try {
+    // Ensure navigator exists
+    if (!window.navigator) {
+      (window as any).navigator = {};
+    }
+
+    // Multiple initialization strategies
+    const strategies = [
+      // Strategy 1: Object.defineProperty with getter
+      () => {
+        Object.defineProperty(window.navigator, 'wallets', {
+          get: () => [],
+          configurable: true,
+          enumerable: false
+        });
+      },
+      // Strategy 2: Direct assignment
+      () => {
+        (window.navigator as any).wallets = [];
+      },
+      // Strategy 3: Force override
+      () => {
+        delete (window.navigator as any).wallets;
+        (window.navigator as any).wallets = [];
+      }
+    ];
+
+    for (const strategy of strategies) {
+      try {
+        strategy();
+        if (Array.isArray(window.navigator.wallets)) {
+          walletInitialized = true;
+          console.log('✅ navigator.wallets initialized successfully');
+          return true;
+        }
+      } catch (e) {
+        // Continue to next strategy
+      }
+    }
+
+    console.warn('⚠️ All navigator.wallets initialization strategies failed');
+    return false;
+  } catch (error) {
+    console.error('❌ Fatal error initializing navigator.wallets:', error);
+    return false;
+  }
+}
+
+// Initialize immediately at module level
+if (typeof window !== 'undefined') {
+  // Wait for next tick to ensure DOM is ready
+  setTimeout(() => {
+    initializeNavigatorWallets();
+  }, 0);
 }
 
 import { DaimoPayProvider, getDefaultConfig } from '@daimo/pay';
@@ -123,8 +120,22 @@ function DaimoPayErrorBoundary({ children }: { children: ReactNode }) {
       }
     };
 
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      if (event.reason?.message?.includes('navigator.wallets') ||
+          event.reason?.message?.includes('DaimoPay')) {
+        console.warn('DaimoPay promise rejection caught:', event.reason);
+        setHasError(true);
+        event.preventDefault(); // Prevent unhandled rejection error
+      }
+    };
+
     window.addEventListener('error', handleError);
-    return () => window.removeEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    
+    return () => {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
   }, []);
 
   if (hasError) {
@@ -138,17 +149,30 @@ function DaimoPayErrorBoundary({ children }: { children: ReactNode }) {
 // Safe DaimoPay Provider wrapper
 function SafeDaimoPayProvider({ children }: { children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     setMounted(true);
+    
+    // Give extra time for navigator.wallets to be ready
+    const checkReady = () => {
+      if (initializeNavigatorWallets()) {
+        setReady(true);
+      } else {
+        // Retry after a short delay
+        setTimeout(checkReady, 100);
+      }
+    };
+    
+    setTimeout(checkReady, 50);
   }, []);
 
-  if (!mounted) {
+  if (!mounted || !ready) {
     return <>{children}</>;
   }
 
   try {
-    // Final check before rendering DaimoPayProvider
+    // Final verification before rendering DaimoPayProvider
     if (typeof window !== 'undefined' && 
         window.navigator && 
         Array.isArray(window.navigator.wallets)) {
@@ -160,7 +184,7 @@ function SafeDaimoPayProvider({ children }: { children: ReactNode }) {
         </DaimoPayErrorBoundary>
       );
     } else {
-      console.warn('navigator.wallets not properly initialized, rendering without DaimoPayProvider');
+      console.warn('navigator.wallets verification failed, rendering without DaimoPayProvider');
       return <>{children}</>;
     }
   } catch (error) {
