@@ -1,3 +1,6 @@
+"use client";
+
+import { DaimoPayProvider, getDefaultConfig } from "@daimo/pay";
 import { farcasterFrame as miniAppConnector } from "@farcaster/frame-wagmi-connector";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -27,7 +30,11 @@ export const clearWagmiCookies = () => {
   });
 };
 
+// Create wagmi config with Daimo Pay defaults
 export const wagmiConfig = createConfig({
+  ...getDefaultConfig({
+    appName: "XMTP Mini App",
+  }),
   chains: [mainnet, base],
   transports: {
     [base.id]: http(),
@@ -51,7 +58,9 @@ export default function MiniAppWalletProvider({
   const initialState = cookieToInitialState(wagmiConfig as Config, cookies);
   return (
     <WagmiProvider config={wagmiConfig} initialState={initialState}>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <DaimoPayProvider>{children}</DaimoPayProvider>
+      </QueryClientProvider>
     </WagmiProvider>
   );
 }

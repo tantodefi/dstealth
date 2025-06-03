@@ -1,275 +1,207 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { privateKeyToAccount } from "viem/accounts";
-import { useAccount } from "wagmi";
 import { useXMTP } from "@/context/xmtp-context";
-import { env } from "@/lib/env";
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { useAccount } from "wagmi";
+import { ChevronDown, ChevronUp, Copy } from "lucide-react";
 
-// Constants for local storage keys
-const XMTP_CONNECTION_TYPE_KEY = "xmtp:connectionType";
-const XMTP_EPHEMERAL_KEY = "xmtp:ephemeralKey";
-
-interface ConnectionInfoProps {
+interface ConnectionStatusProps {
   onConnectionChange?: (isConnected: boolean) => void;
 }
 
 export function CollapsibleConnectionInfo({
   onConnectionChange,
-}: ConnectionInfoProps) {
-  const { client, conversations, isInitializing } = useXMTP();
-  const { isConnected: isWalletConnected, address, connector } = useAccount();
-  const [isOpen, setIsOpen] = useState(false);
-  const [connectionType, setConnectionType] = useState<string>("");
-  const [ephemeralAddress, setEphemeralAddress] = useState<string>("");
+}: ConnectionStatusProps) {
+  const { client } = useXMTP();
+  const { address, isConnected: isWalletConnected } = useAccount();
   const [isActuallyConnected, setIsActuallyConnected] = useState(false);
-  const [backendStatus, setBackendStatus] = useState<string>("");
-  const [walletInfo, setWalletInfo] = useState<{
-    provider?: string;
-    isInApp?: boolean;
-    isCoinbase?: boolean;
-    isSCW?: boolean;
-    injectors?: string[];
-  }>({});
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [connectionDetails, setConnectionDetails] = useState<any>({});
 
-  // Detect wallet environment and injectors
+  // Determine actual connection status and gather details
   useEffect(() => {
-    const checkBackendHealth = async () => {
-      try {
-        const response = await fetch("/api/proxy/health");
-        const data = await response.json();
-        console.log("Backend health:", data);
-        setBackendStatus(data.status === "ok" ? "online" : "offline");
-      } catch (error) {
-        console.error("Error checking backend health:", error);
-        setBackendStatus("offline");
-      }
-    };
+    const connectionType = localStorage.getItem("xmtp:connectionType");
+    const ephemeralKey = localStorage.getItem("xmtp:ephemeralKey");
+    const environment = localStorage.getItem("xmtp:environment") || "dev";
+    
+    const newConnectionState = Boolean(
+      isWalletConnected || 
+      (client && connectionType === "Ephemeral Wallet" && ephemeralKey)
+    );
 
-    const detectEnvironment = () => {
-      const info: {
-        provider?: string;
-        isInApp?: boolean;
-        isCoinbase?: boolean;
-        isSCW?: boolean;
-        injectors?: string[];
-      } = {
-        injectors: [],
-      };
+    setIsActuallyConnected(newConnectionState);
 
-      if (typeof window !== "undefined") {
-        if (window.ethereum?.isCoinbaseWallet) {
-          info.isCoinbase = true;
-          info.provider = "Coinbase Wallet";
-        }
-
-        const userAgent = navigator.userAgent || navigator.vendor || (window as any).opera;
-        if (/android/i.test(userAgent) || /iPad|iPhone|iPod/.test(userAgent)) {
-          info.isInApp = true;
-        }
-
-        if (window.ethereum) {
-          info.injectors?.push("ethereum");
-
-          if (window.ethereum.isMetaMask) info.injectors?.push("MetaMask");
-          if (window.ethereum.isCoinbaseWallet) info.injectors?.push("CoinbaseWallet");
-          if (window.ethereum.isWalletConnect) info.injectors?.push("WalletConnect");
-
-          try {
-            if (window.ethereum._addresses && window.ethereum._addresses.length > 0) {
-              info.isSCW = true;
-            }
-            if (window.ethereum.isCoinbaseWallet && window.ethereum.isSmartContractWallet) {
-              info.isSCW = true;
-            }
-          } catch (error) {
-            console.log("Error checking for SCW:", error);
-          }
-        }
-
-        for (const key in window) {
-          if (key.includes("ethereum") || key.includes("wallet") || key.includes("solana") || key.includes("phantom")) {
-            info.injectors?.push(key);
-          }
-        }
-      }
-
-      if (connector) {
-        info.provider = connector.name || info.provider;
-      }
-
-      setWalletInfo(info);
-    };
-
-    detectEnvironment();
-    checkBackendHealth();
-  }, [connector]);
-
-  // Get ephemeral wallet address if available
-  useEffect(() => {
-    try {
-      const savedConnectionType = localStorage.getItem(XMTP_CONNECTION_TYPE_KEY);
-      const savedPrivateKey = localStorage.getItem(XMTP_EPHEMERAL_KEY);
-
-      if (savedConnectionType === "Ephemeral Wallet" && savedPrivateKey) {
-        const formattedKey = savedPrivateKey.startsWith("0x")
-          ? (savedPrivateKey as `0x${string}`)
-          : (`0x${savedPrivateKey}` as `0x${string}`);
-
-        const account = privateKeyToAccount(formattedKey);
-        setEphemeralAddress(account.address);
-      }
-    } catch (error) {
-      console.error("Error accessing localStorage:", error);
-    }
-  }, []);
-
-  // Detect connection type
-  useEffect(() => {
-    if (client) {
-      try {
-        const savedConnectionType = localStorage.getItem(XMTP_CONNECTION_TYPE_KEY);
-        if (savedConnectionType) {
-          setConnectionType(savedConnectionType);
-        } else if (address) {
-          setConnectionType("EOA Wallet");
-        } else {
-          setConnectionType("Ephemeral Wallet");
-        }
-      } catch (error) {
-        console.error("Error reading connection type:", error);
-      }
-    }
-  }, [client, address]);
-
-  // Determine actual connection status
-  useEffect(() => {
-    const newConnectionState =
-      isWalletConnected || (client && connectionType === "Ephemeral Wallet" && ephemeralAddress !== "");
-
-    setIsActuallyConnected(newConnectionState || false);
+    // Update connection details
+    setConnectionDetails({
+      walletConnected: isWalletConnected,
+      walletAddress: address,
+      connectionType: connectionType || "Not set",
+      xmtpClient: !!client,
+      clientInboxId: client?.inboxId,
+      environment: environment,
+      ephemeralKey: ephemeralKey ? "Present" : "Not set"
+    });
 
     if (typeof onConnectionChange === "function") {
-      onConnectionChange(newConnectionState || false);
+      onConnectionChange(newConnectionState);
     }
-  }, [isWalletConnected, client, connectionType, ephemeralAddress, onConnectionChange]);
+  }, [isWalletConnected, client, address, onConnectionChange]);
 
-  useEffect(() => {
-    if (isWalletConnected && address && !client && !isInitializing) {
-      // Trigger XMTP connection when wallet is connected
-      window.dispatchEvent(new CustomEvent('connectXmtp', { 
-        detail: { connectionType: 'EOA' }
-      }));
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (error) {
+      console.error('Failed to copy:', error);
     }
-  }, [isWalletConnected, address, client, isInitializing]);
-
-  useEffect(() => {
-    onConnectionChange?.(!!client);
-  }, [client, onConnectionChange]);
+  };
 
   return (
-    <div className="w-full max-w-md mx-auto">
+    <div className="relative">
+      {/* Connection Status Indicator - Clickable */}
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between px-4 py-2 bg-gray-900 hover:bg-gray-800 rounded-md text-sm text-gray-300"
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-800 transition-colors"
+        title="Click to view connection details"
       >
-        <span className="flex items-center gap-2">
-          Connection Status
-          <div className={`h-2 w-2 rounded-full ${isActuallyConnected ? "bg-green-500" : "bg-red-500"}`} />
+        <div 
+          className={`h-3 w-3 rounded-full ${isActuallyConnected ? "bg-green-500" : "bg-red-500"}`} 
+        />
+        <span className="text-white text-sm font-medium">
+          {isActuallyConnected ? "Connected" : "Disconnected"}
         </span>
-        {isOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        {isExpanded ? (
+          <ChevronUp className="h-4 w-4 text-gray-400" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-gray-400" />
+        )}
       </button>
 
-      {isOpen && (
-        <div className="mt-2 p-4 bg-gray-900 rounded-md">
-          <div className="text-gray-400 text-xs mt-1">
-            <p>
-              <span className="text-gray-500">Connected:</span>{" "}
-              <span className={isActuallyConnected ? "text-green-500" : "text-red-500"}>
-                {isActuallyConnected ? "Yes" : "No"}
+      {/* Dropdown Details */}
+      {isExpanded && (
+        <div className="absolute top-full left-0 mt-1 w-80 bg-gray-900 border border-gray-700 rounded-lg shadow-lg z-50 p-4">
+          <h3 className="text-white font-medium mb-3">Connection Details</h3>
+          
+          <div className="space-y-2 text-sm">
+            {/* Connection Status */}
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400">Status:</span>
+              <span className={`${isActuallyConnected ? "text-green-400" : "text-red-400"}`}>
+                {isActuallyConnected ? "✓ Connected" : "✗ Disconnected"}
               </span>
-            </p>
-            <p>
-              <span className="text-gray-500">Type:</span>{" "}
-              {connectionType || "Not connected"}
-            </p>
-            <p>
-              <span className="text-gray-500">Address:</span>{" "}
-              {connectionType === "Ephemeral Wallet" && ephemeralAddress
-                ? ephemeralAddress
-                : address || "None"}
-            </p>
-            {connector && (
-              <p>
-                <span className="text-gray-500">Connector:</span>{" "}
-                {connector.name} ({connector.type})
-              </p>
-            )}
-            {walletInfo.provider && (
-              <p>
-                <span className="text-gray-500">Provider:</span>{" "}
-                {walletInfo.provider}
-              </p>
-            )}
-            {walletInfo.isCoinbase && (
-              <p>
-                <span className="text-gray-500">Coinbase Wallet:</span> Yes
-              </p>
-            )}
-            {walletInfo.isSCW !== undefined && (
-              <p>
-                <span className="text-gray-500">Smart Contract Wallet:</span>{" "}
-                {walletInfo.isSCW ? "Yes" : "No"}
-              </p>
-            )}
-            {walletInfo.isInApp && (
-              <p>
-                <span className="text-gray-500">In-App Browser:</span> Yes
-              </p>
-            )}
-            {walletInfo.injectors && walletInfo.injectors.length > 0 && (
-              <p>
-                <span className="text-gray-500">Injectors:</span>{" "}
-                {walletInfo.injectors.slice(0, 3).join(", ")}
-                {walletInfo.injectors.length > 3 ? "..." : ""}
-              </p>
-            )}
-            {client && (
-              <>
-                <p>
-                  <span className="text-gray-500">XMTP:</span>{" "}
-                  <span className="text-green-500">Connected</span>
-                </p>
-                <p>
-                  <span className="text-gray-500">Environment:</span>{" "}
-                  {env.NEXT_PUBLIC_XMTP_ENV}
-                </p>
-                <p>
-                  <span className="text-gray-500">Inbox ID:</span>{" "}
-                  {client.inboxId
-                    ? `${client.inboxId.slice(0, 6)}...${client.inboxId.slice(-6)}`
-                    : "None"}
-                </p>
-                <p>
-                  <span className="text-gray-500">Conversations:</span>{" "}
-                  {conversations.length}
-                </p>
-              </>
-            )}
-            <p>
-              <span className="text-gray-500">Backend:</span>{" "}
-              <span className={`
-                ${backendStatus === "online" ? "text-green-500" : ""}
-                ${backendStatus === "offline" ? "text-red-500" : ""}
-                ${!backendStatus ? "text-yellow-500" : ""}
-              `}>
-                {backendStatus === "online" ? "Online" : backendStatus === "offline" ? "Offline" : "Checking..."}
+            </div>
+
+            {/* Wallet Connection */}
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400">Wallet:</span>
+              <span className={`${connectionDetails.walletConnected ? "text-green-400" : "text-red-400"}`}>
+                {connectionDetails.walletConnected ? "✓ Connected" : "✗ Not connected"}
               </span>
-            </p>
+            </div>
+
+            {/* Wallet Address */}
+            {connectionDetails.walletAddress && (
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400">Address:</span>
+                <div className="flex items-center gap-1">
+                  <span className="text-white text-xs font-mono">
+                    {connectionDetails.walletAddress.slice(0, 6)}...{connectionDetails.walletAddress.slice(-4)}
+                  </span>
+                  <button
+                    onClick={() => copyToClipboard(connectionDetails.walletAddress)}
+                    className="text-gray-400 hover:text-blue-400"
+                  >
+                    <Copy className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* XMTP Client */}
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400">XMTP Client:</span>
+              <span className={`${connectionDetails.xmtpClient ? "text-green-400" : "text-red-400"}`}>
+                {connectionDetails.xmtpClient ? "✓ Active" : "✗ Not active"}
+              </span>
+            </div>
+
+            {/* Inbox ID */}
+            {connectionDetails.clientInboxId && (
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400">Inbox ID:</span>
+                <div className="flex items-center gap-1">
+                  <span className="text-white text-xs font-mono">
+                    {connectionDetails.clientInboxId.slice(0, 8)}...
+                  </span>
+                  <button
+                    onClick={() => copyToClipboard(connectionDetails.clientInboxId)}
+                    className="text-gray-400 hover:text-blue-400"
+                  >
+                    <Copy className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Connection Type */}
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400">Type:</span>
+              <span className="text-white">{connectionDetails.connectionType}</span>
+            </div>
+
+            {/* Environment */}
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400">Environment:</span>
+              <span className="text-white">{connectionDetails.environment}</span>
+            </div>
+
+            {/* Ephemeral Key Status */}
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400">Ephemeral Key:</span>
+              <span className={`${connectionDetails.ephemeralKey === "Present" ? "text-green-400" : "text-gray-400"}`}>
+                {connectionDetails.ephemeralKey}
+              </span>
+            </div>
           </div>
+
+          {/* Close button */}
+          <button
+            onClick={() => setIsExpanded(false)}
+            className="mt-3 w-full text-center text-gray-400 hover:text-white text-xs"
+          >
+            Close
+          </button>
         </div>
       )}
     </div>
+  );
+}
+
+// Keep the simple version for backward compatibility
+export function ConnectionStatus({ onConnectionChange }: ConnectionStatusProps) {
+  const { client } = useXMTP();
+  const { isConnected: isWalletConnected } = useAccount();
+  const [isActuallyConnected, setIsActuallyConnected] = useState(false);
+
+  useEffect(() => {
+    const connectionType = localStorage.getItem("xmtp:connectionType");
+    const ephemeralKey = localStorage.getItem("xmtp:ephemeralKey");
+    
+    const newConnectionState = Boolean(
+      isWalletConnected || 
+      (client && connectionType === "Ephemeral Wallet" && ephemeralKey)
+    );
+
+    setIsActuallyConnected(newConnectionState);
+
+    if (typeof onConnectionChange === "function") {
+      onConnectionChange(newConnectionState);
+    }
+  }, [isWalletConnected, client, onConnectionChange]);
+
+  return (
+    <div 
+      className={`h-3 w-3 rounded-full ${isActuallyConnected ? "bg-green-500" : "bg-red-500"}`} 
+      title={isActuallyConnected ? "Connected" : "Not connected"}
+    />
   );
 } 

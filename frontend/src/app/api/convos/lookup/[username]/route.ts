@@ -3,13 +3,14 @@ import { env } from '@/lib/env';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { username: string } }
+  context: { params: Promise<{ username: string }> }
 ) {
-  const username = await params.username;
+  const { username } = await context.params;
   
   try {
     console.log(`Proxying convos lookup request for username: ${username}`);
-    const response = await fetch(`${env.BACKEND_URL}/api/convos/lookup/${username}`, {
+    const backendUrl = env.BACKEND_URL || env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
+    const response = await fetch(`${backendUrl}/api/convos/lookup/${username}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { ReclaimClient } from '@reclaimprotocol/zk-fetch';
-import { paymentMiddleware } from 'x402-express';
 import { env } from '../config/env';
 
 const router = Router();
@@ -227,111 +226,5 @@ function findAddressInJson(obj: any): string | null {
   
   return null;
 }
-
-// Claim a .fkey.id
-router.post('/claim', async (req, res) => {
-  try {
-    const { fkeyId, owner } = req.body;
-    
-    if (!fkeyId) {
-      return res.status(400).json({ error: 'Missing fkeyId' });
-    }
-
-    // In a real implementation, we would:
-    // 1. Verify ownership of the fkeyId
-    // 2. Create the public route
-    // 3. Set up the proxy server
-    // For now, we'll just store it in memory
-    
-    claimedFkeys.set(fkeyId, owner || 'anonymous');
-
-    res.json({
-      success: true,
-      fkeyId,
-      message: 'Successfully claimed .fkey.id'
-    });
-  } catch (error) {
-    console.error('Error claiming .fkey.id:', error);
-    res.status(500).json({ error: 'Failed to claim .fkey.id' });
-  }
-});
-
-// Get .fkey.id data (requires payment)
-router.get('/:fkeyId/data', paymentMiddleware(
-  env.X402_PRIVATE_KEY as `0x${string}`,
-  {
-    "/:fkeyId/data": {
-      price: "$0.01",
-      network: "base-sepolia",
-      config: {
-        description: "Access to .fkey.id data"
-      }
-    }
-  },
-  { url: "https://x402.org/facilitator" }
-), async (req, res) => {
-  try {
-    const { fkeyId } = req.params;
-    
-    // In a real implementation, we would:
-    // 1. Verify the payment was successful
-    // 2. Fetch data from the actual endpoint
-    // 3. Return the data with proof
-    
-    // For now, return dummy data
-    res.json({
-      success: true,
-      data: {
-        fkeyId,
-        owner: claimedFkeys.get(fkeyId) || 'unknown',
-        timestamp: new Date().toISOString()
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching .fkey.id data:', error);
-    res.status(500).json({ error: 'Failed to fetch data' });
-  }
-});
-
-// Public endpoint for .fkey.id (requires payment)
-router.get('/public/:fkeyId', paymentMiddleware(
-  env.X402_PRIVATE_KEY as `0x${string}`,
-  {
-    "/public/:fkeyId": {
-      price: "$0.01",
-      network: "base-sepolia",
-      config: {
-        description: "Access to public .fkey.id endpoint"
-      }
-    }
-  },
-  { url: "https://x402.org/facilitator" }
-), async (req, res) => {
-  try {
-    const { fkeyId } = req.params;
-    
-    // Check if fkey.id exists
-    if (!claimedFkeys.has(fkeyId)) {
-      return res.status(404).json({
-        success: false,
-        error: 'fkey.id not found'
-      });
-    }
-
-    // Return public data
-    res.json({
-      success: true,
-      data: {
-        fkeyId,
-        owner: claimedFkeys.get(fkeyId),
-        isRegistered: true,
-        timestamp: new Date().toISOString()
-      }
-    });
-  } catch (error) {
-    console.error('Error accessing public endpoint:', error);
-    res.status(500).json({ error: 'Failed to access endpoint' });
-  }
-});
 
 export default router; 

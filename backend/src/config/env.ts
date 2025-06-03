@@ -19,15 +19,6 @@ const envSchema = z.object({
   }),
   RECLAIM_APP_SECRET: z.string({
     required_error: "RECLAIM_APP_SECRET is required. Get it from https://docs.reclaimprotocol.org/"
-  }),
-
-  // x402 Configuration
-  X402_PRIVATE_KEY: z.string({
-    required_error: "X402_PRIVATE_KEY is required for payment verification. Generate with 'yarn gen:keys'"
-  }),
-  X402_CHAIN_ID: z.string().default('1'), // Default to Ethereum mainnet
-  X402_RPC_URL: z.string().url({
-    message: "Valid RPC URL required for x402 payment verification"
   })
 });
 
