@@ -1,6 +1,6 @@
 import express from 'express';
 import { ReclaimClient } from '@reclaimprotocol/zk-fetch';
-import { env } from '../config/env';
+import { env } from '../config/env.js';
 
 const router = express.Router();
 

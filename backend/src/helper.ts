@@ -53,13 +53,42 @@ export const createSigner = (key: string): Signer => {
 };
 
 export const getDbPath = (env: string) => {
-  const volumePath = process.env.RAILWAY_VOLUME_MOUNT_PATH ?? ".data/xmtp";
-  // Create database directory if it doesn't exist
-  if (!fs.existsSync(volumePath)) {
-    fs.mkdirSync(volumePath, { recursive: true });
+  // Use /tmp for Vercel deployments, .data/xmtp for local development
+  const isVercel = process.env.VERCEL || process.env.NODE_ENV === 'production';
+  
+  let volumePath: string;
+  if (isVercel) {
+    // Vercel allows writes to /tmp
+    volumePath = "/tmp/xmtp";
+  } else {
+    // Local development - use Railway path or local .data
+    volumePath = process.env.RAILWAY_VOLUME_MOUNT_PATH ?? ".data/xmtp";
   }
+  
+  // Create database directory if it doesn't exist (and we have permission)
+  try {
+    if (!fs.existsSync(volumePath)) {
+      fs.mkdirSync(volumePath, { recursive: true });
+    }
+  } catch (error) {
+    console.warn(`Could not create directory ${volumePath}:`, error);
+    // Fallback to /tmp if directory creation fails
+    if (!isVercel) {
+      volumePath = "/tmp/xmtp";
+      try {
+        if (!fs.existsSync(volumePath)) {
+          fs.mkdirSync(volumePath, { recursive: true });
+        }
+      } catch (fallbackError) {
+        console.error("Failed to create fallback directory:", fallbackError);
+        // Last resort - use current directory
+        volumePath = "./";
+      }
+    }
+  }
+  
   const dbPath = `${volumePath}/${env}-xmtp.db3`;
-
+  console.log(`Using database path: ${dbPath}`);
   return dbPath;
 };
 

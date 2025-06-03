@@ -16,10 +16,10 @@ import {
   getDbPath,
   getEncryptionKeyFromHex,
   validateEnvironment,
-} from "./helper";
-import { env } from './config/env';
-import fkeyRoutes from './routes/fkey';
-import convosRoutes from './routes/convos';
+} from "./helper.js";
+import { env } from './config/env.js';
+import fkeyRoutes from './routes/fkey.js';
+import convosRoutes from './routes/convos.js';
 
 const { WALLET_KEY, API_SECRET_KEY, ENCRYPTION_KEY, XMTP_ENV, PORT } =
   validateEnvironment([
