@@ -87,9 +87,9 @@ export const getDbPath = (env: string) => {
       // Fallback to /tmp if directory creation fails
       volumePath = "/tmp/xmtp";
       try {
-        if (!fs.existsSync(volumePath)) {
-          fs.mkdirSync(volumePath, { recursive: true });
-        }
+  if (!fs.existsSync(volumePath)) {
+    fs.mkdirSync(volumePath, { recursive: true });
+  }
       } catch (fallbackError) {
         console.error("Failed to create fallback directory:", fallbackError);
         // Last resort - use current directory

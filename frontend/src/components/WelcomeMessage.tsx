@@ -8,6 +8,8 @@ import {
   WalletDropdownDisconnect,
   WalletDropdownLink,
   WalletDropdownFundLink,
+  WalletDropdownBasename,
+  ConnectWallet,
 } from '@coinbase/onchainkit/wallet';
 import {
   Address,
@@ -15,6 +17,7 @@ import {
   Name as WalletName,
   Identity,
   EthBalance,
+  Badge,
 } from '@coinbase/onchainkit/identity';
 import { useEffect, useState } from 'react';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -46,7 +49,7 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
       setConnectionType(savedConnectionType);
     }
 
-    if (savedPrivateKey && savedConnectionType === "Ephemeral Wallet") {
+    if (savedPrivateKey && savedConnectionType === "ephemeral") {
       const formattedKey = savedPrivateKey.startsWith("0x")
         ? (savedPrivateKey as `0x${string}`)
         : (`0x${savedPrivateKey}` as `0x${string}`);
@@ -64,51 +67,126 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
     }
   }, [connector]);
 
+  // Handle wallet disconnection events
+  useEffect(() => {
+    if (!isConnected && !address && connectionType !== "ephemeral") {
+      // Regular wallet was disconnected, also disconnect XMTP
+      disconnectXMTP();
+    }
+  }, [isConnected, address, connectionType, disconnectXMTP]);
+
   // Show wallet UI for any connected wallet or ephemeral connection
-  const showWalletUI = (isConnected && address) || (connectionType === "Ephemeral Wallet" && ephemeralAddress);
+  const showWalletUI = (isConnected && address) || (connectionType === "ephemeral" && ephemeralAddress);
+  const displayAddress = address || ephemeralAddress;
+
+  const handleEphemeralDisconnect = () => {
+    // For ephemeral wallets, manually clear everything
+    disconnectXMTP();
+    localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
+    localStorage.removeItem(XMTP_EPHEMERAL_KEY);
+    setConnectionType("");
+    setEphemeralAddress("");
+  };
 
   return (
     <div className="bg-gray-800 py-2 px-4">
       <div className="max-w-7xl mx-auto flex items-center justify-between relative">
         <div className="flex items-center gap-2">
-          {showWalletUI && (
-            <div className="relative [--ock-font-family:inherit] [--ock-border-radius:6px] [--ock-text-primary:#fff] [--ock-text-inverse:#000] [--ock-text-foreground:#fff] [--ock-text-foreground-muted:#999] [--ock-text-error:#ff4d4d] [--ock-text-success:#00cc66] [--ock-text-warning:#ffcc00] [--ock-text-disabled:#666] [--ock-bg-default:#111] [--ock-bg-default-hover:#222] [--ock-bg-default-active:#333] [--ock-bg-alternate:#222] [--ock-bg-alternate-hover:#333] [--ock-bg-alternate-active:#444] [--ock-bg-inverse:#fff] [--ock-bg-inverse-hover:#f5f5f5] [--ock-bg-inverse-active:#e5e5e5] [--ock-bg-primary:#3898FF] [--ock-bg-primary-hover:#1a7aff] [--ock-bg-primary-active:#0066ff] [--ock-bg-primary-washed:rgba(56,152,255,0.1)] [--ock-bg-primary-disabled:rgba(56,152,255,0.5)] [--ock-bg-secondary:#222] [--ock-bg-secondary-hover:#333] [--ock-bg-secondary-active:#444] [--ock-bg-error:#ff4d4d] [--ock-bg-warning:#ffcc00] [--ock-bg-success:#00cc66] [--ock-bg-default-reverse:#fff] [--ock-icon-color-primary:#3898FF] [--ock-icon-color-foreground:#fff] [--ock-icon-color-foreground-muted:#999] [--ock-icon-color-inverse:#000] [--ock-icon-color-error:#ff4d4d] [--ock-icon-color-success:#00cc66] [--ock-icon-color-warning:#ffcc00] [--ock-border-line-primary:#3898FF] [--ock-border-line-default:#333] [--ock-border-line-heavy:#444] [--ock-border-line-inverse:#fff] [--ock-dropdown-width:300px]">
+          {showWalletUI ? (
+            <div className="relative z-[10000]">
               <Wallet>
-                {/* Only show the wallet info when connected, don't show ConnectWallet button */}
-                <div className="flex items-center gap-2 cursor-pointer">
-                  <p className="text-gray-200 mr-2">Welcome,</p>
-                  <WalletAvatar className="h-6 w-6" />
-                  <WalletName className="text-white text-sm" />
-                </div>
-                <WalletDropdown className="!absolute !left-0 !top-12 !z-50 !max-w-[calc(100vw-2rem)] !w-[300px]">
+                <ConnectWallet className="!bg-transparent !border-none !p-0 !shadow-none hover:!bg-transparent !text-white">
+                  <div className="flex items-center gap-2 cursor-pointer text-white">
+                    <span className="text-gray-200 mr-2">Welcome,</span>
+                    {displayAddress ? (
+                      <>
+                        <WalletAvatar 
+                          address={displayAddress as `0x${string}`}
+                          className="h-6 w-6" 
+                        />
+                        <WalletName 
+                          address={displayAddress as `0x${string}`}
+                          className="text-white text-sm" 
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <div className="h-6 w-6 rounded-full bg-gray-600 flex items-center justify-center">
+                          <span className="text-xs">?</span>
+                        </div>
+                        <span className="text-white text-sm">User</span>
+                      </>
+                    )}
+                  </div>
+                </ConnectWallet>
+                <WalletDropdown className="!z-[10001] !absolute !top-full !left-0 !mt-2">
                   <Identity
                     className="px-4 pt-3 pb-2"
                     hasCopyAddressOnClick
+                    address={displayAddress as `0x${string}`}
                   >
-                    <WalletAvatar />
-                    <WalletName />
+                    <WalletAvatar address={displayAddress as `0x${string}`} />
+                    <WalletName address={displayAddress as `0x${string}`}>
+                      <Badge />
+                    </WalletName>
                     <Address />
-                    {connectionType !== "Ephemeral Wallet" && <EthBalance />}
+                    {connectionType !== "ephemeral" && <EthBalance />}
                   </Identity>
-                  {connectionType !== "Ephemeral Wallet" && (
+                  
+                  {/* Basename section for non-ephemeral wallets */}
+                  {connectionType !== "ephemeral" && (
+                    <WalletDropdownBasename />
+                  )}
+                  
+                  {connectionType !== "ephemeral" && (
                     <>
                       <WalletDropdownLink
                         icon="wallet"
                         href="https://keys.coinbase.com"
+                        target="_blank"
+                        rel="noopener noreferrer"
                       >
                         Manage Wallet
                       </WalletDropdownLink>
                       <WalletDropdownFundLink />
+                      <WalletDropdownLink
+                        icon="creditCard"
+                        href={`https://etherscan.io/address/${displayAddress}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        View on Etherscan
+                      </WalletDropdownLink>
+                      <WalletDropdownLink
+                        icon="coinbaseWallet"
+                        href="https://www.coinbase.com/web3"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Learn Web3
+                      </WalletDropdownLink>
                     </>
                   )}
-                  <WalletDropdownDisconnect 
-                    className="text-red-500 hover:bg-red-500/10"
-                  />
+                  
+                  {/* For ephemeral wallets, show custom disconnect button */}
+                  {connectionType === "ephemeral" ? (
+                    <button
+                      onClick={handleEphemeralDisconnect}
+                      className="w-full px-4 py-2 text-left text-red-500 hover:bg-red-500/10 flex items-center gap-2"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 0C3.6 0 0 3.6 0 8s3.6 8 8 8 8-3.6 8-8-3.6-8-8-8zM8 14c-3.3 0-6-2.7-6-6s2.7-6 6-6 6 2.7 6 6-2.7 6-6 6z"/>
+                        <path d="M11 5L5 11M5 5l6 6"/>
+                      </svg>
+                      Disconnect
+                    </button>
+                  ) : (
+                    <WalletDropdownDisconnect className="text-red-500 hover:bg-red-500/10" />
+                  )}
                 </WalletDropdown>
               </Wallet>
             </div>
-          )}
-          {!showWalletUI && (
+          ) : (
             <p className="text-gray-200">
               Welcome, <span className="font-medium text-white">anon</span>
             </p>

@@ -150,47 +150,64 @@ function DaimoPayErrorBoundary({ children }: { children: ReactNode }) {
 function SafeDaimoPayProvider({ children }: { children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
   const [ready, setReady] = useState(false);
+  const [daimoPayEnabled, setDaimoPayEnabled] = useState(false);
 
   useEffect(() => {
     setMounted(true);
     
-    // Give extra time for navigator.wallets to be ready
+    // Give time for navigator.wallets to be ready, but don't block the app
     const checkReady = () => {
       if (initializeNavigatorWallets()) {
+        setDaimoPayEnabled(true);
         setReady(true);
       } else {
-        // Retry after a short delay
-        setTimeout(checkReady, 100);
+        // Even if DaimoPay fails, we should still render the app
+        setDaimoPayEnabled(false);
+        setReady(true);
       }
     };
     
+    // Give it a chance to initialize, but don't wait too long
+    const timeoutId = setTimeout(() => {
+      if (!ready) {
+        console.warn('DaimoPay initialization timeout - proceeding without it');
+        setDaimoPayEnabled(false);
+        setReady(true);
+      }
+    }, 500); // Maximum wait time of 500ms
+    
     setTimeout(checkReady, 50);
-  }, []);
+    
+    return () => clearTimeout(timeoutId);
+  }, [ready]);
 
   if (!mounted || !ready) {
     return <>{children}</>;
   }
 
-  try {
-    // Final verification before rendering DaimoPayProvider
-    if (typeof window !== 'undefined' && 
-        window.navigator && 
-        Array.isArray(window.navigator.wallets)) {
-      return (
-        <DaimoPayErrorBoundary>
-          <DaimoPayProvider>
-            {children}
-          </DaimoPayProvider>
-        </DaimoPayErrorBoundary>
-      );
-    } else {
-      console.warn('navigator.wallets verification failed, rendering without DaimoPayProvider');
-      return <>{children}</>;
+  // Always render children, with or without DaimoPayProvider
+  if (daimoPayEnabled) {
+    try {
+      // Verify one more time before rendering DaimoPayProvider
+      if (typeof window !== 'undefined' && 
+          window.navigator && 
+          Array.isArray(window.navigator.wallets)) {
+        return (
+          <DaimoPayErrorBoundary>
+            <DaimoPayProvider>
+              {children}
+            </DaimoPayProvider>
+          </DaimoPayErrorBoundary>
+        );
+      }
+    } catch (error) {
+      console.error('Error in SafeDaimoPayProvider:', error);
     }
-  } catch (error) {
-    console.error('Error in SafeDaimoPayProvider:', error);
-    return <>{children}</>;
   }
+  
+  // Fallback: render without DaimoPayProvider
+  console.log('Rendering without DaimoPayProvider');
+  return <>{children}</>;
 }
 
 // Create a client-only wrapper to prevent hydration issues
