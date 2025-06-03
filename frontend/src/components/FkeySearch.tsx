@@ -121,7 +121,7 @@ const verifyReclaimProof = async (proof: any): Promise<VerificationResult> => {
       };
     }
 
-  } catch (error) {
+      } catch (error) {
     console.error('❌ Reclaim verification error:', error);
     return {
       isValid: false,
@@ -297,7 +297,7 @@ export function FkeySearch() {
         const isProofVerified = await verifyReclaimProof(proofs.fkey);
         verifications.fkey = isProofVerified;
         console.log(`fkey verification completed. Result: ${isProofVerified.isValid ? 'SUCCESS' : 'FAILED'}`);
-      } catch (error) {
+    } catch (error) {
         console.error('❌ fkey verification error:', error);
         verifications.fkey = {
           isValid: false,
@@ -357,9 +357,9 @@ export function FkeySearch() {
     <div className="space-y-4">
       {/* Search Form */}
       <div className="flex gap-4">
-        <input
-          type="text"
-          value={username}
+                <input
+                  type="text"
+                  value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder="Enter fkey.id username"
           className="flex-1 bg-gray-800 border border-gray-700 text-white rounded-lg p-2.5"
@@ -369,14 +369,14 @@ export function FkeySearch() {
             }
           }}
         />
-        <button
+              <button
           onClick={handleSearch}
           disabled={!username || loading}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
         >
           {loading ? "Searching..." : "Search"}
-        </button>
-      </div>
+              </button>
+            </div>
 
       {/* Simple Loading/Status Messages */}
       {zkFetching && (
@@ -398,11 +398,11 @@ export function FkeySearch() {
         </div>
       )}
 
-      {error && (
+            {error && (
         <div className="text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
-          {error}
-        </div>
-      )}
+                {error}
+              </div>
+            )}
 
       {profile && (
         <div className="space-y-4 p-4 bg-gray-800 rounded-lg">
@@ -426,28 +426,28 @@ export function FkeySearch() {
                 <p className="text-gray-300 text-sm mt-1">Address: {profile.address}</p>
                 <CopyButton text={profile.address} title="Copy wallet address" />
               </div>
-            </div>
-          </div>
+                </div>
+                </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
               Amount (USDC)
-            </label>
+                  </label>
             <div className="relative">
-              <input
-                type="number"
-                value={amount}
+                  <input
+                    type="number"
+                    value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
+                    placeholder="0.00"
                 className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg p-2.5 pr-20"
                 min="0"
-                step="any"
+                    step="any"
               />
               <div className="absolute inset-y-0 right-0 flex items-center pr-3">
                 <div className="flex items-center gap-2 text-gray-400">
                   <div className="w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs font-bold">
                     $
-                  </div>
+            </div>
                   <span className="text-sm font-medium">USDC</span>
                 </div>
               </div>
