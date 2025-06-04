@@ -8,6 +8,7 @@ import {
   useContext,
   useEffect,
   useState,
+  useRef,
 } from "react";
 
 interface FrameContextValue {
@@ -16,6 +17,7 @@ interface FrameContextValue {
   isSDKLoaded: boolean;
   error: string | null;
   actions: typeof sdk.actions | null;
+  isLoading: boolean;
 }
 
 const FrameProviderContext = createContext<FrameContextValue | undefined>(
@@ -32,38 +34,88 @@ export function FrameProvider({ children }: FrameProviderProps) {
   const [isSDKLoaded, setIsSDKLoaded] = useState(false);
   const [isInMiniApp, setIsInMiniApp] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const initializationAttempted = useRef(false);
 
   useEffect(() => {
-    const load = async () => {
+    const initializeFarcasterSDK = async () => {
+      // Prevent multiple initialization attempts
+      if (initializationAttempted.current) {
+        return;
+      }
+      initializationAttempted.current = true;
+
       try {
-        const context = await sdk.context;
-        if (context) {
-          setContext(context as FrameContext);
-          setActions(sdk.actions);
-          setIsInMiniApp(await sdk.isInMiniApp());
+        setIsLoading(true);
+        console.log("🎯 Farcaster: Starting SDK initialization...");
+
+        // Check if we're in a mini app first
+        const isMiniApp = await sdk.isInMiniApp();
+        setIsInMiniApp(isMiniApp);
+        console.log("🎯 Farcaster: Mini app check result:", isMiniApp);
+
+        if (isMiniApp) {
+          // Get the context
+          const frameContext = await sdk.context;
+          console.log("🎯 Farcaster: Context received:", frameContext);
+          
+          if (frameContext) {
+            setContext(frameContext as FrameContext);
+            setActions(sdk.actions);
+            
+            // Mark SDK as ready
+            await sdk.actions.ready({
+              disableNativeGestures: true,
+            });
+            
+            console.log("🎯 Farcaster: SDK ready with context:", {
+              user: frameContext.user,
+              location: frameContext.location,
+            });
+          } else {
+            console.log("🎯 Farcaster: No context received despite being in mini app");
+          }
         } else {
-          setError("Failed to load Farcaster context");
+          console.log("🎯 Farcaster: Not in mini app environment");
         }
-        await sdk.actions.ready({
-          disableNativeGestures: true,
-        });
+
+        setIsSDKLoaded(true);
+        setError(null);
       } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to initialize Farcaster Frames SDK",
-        );
-        console.error("Farcaster Frames SDK initialization error:", err);
+        const errorMessage = err instanceof Error 
+          ? err.message 
+          : "Failed to initialize Farcaster Frames SDK";
+        
+        console.error("🎯 Farcaster: SDK initialization error:", err);
+        setError(errorMessage);
+        
+        // Set defaults for failed initialization
+        setIsInMiniApp(false);
+        setContext(null);
+        setActions(null);
+      } finally {
+        setIsLoading(false);
+        setIsSDKLoaded(true); // Mark as loaded even if failed, to prevent retry loops
       }
     };
 
-    if (sdk && !isSDKLoaded) {
-      load().then(() => {
-        setIsSDKLoaded(true);
-        console.log("Farcaster Frames SDK loaded");
-      });
+    // Only initialize if we haven't attempted yet
+    if (!initializationAttempted.current) {
+      initializeFarcasterSDK();
     }
-  }, [isSDKLoaded]);
+  }, []);
+
+  // Debug logging
+  useEffect(() => {
+    console.log("🎯 Farcaster: State update:", {
+      isSDKLoaded,
+      isInMiniApp,
+      hasContext: !!context,
+      hasActions: !!actions,
+      error,
+      isLoading,
+    });
+  }, [isSDKLoaded, isInMiniApp, context, actions, error, isLoading]);
 
   const value = {
     context,
@@ -71,6 +123,7 @@ export function FrameProvider({ children }: FrameProviderProps) {
     isSDKLoaded,
     isInMiniApp,
     error,
+    isLoading,
   };
 
   return (

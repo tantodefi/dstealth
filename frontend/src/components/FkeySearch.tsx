@@ -10,6 +10,7 @@ import { XIcon } from "./icons/XIcon";
 import { Copy } from 'lucide-react';
 import ConvosChat from "./ConvosChat";
 import { verifyProof } from '@reclaimprotocol/js-sdk';
+import type { PaymentMethod } from "./SendButton";
 
 interface StealthPayment {
   timestamp: number;
@@ -163,27 +164,30 @@ export function FkeySearch() {
   // Wallet connection state
   const { isConnected } = useWallet();
   
-  // Form state
+  // Local storage for stealth payments
+  const [stealthPayments, setStealthPayments] = useLocalStorage<StealthPayment[]>('stealthPayments', []);
+  
+  // Search and UI state
   const [username, setUsername] = useState("");
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<FkeyProfile | null>(null);
-  const [error, setError] = useState("");
-  
-  // ZK fetching state
-  const [zkFetching, setZkFetching] = useState(false);
-  const [zkSuccess, setZkSuccess] = useState(false);
+  const [convosData, setConvosData] = useState<ConvosProfile | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [zkProofs, setZkProofs] = useState<{fkey?: any, convos?: any}>({});
   const [zkVerification, setZkVerification] = useState<{fkey?: VerificationResult, convos?: VerificationResult}>({});
+  const [zkSuccess, setZkSuccess] = useState(false);
   const [showZkModal, setShowZkModal] = useState(false);
   const [selectedProofType, setSelectedProofType] = useState<'fkey' | 'convos'>('fkey');
+  
+  // Payment method state
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("daimo");
+
+  // ZK fetching state
+  const [zkFetching, setZkFetching] = useState(false);
   const [zkFetchingMessage, setZkFetchingMessage] = useState("ZK Fetching user accounts...");
 
-  // Convos data
-  const [convosData, setConvosData] = useState<ConvosProfile | null>(null);
-
-  // Local storage for stealth payments and stats
-  const [stealthPayments, setStealthPayments] = useLocalStorage<StealthPayment[]>("stealth-payments", []);
+  // Local storage for activity stats
   const [activityStats, setActivityStats] = useLocalStorage<ActivityStats>("activity-stats", {
     totalPayments: 0,
     totalZkProofs: 0,
@@ -468,6 +472,8 @@ export function FkeySearch() {
             amount={amount}
             onPaymentCompleted={handlePaymentCompleted}
             disabled={!isConnected || !amount || parseFloat(amount) <= 0}
+            paymentMethod={paymentMethod}
+            onPaymentMethodChange={setPaymentMethod}
           />
         </div>
       )}

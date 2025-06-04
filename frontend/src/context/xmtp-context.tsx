@@ -12,10 +12,12 @@ import {
   useEffect,
   useMemo,
   useState,
+  useRef,
 } from "react";
 import { useAccount, useSignMessage } from "wagmi";
 import { createEOASigner, createSCWSigner, createEphemeralSigner } from "@/lib/xmtp";
 import { env as envConfig } from "@/lib/env";
+import { useFrame } from "./frame-context";
 
 // Type definitions
 export type InitializeClientOptions = {
@@ -24,6 +26,7 @@ export type InitializeClientOptions = {
   loggingLevel?: ClientOptions["loggingLevel"];
   signer?: Signer;
   connectionType?: string;
+  skipAutoInit?: boolean;
 };
 
 export type XMTPContextValue = {
@@ -37,6 +40,9 @@ export type XMTPContextValue = {
   setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>;
   groupConversation: Group | null;
   setGroupConversation: React.Dispatch<React.SetStateAction<Group | null>>;
+  connectionType: string;
+  isInFarcasterContext: boolean;
+  farcasterUser: any;
 };
 
 export type XMTPProviderProps = React.PropsWithChildren & {
@@ -50,6 +56,8 @@ const STORAGE_KEYS = {
   ENCRYPTION_KEY: "xmtp:encryptionKey",
   FORCE_SCW: "xmtp:forceSCW",
   EPHEMERAL_KEY: "xmtp:ephemeralKey",
+  FARCASTER_AUTO_CONNECTED: "xmtp:farcasterAutoConnected",
+  INITIALIZATION_BLOCKED: "xmtp:initBlocked",
 };
 
 // Create context with default values
@@ -63,6 +71,9 @@ export const XMTPContext = createContext<XMTPContextValue>({
   setConversations: () => {},
   groupConversation: null,
   setGroupConversation: () => {},
+  connectionType: "",
+  isInFarcasterContext: false,
+  farcasterUser: null,
 });
 
 // Logger utility for consistent logging
@@ -90,6 +101,14 @@ const storage = {
       return false;
     }
   },
+  get: (key: string) => {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      logger.error(`Failed to get localStorage item: ${key}`, e);
+      return null;
+    }
+  },
   remove: (key: string) => {
     try {
       localStorage.removeItem(key);
@@ -101,10 +120,13 @@ const storage = {
   },
   clearXMTPItems: () => {
     try {
-      storage.remove(STORAGE_KEYS.HAS_CONNECTED);
+      // Clear all xmtp: prefixed items
+      const keysToRemove = Object.values(STORAGE_KEYS);
+      keysToRemove.forEach(key => storage.remove(key));
 
+      // Clear any other xmtp. prefixed items
       let removedCount = 0;
-      for (let i = 0; i < localStorage.length; i++) {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
         const key = localStorage.key(i);
         if (key && key.startsWith("xmtp.")) {
           localStorage.removeItem(key);
@@ -120,12 +142,17 @@ const storage = {
   },
 };
 
+// Global initialization state to prevent multiple simultaneous attempts
+let globalInitializing = false;
+let globalInitializationPromise: Promise<Client | undefined> | null = null;
+
 export const XMTPProvider: React.FC<XMTPProviderProps> = ({
   children,
   client: initialClient,
 }) => {
   const { address, connector } = useAccount();
   const { signMessageAsync } = useSignMessage();
+  const { context, isInMiniApp, isSDKLoaded } = useFrame();
   
   // State
   const [client, setClient] = useState<Client | undefined>(initialClient);
@@ -133,6 +160,17 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
   const [groupConversation, setGroupConversation] = useState<Group | null>(null);
   const [initializing, setInitializing] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [connectionType, setConnectionType] = useState<string>("");
+  const [farcasterUser, setFarcasterUser] = useState<any>(null);
+  
+  // Refs to prevent loops and track state
+  const initializationAttempted = useRef(false);
+  const mountedRef = useRef(true);
+  const lastAddressRef = useRef<string>("");
+  
+  // Derived state
+  const isInFarcasterContext = isInMiniApp && !!context;
+
   const [forceSCW, setForceSCW] = useState(() => {
     try {
       return localStorage.getItem(STORAGE_KEYS.FORCE_SCW) === "true";
@@ -141,11 +179,42 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
     }
   });
 
+  // Load connection type from storage on mount
+  useEffect(() => {
+    const savedConnectionType = storage.get(STORAGE_KEYS.CONNECTION_TYPE);
+    if (savedConnectionType) {
+      setConnectionType(savedConnectionType);
+    }
+  }, []);
+
+  // Handle Farcaster context changes
+  useEffect(() => {
+    if (isSDKLoaded && context) {
+      logger.log("Farcaster context detected", { context });
+      setFarcasterUser(context.user);
+      
+      // Mark that we've detected Farcaster context
+      storage.set(STORAGE_KEYS.FARCASTER_AUTO_CONNECTED, "true");
+    }
+  }, [context, isSDKLoaded]);
+
   // Debug logging on mount
   useEffect(() => {
-    logger.log("Provider mounted");
+    mountedRef.current = true;
+    logger.log("Provider mounted", {
+      hasInitialClient: !!initialClient,
+      isInFarcasterContext,
+      isSDKLoaded
+    });
     return () => {
+      mountedRef.current = false;
       logger.log("Provider unmounted");
+      
+      // Clean up global state on unmount
+      if (globalInitializing) {
+        globalInitializing = false;
+        globalInitializationPromise = null;
+      }
     };
   }, []);
 
@@ -164,14 +233,17 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
       env,
       loggingLevel,
       signer: providedSigner,
-      connectionType,
+      connectionType: requestedConnectionType,
+      skipAutoInit = false,
     }: InitializeClientOptions) => {
       logger.log("Initialize called with options", {
         hasDBEncryptionKey: !!dbEncryptionKey,
         env,
         loggingLevel,
         hasSigner: !!providedSigner,
-        connectionType,
+        connectionType: requestedConnectionType,
+        skipAutoInit,
+        globalInitializing,
       });
 
       // Don't initialize if client exists
@@ -180,88 +252,144 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
         return client;
       }
 
-      // Don't proceed if already initializing
-      if (initializing) {
-        logger.log("XMTP client initialization already in progress");
-        return undefined;
+      // Don't proceed if already initializing (global check)
+      if (globalInitializing && globalInitializationPromise) {
+        logger.log("Global initialization in progress, waiting for completion");
+        try {
+          return await globalInitializationPromise;
+        } catch (error) {
+          logger.error("Global initialization failed:", error);
+          return undefined;
+        }
       }
 
-      // Set initializing state
+      // Check for recent initialization block (to prevent rapid retries)
+      const initBlocked = storage.get(STORAGE_KEYS.INITIALIZATION_BLOCKED);
+      if (initBlocked) {
+        const blockedTime = parseInt(initBlocked);
+        const now = Date.now();
+        if (now - blockedTime < 5000) { // 5 second cooldown
+          logger.log("Initialization blocked due to recent failure, skipping");
+          return undefined;
+        } else {
+          storage.remove(STORAGE_KEYS.INITIALIZATION_BLOCKED);
+        }
+      }
+
+      // Set global initialization state
+      globalInitializing = true;
       setInitializing(true);
       setError(null);
+      initializationAttempted.current = true;
 
-      try {
-        let xmtpSigner = providedSigner;
-        const isEphemeral = connectionType === "ephemeral";
-        const isCoinbaseWallet = connector?.id === "coinbaseWalletSDK";
+      const initPromise = (async () => {
+        try {
+          let xmtpSigner = providedSigner;
+          const isEphemeral = requestedConnectionType === "ephemeral";
+          const isCoinbaseWallet = connector?.id === "coinbaseWalletSDK";
 
-        if (!xmtpSigner) {
-          if (!address && !isEphemeral) {
-            throw new Error("Please connect your wallet first");
+          if (!xmtpSigner) {
+            if (!address && !isEphemeral) {
+              throw new Error("Please connect your wallet first");
+            }
+
+            if (isEphemeral) {
+              logger.log("Creating ephemeral signer");
+              // Generate a random private key for ephemeral connection
+              const privateKeyBytes = new Uint8Array(32);
+              crypto.getRandomValues(privateKeyBytes);
+              const privateKey = Array.from(privateKeyBytes)
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('');
+              xmtpSigner = createEphemeralSigner(`0x${privateKey}` as `0x${string}`);
+              // Store the ephemeral key
+              storage.set(STORAGE_KEYS.EPHEMERAL_KEY, `0x${privateKey}`);
+            } else if (isCoinbaseWallet) {
+              logger.log("Using Coinbase Wallet signer");
+              xmtpSigner = createEOASigner(address as `0x${string}`, signMessageAsync);
+            } else if (forceSCW || connector?.id === "safe") {
+              logger.log("Using Smart Contract Wallet signer");
+              xmtpSigner = createSCWSigner(
+                address as `0x${string}`,
+                signMessageAsync,
+                BigInt(8453) // Base mainnet
+              );
+            } else {
+              logger.log("Using EOA signer");
+              xmtpSigner = createEOASigner(address as `0x${string}`, signMessageAsync);
+            }
           }
 
-          if (isEphemeral) {
-            logger.log("Creating ephemeral signer");
-            // Generate a random private key for ephemeral connection
-            const privateKeyBytes = new Uint8Array(32);
-            crypto.getRandomValues(privateKeyBytes);
-            const privateKey = Array.from(privateKeyBytes)
-              .map(b => b.toString(16).padStart(2, '0'))
-              .join('');
-            xmtpSigner = createEphemeralSigner(`0x${privateKey}` as `0x${string}`);
-            // Store the ephemeral key
-            localStorage.setItem(STORAGE_KEYS.EPHEMERAL_KEY, `0x${privateKey}`);
-          } else if (isCoinbaseWallet) {
-            logger.log("Using Coinbase Wallet signer");
-            xmtpSigner = createEOASigner(address as `0x${string}`, signMessageAsync);
-          } else if (forceSCW || connector?.id === "safe") {
-            logger.log("Using Smart Contract Wallet signer");
-            xmtpSigner = createSCWSigner(
-              address as `0x${string}`,
-              signMessageAsync,
-              BigInt(8453) // Base mainnet
-            );
+          // Store connection type
+          if (requestedConnectionType) {
+            setConnectionType(requestedConnectionType);
+            storage.set(STORAGE_KEYS.CONNECTION_TYPE, requestedConnectionType);
+          }
+
+          // Create XMTP client with proper error handling for database conflicts
+          logger.log("Creating XMTP client...");
+          const newClient = await Client.create(xmtpSigner, {
+            env: env || envConfig.NEXT_PUBLIC_XMTP_ENV,
+            dbEncryptionKey,
+            loggingLevel,
+          });
+
+          // Only set client if component is still mounted
+          if (mountedRef.current) {
+            logger.log("XMTP client created successfully");
+            setClient(newClient);
+            
+            // Mark as successfully connected
+            storage.set(STORAGE_KEYS.HAS_CONNECTED, 'true');
+            
+            // Update last connected address
+            if (address) {
+              lastAddressRef.current = address;
+            }
+            
+            return newClient;
           } else {
-            logger.log("Using EOA signer");
-            xmtpSigner = createEOASigner(address as `0x${string}`, signMessageAsync);
+            logger.log("Component unmounted during initialization, cleaning up client");
+            newClient.close();
+            return undefined;
+          }
+        } catch (e) {
+          const error = e as Error;
+          logger.error("Error initializing XMTP client:", error);
+          
+          // Handle database access conflicts
+          if (error.message?.includes('createSyncAccessHandle') || 
+              error.message?.includes('NoModificationAllowedError')) {
+            logger.log("Database access conflict detected, blocking retries temporarily");
+            storage.set(STORAGE_KEYS.INITIALIZATION_BLOCKED, Date.now().toString());
+          }
+          
+          // Check for specific error types that shouldn't trigger retries
+          if (error.message?.includes('rejected due to a change in selected network') ||
+              error.message?.includes('User rejected') ||
+              error.message?.includes('User denied')) {
+            logger.log("User-related error, not setting permanent error state");
+            // Don't set permanent error state for user rejections
+          } else {
+            if (mountedRef.current) {
+              setError(error);
+            }
+          }
+          
+          throw error;
+        } finally {
+          globalInitializing = false;
+          globalInitializationPromise = null;
+          if (mountedRef.current) {
+            setInitializing(false);
           }
         }
+      })();
 
-        // Store connection type
-        if (connectionType) {
-          localStorage.setItem(STORAGE_KEYS.CONNECTION_TYPE, connectionType);
-        }
-
-        // Create XMTP client
-        const newClient = await Client.create(xmtpSigner, {
-          env: env || envConfig.NEXT_PUBLIC_XMTP_ENV,
-          dbEncryptionKey,
-          loggingLevel,
-        });
-
-        logger.log("XMTP client created successfully");
-        setClient(newClient);
-        return newClient;
-      } catch (e) {
-        const error = e as Error;
-        logger.error("Error initializing XMTP client:", error);
-        
-        // Check for specific error types that shouldn't trigger retries
-        if (error.message?.includes('rejected due to a change in selected network') ||
-            error.message?.includes('User rejected') ||
-            error.message?.includes('User denied')) {
-          logger.log("User-related error, not setting permanent error state");
-          // Don't set permanent error state for user rejections
-        } else {
-          setError(error);
-        }
-        
-        throw error;
-      } finally {
-        setInitializing(false);
-      }
+      globalInitializationPromise = initPromise;
+      return initPromise;
     },
-    [address, connector?.id, client, initializing, signMessageAsync, forceSCW]
+    [address, connector?.id, client, signMessageAsync, forceSCW]
   );
 
   /**
@@ -283,57 +411,117 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
       // Clear XMTP storage
       const removedCount = storage.clearXMTPItems();
       logger.log(`Removed ${removedCount} XMTP-specific localStorage items`);
+      
+      // Reset state
+      setConnectionType("");
+      initializationAttempted.current = false;
+      lastAddressRef.current = "";
+      
+      // Clear global state
+      globalInitializing = false;
+      globalInitializationPromise = null;
     } else {
       logger.log("No client to disconnect");
     }
   }, [client]);
 
-  // Restore connection on mount if previously connected
+  // Restore connection on mount - improved logic with better loop prevention
   useEffect(() => {
-    const connectionType = localStorage.getItem(STORAGE_KEYS.CONNECTION_TYPE);
-    const hasConnected = localStorage.getItem(STORAGE_KEYS.HAS_CONNECTED);
-    const ephemeralKey = localStorage.getItem(STORAGE_KEYS.EPHEMERAL_KEY);
+    // Prevent multiple restoration attempts
+    if (initializationAttempted.current || !mountedRef.current) {
+      return;
+    }
+
+    const savedConnectionType = storage.get(STORAGE_KEYS.CONNECTION_TYPE);
+    const hasConnected = storage.get(STORAGE_KEYS.HAS_CONNECTED);
+    const ephemeralKey = storage.get(STORAGE_KEYS.EPHEMERAL_KEY);
+    const farcasterAutoConnected = storage.get(STORAGE_KEYS.FARCASTER_AUTO_CONNECTED);
     
-    // Check if there's already an error to avoid retry loops
-    if (error) {
-      logger.log("Error detected, not restoring connection:", error);
+    // Check if there's already an error or global initialization to avoid retry loops
+    if (error || globalInitializing) {
+      logger.log("Error detected or global initialization in progress, not restoring connection:", { error, globalInitializing });
       return;
     }
     
-    // Only attempt to initialize if wallet is connected or we have an ephemeral key
-    if ((address || ephemeralKey) && !client && !initializing) {
-      logger.log("Attempting to initialize XMTP", { 
-        connectionType,
-        hasConnected,
+    // Don't restore if client already exists
+    if (client) {
+      return;
+    }
+
+    // Track address changes to prevent unnecessary re-initialization
+    if (address && address === lastAddressRef.current && savedConnectionType && savedConnectionType !== "ephemeral") {
+      logger.log("Same address as last initialization, skipping restore");
+      return;
+    }
+
+    // Priority 1: Check for Farcaster context and auto-connect if not done yet
+    if (isInFarcasterContext && address && !farcasterAutoConnected && !savedConnectionType) {
+      logger.log("Farcaster context detected - auto-connecting with EOA wallet", {
         address,
+        context: !!context
+      });
+      
+      setConnectionType("EOA Wallet");
+      storage.set(STORAGE_KEYS.CONNECTION_TYPE, "EOA Wallet");
+      
+      // Auto-initialize with Farcaster wallet
+      initialize({ 
+        connectionType: "eoa",
+        env: envConfig.NEXT_PUBLIC_XMTP_ENV
+      }).catch((e) => {
+        logger.log("Error auto-connecting with Farcaster wallet:", e);
+      });
+      
+      return;
+    }
+    
+    // Priority 2: Restore ephemeral connection
+    if (ephemeralKey && savedConnectionType === "ephemeral" && !client && !globalInitializing) {
+      logger.log("Attempting to restore ephemeral connection", { 
+        savedConnectionType,
+        hasConnected,
         hasEphemeralKey: !!ephemeralKey
       });
       
+      setConnectionType("ephemeral");
+      
       initialize({ 
-        connectionType: ephemeralKey ? "ephemeral" : (connectionType || "eoa"),
+        connectionType: "ephemeral",
         env: envConfig.NEXT_PUBLIC_XMTP_ENV
       }).catch((e) => {
-        logger.log("Error detected, not initializing XMTP:", e);
-        // Don't retry immediately - let user manually retry
+        logger.log("Error restoring ephemeral connection:", e);
+        // Clear ephemeral key if it's invalid
+        storage.remove(STORAGE_KEYS.EPHEMERAL_KEY);
+      });
+    } 
+    // Priority 3: Restore EOA/SCW wallet connection if wallet is connected
+    else if (address && savedConnectionType && savedConnectionType !== "ephemeral" && !client && !globalInitializing) {
+      logger.log("Attempting to restore wallet connection", {
+        address,
+        savedConnectionType,
+        hasConnected,
+        lastAddress: lastAddressRef.current
+      });
+      
+      setConnectionType(savedConnectionType);
+      
+      // Auto-initialize for previously connected wallets
+      initialize({ 
+        connectionType: savedConnectionType === "Coinbase Smart Wallet" ? "scw" : "eoa",
+        env: envConfig.NEXT_PUBLIC_XMTP_ENV
+      }).catch((e) => {
+        logger.log("Error restoring wallet connection:", e);
       });
     }
-  }, [client, initializing, address, initialize, error]);
+  }, [client, address, initialize, error, isInFarcasterContext, context]);
 
   // Handle wallet disconnection
   useEffect(() => {
-    if (!address && client && !localStorage.getItem(STORAGE_KEYS.EPHEMERAL_KEY)) {
+    if (!address && client && !storage.get(STORAGE_KEYS.EPHEMERAL_KEY)) {
       logger.log("Wallet disconnected and no ephemeral key, cleaning up XMTP client");
       disconnect();
     }
   }, [address, client, disconnect]);
-
-  // Handle successful initialization
-  useEffect(() => {
-    if (client && address) {
-      logger.log("XMTP initialized successfully", { address });
-      localStorage.setItem(STORAGE_KEYS.HAS_CONNECTED, 'true');
-    }
-  }, [client, address]);
 
   // Create context value
   const value = useMemo<XMTPContextValue>(
@@ -348,6 +536,9 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
       setConversations,
       groupConversation,
       setGroupConversation,
+      connectionType,
+      isInFarcasterContext,
+      farcasterUser,
     }),
     [
       client,
@@ -357,6 +548,9 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
       disconnect,
       conversations,
       groupConversation,
+      connectionType,
+      isInFarcasterContext,
+      farcasterUser,
     ],
   );
 

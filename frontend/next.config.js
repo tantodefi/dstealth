@@ -22,6 +22,7 @@ const nextConfig = {
     config.resolve.extensionAlias = {
       ".js": [".ts", ".tsx", ".js", ".jsx"],
     };
+    
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,
@@ -29,11 +30,26 @@ const nextConfig = {
         net: false,
         tls: false,
         crypto: false,
+        ws: false,
       };
 
       config.module.rules.push({
         test: /\.node$/,
         loader: "null-loader",
+      });
+
+      // Handle WalletConnect WebSocket dependencies
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        'ws': false,
+      };
+      
+      // Ignore WalletConnect WebSocket modules in browser
+      config.externals = config.externals || [];
+      config.externals.push({
+        'ws': 'WebSocket',
+        'utf-8-validate': 'commonjs utf-8-validate',
+        'bufferutil': 'commonjs bufferutil',
       });
     }
 

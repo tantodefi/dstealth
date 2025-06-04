@@ -53,7 +53,7 @@ export default function ZkReceipts() {
         <div className="p-8 bg-gray-800 rounded-lg text-center">
           <p className="text-gray-400">No payment receipts yet</p>
           <p className="text-gray-500 text-sm mt-2">
-            Completed payments with ZK proofs will appear here
+            Completed stealth payments with ZK proofs will appear here.
           </p>
         </div>
       </div>

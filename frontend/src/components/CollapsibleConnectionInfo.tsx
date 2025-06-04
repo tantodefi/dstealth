@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useXMTP } from "@/context/xmtp-context";
 import { useAccount } from "wagmi";
 import { ChevronDown, ChevronUp, Copy } from "lucide-react";
+import { privateKeyToAccount } from "viem/accounts";
 
 interface ConnectionStatusProps {
   onConnectionChange?: (isConnected: boolean) => void;
@@ -12,12 +13,13 @@ interface ConnectionStatusProps {
 export function CollapsibleConnectionInfo({
   onConnectionChange,
 }: ConnectionStatusProps) {
-  const { client } = useXMTP();
+  const { client, connectionType: xmtpConnectionType } = useXMTP();
   const { address, isConnected: isWalletConnected } = useAccount();
   const [isActuallyConnected, setIsActuallyConnected] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [connectionDetails, setConnectionDetails] = useState<any>({});
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
+  const [ephemeralAddress, setEphemeralAddress] = useState<string>("");
 
   // Check backend connection status
   const checkBackendStatus = async () => {
@@ -52,15 +54,46 @@ export function CollapsibleConnectionInfo({
     return () => clearInterval(interval);
   }, []);
 
+  // Get ephemeral address if needed
+  useEffect(() => {
+    const isEphemeral = xmtpConnectionType === "ephemeral" || xmtpConnectionType === "Ephemeral Wallet";
+    if (isEphemeral) {
+      const savedPrivateKey = localStorage.getItem("xmtp:ephemeralKey");
+      if (savedPrivateKey) {
+        try {
+          const formattedKey = savedPrivateKey.startsWith("0x")
+            ? (savedPrivateKey as `0x${string}`)
+            : (`0x${savedPrivateKey}` as `0x${string}`);
+
+          const account = privateKeyToAccount(formattedKey);
+          setEphemeralAddress(account.address);
+        } catch (error) {
+          console.error("Error generating ephemeral address:", error);
+          setEphemeralAddress("");
+        }
+      }
+    } else {
+      setEphemeralAddress("");
+    }
+  }, [xmtpConnectionType]);
+
   // Determine actual connection status and gather details
   useEffect(() => {
-    const connectionType = localStorage.getItem("xmtp:connectionType");
+    const connectionType = xmtpConnectionType || localStorage.getItem("xmtp:connectionType");
     const ephemeralKey = localStorage.getItem("xmtp:ephemeralKey");
     const environment = localStorage.getItem("xmtp:environment") || "dev";
     
+    // Check for ephemeral connection (prioritize XMTP context)
+    const isEphemeral = connectionType === "ephemeral" || connectionType === "Ephemeral Wallet";
+    
+    // Determine if we're actually connected
     const newConnectionState = Boolean(
-      isWalletConnected || 
-      (client && connectionType === "Ephemeral Wallet" && ephemeralKey)
+      // Regular wallet connection
+      (isWalletConnected && address) ||
+      // Ephemeral wallet connection with XMTP client
+      (client && isEphemeral && ephemeralKey) ||
+      // Any XMTP client (fallback)
+      (client && connectionType)
     );
 
     setIsActuallyConnected(newConnectionState);
@@ -68,18 +101,19 @@ export function CollapsibleConnectionInfo({
     // Update connection details
     setConnectionDetails({
       walletConnected: isWalletConnected,
-      walletAddress: address,
+      walletAddress: address || ephemeralAddress,
       connectionType: connectionType || "Not set",
       xmtpClient: !!client,
       clientInboxId: client?.inboxId,
       environment: environment,
-      ephemeralKey: ephemeralKey ? "Present" : "Not set"
+      ephemeralKey: ephemeralKey ? "Present" : "Not set",
+      isEphemeral: isEphemeral,
     });
 
     if (typeof onConnectionChange === "function") {
       onConnectionChange(newConnectionState);
     }
-  }, [isWalletConnected, client, address, onConnectionChange]);
+  }, [isWalletConnected, client, address, ephemeralAddress, xmtpConnectionType, onConnectionChange]);
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -162,8 +196,8 @@ export function CollapsibleConnectionInfo({
             {/* Wallet Connection */}
             <div className="flex justify-between items-center">
               <span className="text-gray-400">Wallet:</span>
-              <span className={`${connectionDetails.walletConnected ? "text-green-400" : "text-red-400"}`}>
-                {connectionDetails.walletConnected ? "✓ Connected" : "✗ Not connected"}
+              <span className={`${connectionDetails.isEphemeral ? "text-yellow-400" : (connectionDetails.walletConnected ? "text-green-400" : "text-red-400")}`}>
+                {connectionDetails.isEphemeral ? "⚡ Ephemeral" : (connectionDetails.walletConnected ? "✓ Connected" : "✗ Not connected")}
               </span>
             </div>
 
@@ -256,17 +290,20 @@ export function CollapsibleConnectionInfo({
 
 // Keep the simple version for backward compatibility
 export function ConnectionStatus({ onConnectionChange }: ConnectionStatusProps) {
-  const { client } = useXMTP();
+  const { client, connectionType: xmtpConnectionType } = useXMTP();
   const { isConnected: isWalletConnected } = useAccount();
   const [isActuallyConnected, setIsActuallyConnected] = useState(false);
 
   useEffect(() => {
-    const connectionType = localStorage.getItem("xmtp:connectionType");
+    const connectionType = xmtpConnectionType || localStorage.getItem("xmtp:connectionType");
     const ephemeralKey = localStorage.getItem("xmtp:ephemeralKey");
+    
+    // Check for ephemeral connection
+    const isEphemeral = connectionType === "ephemeral" || connectionType === "Ephemeral Wallet";
     
     const newConnectionState = Boolean(
       isWalletConnected || 
-      (client && connectionType === "Ephemeral Wallet" && ephemeralKey)
+      (client && isEphemeral && ephemeralKey)
     );
 
     setIsActuallyConnected(newConnectionState);
@@ -274,7 +311,7 @@ export function ConnectionStatus({ onConnectionChange }: ConnectionStatusProps) 
     if (typeof onConnectionChange === "function") {
       onConnectionChange(newConnectionState);
     }
-  }, [isWalletConnected, client, onConnectionChange]);
+  }, [isWalletConnected, client, xmtpConnectionType, onConnectionChange]);
 
   return (
     <div 

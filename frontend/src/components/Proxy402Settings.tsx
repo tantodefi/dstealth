@@ -280,9 +280,6 @@ export default function Proxy402Settings() {
         <p className="text-gray-400 text-sm mb-2">
           Create payment-gated links using Proxy402
         </p>
-        <p className="text-gray-500 text-xs">
-          Connected wallet: {address.slice(0, 6)}...{address.slice(-4)}
-        </p>
       </div>
 
       {/* JWT Token Input */}

@@ -90,7 +90,7 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
           <div className="space-y-4">
             <Stats />
             <div className="p-6 bg-gray-800 rounded-lg text-center">
-              <h2 className="text-xl font-bold text-white mb-4">Welcome to XMTP Mini App</h2>
+              <h2 className="text-xl font-bold text-white mb-4">Better Privacy & earn rewards</h2>
               <p className="text-gray-400 mb-4">
                 Select an option from the navigation bar or click below to get started
               </p>
