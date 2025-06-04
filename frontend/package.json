@@ -66,6 +66,9 @@
     "tailwindcss": "^3.4.1",
     "typescript": "^5"
   },
+  "resolutions": {
+    "ethereumjs-abi": "^0.6.8"
+  },
   "packageManager": "yarn@4.9.1",
   "engines": {
     "node": ">=20"
