@@ -45,7 +45,6 @@ const initializeXmtpClient = async () => {
     console.log("🔄 Initializing XMTP client...");
     console.log("📁 Database path:", dbPath);
     console.log("🌍 Environment:", XMTP_ENV);
-    console.log("🔧 Is Vercel:", !!(process.env.VERCEL || process.env.NODE_ENV === 'production'));
     
     // Create installation A (receiver) client
     xmtpClient = await Client.create(signer, {
@@ -57,7 +56,13 @@ const initializeXmtpClient = async () => {
     console.log("✅ XMTP Client initialized with inbox ID:", xmtpClient.inboxId);
     
     // Only try to setup group functionality if not in Vercel (to avoid memory issues)
+    // Render has RENDER=true, Vercel has VERCEL=1/true
     const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true';
+    const isRender = process.env.RENDER === 'true';
+    
+    console.log(`🔧 Is Vercel: ${isVercel}`);
+    console.log(`🔧 Is Render: ${isRender}`);
+    
     if (!isVercel) {
       try {
         await xmtpClient.conversations.sync();
@@ -110,7 +115,13 @@ const initializeXmtpClient = async () => {
     console.error("Failed to initialize XMTP client:", error);
     
     // In Vercel, we might want to continue without XMTP for API routes that don't need it
+    // Render has RENDER=true, Vercel has VERCEL=1/true  
     const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true';
+    const isRender = process.env.RENDER === 'true';
+    
+    console.log(`🔧 Is Vercel: ${isVercel}`);
+    console.log(`🔧 Is Render: ${isRender}`);
+    
     if (isVercel) {
       console.warn("⚠️ XMTP client initialization failed in Vercel - API will work but XMTP features will be disabled");
       xmtpClient = null as any; // Set to null so we can check for it in routes

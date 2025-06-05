@@ -1,0 +1,1 @@
+NEXT_PUBLIC_BACKEND_URL: z.string().url().default('https://xmtp-mini-app-examples.onrender.com'), 

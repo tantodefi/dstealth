@@ -3,13 +3,13 @@ services:
     name: dstealth-backend
     env: node
     plan: free
-    buildCommand: cd backend && yarn install
-    startCommand: cd backend && yarn start
+    buildCommand: yarn install
+    startCommand: yarn start
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 5001
+        value: 10000
       - key: XMTP_ENV
         value: production
       - key: WALLET_KEY
@@ -20,5 +20,7 @@ services:
         fromSecret: API_SECRET_KEY
       - key: FRONTEND_URL
         value: https://dstealth.vercel.app
+      - key: GROUP_ID
+        fromSecret: GROUP_ID
     healthCheckPath: /health
     autoDeploy: true 
