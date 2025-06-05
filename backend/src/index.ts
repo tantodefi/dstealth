@@ -56,10 +56,11 @@ const initializeXmtpClient = async () => {
     console.log("✅ XMTP Client initialized with inbox ID:", xmtpClient.inboxId);
     
     // Only try to setup group functionality if not in Vercel (to avoid memory issues)
-    // Render has RENDER=true, Vercel has VERCEL=1/true
-    const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true';
-    const isRender = process.env.RENDER === 'true';
+    // Vercel has VERCEL=1, Render has RENDER environment variable
+    const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true' || process.env.VERCEL_ENV;
+    const isRender = process.env.RENDER === 'true' || process.env.RENDER_SERVICE_ID;
     
+    console.log(`🔧 Platform: ${isVercel ? 'Vercel' : isRender ? 'Render' : 'Local'}`);
     console.log(`🔧 Is Vercel: ${isVercel}`);
     console.log(`🔧 Is Render: ${isRender}`);
     
@@ -115,10 +116,11 @@ const initializeXmtpClient = async () => {
     console.error("Failed to initialize XMTP client:", error);
     
     // In Vercel, we might want to continue without XMTP for API routes that don't need it
-    // Render has RENDER=true, Vercel has VERCEL=1/true  
-    const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true';
-    const isRender = process.env.RENDER === 'true';
+    // Vercel has VERCEL=1, Render has RENDER environment variable  
+    const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true' || process.env.VERCEL_ENV;
+    const isRender = process.env.RENDER === 'true' || process.env.RENDER_SERVICE_ID;
     
+    console.log(`🔧 Platform: ${isVercel ? 'Vercel' : isRender ? 'Render' : 'Local'}`);
     console.log(`🔧 Is Vercel: ${isVercel}`);
     console.log(`🔧 Is Render: ${isRender}`);
     
