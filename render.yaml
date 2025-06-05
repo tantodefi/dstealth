@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: dstealth-backend
+    env: node
+    plan: free
+    buildCommand: cd backend && yarn install
+    startCommand: cd backend && yarn start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5001
+      - key: XMTP_ENV
+        value: production
+      - key: WALLET_KEY
+        fromSecret: WALLET_KEY
+      - key: ENCRYPTION_KEY
+        fromSecret: ENCRYPTION_KEY
+      - key: API_SECRET_KEY
+        fromSecret: API_SECRET_KEY
+      - key: FRONTEND_URL
+        value: https://dstealth.vercel.app
+    healthCheckPath: /health
+    autoDeploy: true 
