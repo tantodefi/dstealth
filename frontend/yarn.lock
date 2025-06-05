@@ -862,16 +862,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@farcaster/frame-core@npm:0.0.26":
-  version: 0.0.26
-  resolution: "@farcaster/frame-core@npm:0.0.26"
-  dependencies:
-    ox: "npm:^0.4.4"
-    zod: "npm:^3.24.1"
-  checksum: 10/8b140b3578d4ce7ff9430e3f9f39aae6dd8ed5d7f4f6f945f8dd49aaa7628756725c1b6e3293bd00a86131dd29f2e58c3f86195061e7369856e02b7f098139d4
-  languageName: node
-  linkType: hard
-
 "@farcaster/frame-core@npm:0.0.35, @farcaster/frame-core@npm:^0.0.35":
   version: 0.0.35
   resolution: "@farcaster/frame-core@npm:0.0.35"
@@ -903,18 +893,6 @@ __metadata:
     ox: "npm:^0.4.4"
     zod: "npm:^3.24.1"
   checksum: 10/61dd1c3cf4d90aa6d3bd4df088cc7dd0668019229b2a0448d62948e3d4dc5b945ee61c41741ecb323eb72279b8f775e020f9ccb4f83ccaf7caf0b9686fdb4a7d
-  languageName: node
-  linkType: hard
-
-"@farcaster/frame-sdk@npm:^0.0.28":
-  version: 0.0.28
-  resolution: "@farcaster/frame-sdk@npm:0.0.28"
-  dependencies:
-    "@farcaster/frame-core": "npm:0.0.26"
-    comlink: "npm:^4.4.2"
-    eventemitter3: "npm:^5.0.1"
-    ox: "npm:^0.4.4"
-  checksum: 10/3e7772bebefd1c7809cc0216285a45e2f920cf12fe828c5f2d8d8b091be33f364c0c9bc5f1c4b541f40bf51ffa6dee3c97ff4920b28b032a3ad7f4a404b9cb30
   languageName: node
   linkType: hard
 

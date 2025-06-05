@@ -14,10 +14,10 @@ export default function BotChat() {
   // State
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
-  const [botConversation, setBotConversation] = useState<Conversation | null>(
+  const [botConversation, setBotConversation] = useState<Conversation<any> | null>(
     null,
   );
-  const [messages, setMessages] = useState<DecodedMessage[]>([]);
+  const [messages, setMessages] = useState<DecodedMessage<any>[]>([]);
   const [isConnecting, setIsConnecting] = useState(false);
   const [streamActive, setStreamActive] = useState(false);
 
@@ -27,7 +27,7 @@ export default function BotChat() {
   // Initialize the conversation with the bot
   const initializeConversation = useCallback(async () => {
     if (!client) return;
-    let botConversation: Conversation | null = null;
+    let botConversation: Conversation<any> | null = null;
     setIsConnecting(true);
     try {
       botConversation = await client.conversations.newDmWithIdentifier({

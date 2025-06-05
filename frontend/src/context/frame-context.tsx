@@ -1,7 +1,6 @@
 "use client";
 
 import { FrameContext } from "@farcaster/frame-core/dist/context";
-import sdk from "@farcaster/frame-sdk";
 import {
   createContext,
   ReactNode,
@@ -16,7 +15,7 @@ interface FrameContextValue {
   isInMiniApp: boolean;
   isSDKLoaded: boolean;
   error: string | null;
-  actions: typeof sdk.actions | null;
+  actions: any | null;
   isLoading: boolean;
 }
 
@@ -30,7 +29,7 @@ interface FrameProviderProps {
 
 export function FrameProvider({ children }: FrameProviderProps) {
   const [context, setContext] = useState<FrameContext | null>(null);
-  const [actions, setActions] = useState<typeof sdk.actions | null>(null);
+  const [actions, setActions] = useState<any | null>(null);
   const [isSDKLoaded, setIsSDKLoaded] = useState(false);
   const [isInMiniApp, setIsInMiniApp] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +47,9 @@ export function FrameProvider({ children }: FrameProviderProps) {
       try {
         setIsLoading(true);
         console.log("🎯 Farcaster: Starting SDK initialization...");
+
+        // Dynamic import to avoid build-time issues
+        const sdk = (await import("@farcaster/frame-sdk")).default;
 
         // Check if we're in a mini app first
         const isMiniApp = await sdk.isInMiniApp();

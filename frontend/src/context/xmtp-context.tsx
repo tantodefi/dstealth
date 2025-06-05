@@ -36,8 +36,8 @@ export type XMTPContextValue = {
   initializing: boolean;
   error: Error | null;
   disconnect: () => void;
-  conversations: Conversation[];
-  setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>;
+  conversations: Conversation<any>[];
+  setConversations: React.Dispatch<React.SetStateAction<Conversation<any>[]>>;
   groupConversation: Group | null;
   setGroupConversation: React.Dispatch<React.SetStateAction<Group | null>>;
   connectionType: string;
@@ -156,7 +156,7 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
   
   // State
   const [client, setClient] = useState<Client | undefined>(initialClient);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversations, setConversations] = useState<Conversation<any>[]>([]);
   const [groupConversation, setGroupConversation] = useState<Group | null>(null);
   const [initializing, setInitializing] = useState(false);
   const [error, setError] = useState<Error | null>(null);

@@ -26,8 +26,8 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
   // State
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
-  const [conversation, setConversation] = useState<Conversation | null>(null);
-  const [messages, setMessages] = useState<DecodedMessage[]>([]);
+  const [conversation, setConversation] = useState<Conversation<any> | null>(null);
+  const [messages, setMessages] = useState<DecodedMessage<any>[]>([]);
   const [isConnecting, setIsConnecting] = useState(false);
   const [streamActive, setStreamActive] = useState(false);
 
@@ -59,7 +59,7 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
   // Initialize the conversation
   const initializeConversation = useCallback(async () => {
     if (!client) return;
-    let newConversation: Conversation | null = null;
+    let newConversation: Conversation<any> | null = null;
     setIsConnecting(true);
     try {
       newConversation = await client.conversations.newDmWithIdentifier({

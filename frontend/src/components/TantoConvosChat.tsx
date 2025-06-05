@@ -16,8 +16,8 @@ const TANTO_DATA = {
 
 export default function TantoConvosChat() {
   const { client } = useXMTP();
-  const [conversation, setConversation] = useState<Conversation | null>(null);
-  const [messages, setMessages] = useState<DecodedMessage[]>([]);
+  const [conversation, setConversation] = useState<Conversation<any> | null>(null);
+  const [messages, setMessages] = useState<DecodedMessage<any>[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
   const [isSending, setIsSending] = useState(false);
