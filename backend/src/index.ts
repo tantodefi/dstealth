@@ -57,7 +57,7 @@ const initializeXmtpClient = async () => {
     console.log("✅ XMTP Client initialized with inbox ID:", xmtpClient.inboxId);
     
     // Only try to setup group functionality if not in Vercel (to avoid memory issues)
-    const isVercel = process.env.VERCEL || process.env.NODE_ENV === 'production';
+    const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true';
     if (!isVercel) {
       try {
         await xmtpClient.conversations.sync();
@@ -110,7 +110,7 @@ const initializeXmtpClient = async () => {
     console.error("Failed to initialize XMTP client:", error);
     
     // In Vercel, we might want to continue without XMTP for API routes that don't need it
-    const isVercel = process.env.VERCEL || process.env.NODE_ENV === 'production';
+    const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true';
     if (isVercel) {
       console.warn("⚠️ XMTP client initialization failed in Vercel - API will work but XMTP features will be disabled");
       xmtpClient = null as any; // Set to null so we can check for it in routes
