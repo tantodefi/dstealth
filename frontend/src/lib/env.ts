@@ -24,7 +24,7 @@ export const env = createEnv({
     // OnchainKit API Key
     NEXT_PUBLIC_ONCHAINKIT_API_KEY: z.string().min(1).optional(),
     // Backend URL
-    NEXT_PUBLIC_BACKEND_URL: z.string().url().default('https://dstealth-backend.vercel.app'),
+    NEXT_PUBLIC_BACKEND_URL: z.string().url().default('https://xmtp-mini-app-examples.onrender.com'),
     // Add defaults to prevent crashes during development
     NEXT_PUBLIC_ETHERSCAN_API_KEY: z.string().default("development_key"),
     NEXT_PUBLIC_FARCASTER_APP_FID: z.string().default("0"),
