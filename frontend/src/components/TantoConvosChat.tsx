@@ -128,7 +128,7 @@ export default function TantoConvosChat() {
                             : "bg-gray-700 text-gray-200"
                         }`}
                       >
-                        <p>{String(msg.content)}</p>
+                        <p>{typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)}</p>
                         <p className="text-xs opacity-60 mt-1">
                           {sentTime.toLocaleTimeString()}
                         </p>

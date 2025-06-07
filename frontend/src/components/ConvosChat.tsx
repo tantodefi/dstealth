@@ -1,11 +1,9 @@
 "use client";
 
-import { Client, Conversation, DecodedMessage } from "@xmtp/browser-sdk";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Button } from "@/components/Button";
-import { useXMTP } from "@/context/xmtp-context";
-import { CheckCircle2 } from "lucide-react";
-import { storage } from "@/lib/storage";
+import { useState, useEffect, useRef } from 'react';
+import { MessageCircle, Send, ExternalLink } from 'lucide-react';
+import { useXMTP } from '@/context/xmtp-context';
+import { Conversation, DecodedMessage } from '@xmtp/browser-sdk';
 
 interface ConvosChatProps {
   xmtpId: string;
@@ -22,277 +20,294 @@ interface ConvosChatProps {
 
 export default function ConvosChat({ xmtpId, username, url, profile }: ConvosChatProps) {
   const { client } = useXMTP();
-
-  // State
-  const [message, setMessage] = useState("");
-  const [sending, setSending] = useState(false);
   const [conversation, setConversation] = useState<Conversation<any> | null>(null);
   const [messages, setMessages] = useState<DecodedMessage<any>[]>([]);
-  const [isConnecting, setIsConnecting] = useState(false);
+  const [newMessage, setNewMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [streamActive, setStreamActive] = useState(false);
-
-  // Use ref to track if stream is already started to prevent infinite loops
+  const [debugLog, setDebugLog] = useState<string[]>([]);
   const streamStartedRef = useRef(false);
-  const streamRef = useRef<any>(null);
-  const cleanupRef = useRef<(() => void) | null>(null);
 
-  // Listen for invite message event
+  // Add debug logging function
+  const addDebugLog = (message: string, data?: any) => {
+    const timestamp = new Date().toISOString();
+    const logEntry = `[${timestamp}] ${message}${data ? ` - ${JSON.stringify(data)}` : ''}`;
+    console.log(`ConvosChat: ${logEntry}`);
+    setDebugLog(prev => [...prev.slice(-10), logEntry]); // Keep last 10 logs
+  };
+
+  // Initialize XMTP conversation
   useEffect(() => {
-    console.log("Setting up invite message listener");
-    
-    const handleInviteMessage = (event: Event) => {
-      const customEvent = event as CustomEvent<{ message: string }>;
-      console.log("Received invite message event:", customEvent.detail.message);
-      setMessage(customEvent.detail.message);
-    };
-
-    // Add event listener
-    window.addEventListener('setInviteMessage', handleInviteMessage);
-
-    // Cleanup
-    return () => {
-      console.log("Removing invite message listener");
-      window.removeEventListener('setInviteMessage', handleInviteMessage);
-    };
-  }, []);
-
-  // Initialize the conversation
-  const initializeConversation = useCallback(async () => {
-    if (!client) return;
-    let newConversation: Conversation<any> | null = null;
-    setIsConnecting(true);
-    try {
-      newConversation = await client.conversations.newDmWithIdentifier({
-        identifier: profile.address,
-        identifierKind: "Ethereum",
-      });
-      setConversation(newConversation);
-    } catch (error) {
-      console.error("Error initializing convos conversation:", error);
-    } finally {
-      setIsConnecting(false);
+    if (!client || !xmtpId) {
+      addDebugLog('Missing client or xmtpId', { hasClient: !!client, xmtpId });
+      return;
     }
-  }, [client, profile.address]);
 
-  // Start a stream to listen for new messages
-  const startMessageStream = useCallback(async () => {
-    if (!client || !conversation || streamStartedRef.current) return;
+    // Prevent duplicate initialization
+    if (streamStartedRef.current) {
+      addDebugLog('Stream already started, skipping initialization');
+      return;
+    }
 
-    try {
-      console.log("Starting message stream for convos conversation");
-      streamStartedRef.current = true;
-      setStreamActive(true);
-
-      const stream = await conversation.stream();
-      streamRef.current = stream;
-
-      const streamMessages = async () => {
-        try {
-          for await (const message of stream) {
-            if (!streamStartedRef.current) break; // Exit if stream should stop
-            console.log("Received message:", message);
-            if (message) {
-              setMessages((prevMessages) => [...prevMessages, message]);
-            }
-          }
-        } catch (error) {
-          console.error("Error in message stream:", error);
-          if (streamStartedRef.current) { // Only reset if we haven't already cleaned up
-            setStreamActive(false);
-            streamStartedRef.current = false;
-          }
-        }
-      };
-
-      // Start streaming messages
-      streamMessages();
-
-      // Store cleanup function
-      const cleanup = () => {
-        console.log("Cleaning up stream");
-        if (streamRef.current && typeof streamRef.current.return === "function") {
-          streamRef.current.return(undefined);
-        }
-        streamRef.current = null;
-        streamStartedRef.current = false;
-        setStreamActive(false);
-      };
+    const initConversation = async () => {
+      setLoading(true);
+      setError(null);
+      addDebugLog('Starting conversation initialization', { xmtpId, username });
       
-      cleanupRef.current = cleanup;
-      return cleanup;
+      try {
+        addDebugLog('Syncing conversations...');
+        await client.conversations.sync();
+        
+        addDebugLog('Fetching conversation list...');
+        const conversations = await client.conversations.list();
+        addDebugLog(`Found ${conversations.length} conversations`);
+        
+        // Look for existing conversation - need to handle async peerInboxId
+        let existingConversation = null;
+        for (const conv of conversations) {
+          try {
+            const peerInboxId = await conv.peerInboxId();
+            addDebugLog(`Checking conversation with peer: ${peerInboxId}`);
+            if (peerInboxId?.toLowerCase() === xmtpId.toLowerCase()) {
+              existingConversation = conv;
+              addDebugLog('Found matching conversation');
+              break;
+            }
+          } catch (error) {
+            addDebugLog('Error getting peerInboxId for conversation', error);
+            // Skip this conversation and continue
+          }
+        }
 
-    } catch (error) {
-      console.error("Error starting message stream:", error);
-      streamStartedRef.current = false;
-      setStreamActive(false);
-      return undefined;
-    }
-  }, [client, conversation]); // Removed streamActive from dependencies
+        if (!existingConversation) {
+          addDebugLog('No existing conversation found, creating new DM');
+          try {
+            existingConversation = await client.conversations.newDm(xmtpId);
+            addDebugLog('New DM created successfully');
+          } catch (dmError) {
+            addDebugLog('Failed to create new DM', dmError);
+            throw dmError;
+          }
+        } else {
+          addDebugLog('Found existing conversation');
+        }
+        
+        setConversation(existingConversation);
+        
+        // Load existing messages
+        addDebugLog('Loading existing messages...');
+        const existingMessages = await existingConversation.messages();
+        addDebugLog(`Loaded ${existingMessages.length} existing messages`);
+        setMessages(existingMessages);
+        
+        // Start streaming new messages
+        addDebugLog('Starting message stream...');
+        streamStartedRef.current = true;
+        
+        try {
+          const stream = await existingConversation.stream();
+          setStreamActive(true);
+          addDebugLog('Message stream started successfully');
+          
+          const streamMessages = async () => {
+            try {
+              for await (const message of stream) {
+                if (message) {
+                  addDebugLog('Received new message via stream');
+                  setMessages(prev => [...prev, message]);
+                }
+              }
+            } catch (streamError) {
+              addDebugLog('Error in message stream', streamError);
+              setStreamActive(false);
+              streamStartedRef.current = false;
+            }
+          };
+          
+          streamMessages();
+        } catch (streamError) {
+          addDebugLog('Failed to start message stream', streamError);
+          // Continue without streaming - conversation still works for sending
+        }
+        
+      } catch (error) {
+        addDebugLog('Failed to initialize conversation', error);
+        setError(`Failed to connect to chat: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  // Initialize conversation when client is available
-  useEffect(() => {
-    if (client && !conversation && !isConnecting) {
-      initializeConversation();
-    }
-  }, [client, conversation, isConnecting, initializeConversation]);
-
-  // Start stream when conversation is available
-  useEffect(() => {
-    // Start stream if conditions are met
-    if (client && conversation && !streamStartedRef.current) {
-      startMessageStream();
-    }
+    initConversation();
 
     // Cleanup function
     return () => {
-      if (cleanupRef.current) {
-        cleanupRef.current();
-      }
+      streamStartedRef.current = false;
+      setStreamActive(false);
+      addDebugLog('Cleaning up conversation');
     };
-  }, [client, conversation, startMessageStream]);
+  }, [client, xmtpId, username]);
 
-  // Send message
-  const handleSendMessage = async () => {
-    if (!client || !conversation || !message.trim()) return;
-
-    setSending(true);
-
+  const sendMessage = async () => {
+    if (!conversation || !newMessage.trim()) return;
+    
+    addDebugLog('Sending message', { messageLength: newMessage.length });
+    
     try {
-      await conversation.send(message);
-      // Check if this was an invite message
-      if (message.includes('fluidkey.com') && message.toLowerCase().includes('hey')) {
-        storage.incrementInvites();
-      }
-      setMessage("");
+      await conversation.send(newMessage);
+      addDebugLog('Message sent successfully');
+      setNewMessage('');
     } catch (error) {
-      console.error("Failed to send message:", error);
-    } finally {
-      setSending(false);
+      addDebugLog('Failed to send message', error);
+      setError(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
+  if (!client) {
+    return (
+      <div className="text-center py-8">
+        <MessageCircle className="mx-auto mb-3 text-gray-500" size={32} />
+        <p className="text-sm text-gray-400">
+          Connect your wallet to chat
+        </p>
+        <div className="mt-2 text-xs text-gray-600">
+          Debug: No XMTP client available
+        </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-8">
+        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+        <span className="ml-2 text-sm text-gray-400">Connecting to chat...</span>
+        {debugLog.length > 0 && (
+          <div className="mt-4 text-xs text-gray-600 max-w-sm">
+            <details>
+              <summary className="cursor-pointer">Debug Log</summary>
+              <div className="mt-2 bg-gray-900 rounded p-2 max-h-32 overflow-y-auto">
+                {debugLog.map((log, i) => (
+                  <div key={i} className="text-xs break-words">{log}</div>
+                ))}
+              </div>
+            </details>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-8">
+        <MessageCircle className="mx-auto mb-3 text-gray-500" size={32} />
+        <p className="text-sm text-red-400 mb-3">{error}</p>
+        <button
+          onClick={() => window.location.reload()}
+          className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm"
+        >
+          Retry
+        </button>
+        {debugLog.length > 0 && (
+          <div className="mt-4 text-xs text-gray-600 max-w-sm mx-auto">
+            <details>
+              <summary className="cursor-pointer">Debug Log</summary>
+              <div className="mt-2 bg-gray-900 rounded p-2 max-h-32 overflow-y-auto text-left">
+                {debugLog.map((log, i) => (
+                  <div key={i} className="text-xs break-words">{log}</div>
+                ))}
+              </div>
+            </details>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="w-full flex flex-col gap-3">
-      <div className="w-full bg-gray-900 p-3 rounded-md">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2">
-              {profile.avatar && (
-                <img 
-                  src={profile.avatar} 
-                  alt={profile.name || username}
-                  className="w-6 h-6 rounded-full"
-                />
-              )}
-              <div>
-                <h2 className="text-white text-sm font-medium flex items-center gap-1">
-                  {profile.name || username}
-                  <CheckCircle2 className="w-4 h-4 text-green-500" />
-                </h2>
-                <a 
-                  href={url} 
-                  target="_blank" 
-                  rel="noopener noreferrer" 
-                  className="text-xs text-gray-400 hover:text-gray-300"
-                >
-                  {username}.convos.org
-                </a>
+    <div className="space-y-3">
+      {/* Connection Status */}
+      <div className="flex items-center justify-between text-xs">
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${streamActive ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+          <span className={streamActive ? 'text-green-400' : 'text-yellow-400'}>
+            {streamActive ? 'Connected to' : 'Connecting to'} {username}.convos.org
+          </span>
+        </div>
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-400 hover:text-blue-300 flex items-center gap-1"
+        >
+          <ExternalLink size={12} />
+          Open
+        </a>
+      </div>
+
+      {/* Debug Info */}
+      {debugLog.length > 0 && (
+        <div className="text-xs text-gray-600">
+          <details>
+            <summary className="cursor-pointer">Debug Info</summary>
+            <div className="mt-2 bg-gray-900 rounded p-2 max-h-24 overflow-y-auto">
+              {debugLog.slice(-3).map((log, i) => (
+                <div key={i} className="text-xs break-words">{log}</div>
+              ))}
+            </div>
+          </details>
+        </div>
+      )}
+
+      {/* Messages */}
+      <div className="bg-gray-800 rounded p-3 h-40 overflow-y-auto space-y-2">
+        {messages.map((message, index) => {
+          const isFromUser = message.senderInboxId === client.inboxId;
+          const sentTime = message.sentAtNs 
+            ? new Date(Number(message.sentAtNs) / 1000000)
+            : new Date();
+
+          return (
+            <div
+              key={index}
+              className={`text-xs ${isFromUser ? 'text-right' : 'text-left'}`}
+            >
+              <div
+                className={`inline-block p-2 rounded max-w-[80%] ${
+                  isFromUser
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-600 text-gray-200'
+                }`}
+              >
+                {typeof message.content === 'string' ? message.content : JSON.stringify(message.content)}
+                <div className="text-gray-400 text-xs mt-1">
+                  {sentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
               </div>
             </div>
-          </div>
-          <div className="flex items-center">
-            <div
-              className={`h-2 w-2 rounded-full mr-2 ${streamActive ? "bg-green-500" : "bg-red-500"}`}
-            />
-            <span className="text-xs text-gray-400">
-              {streamActive ? "Stream active" : "Stream inactive"}
-            </span>
-          </div>
-        </div>
+          );
+        })}
+      </div>
 
-        {!client ? (
-          <p className="text-gray-400 text-xs mt-2">
-            Connect your wallet to chat
-          </p>
-        ) : isConnecting ? (
-          <p className="text-yellow-500 text-xs mt-2">Connecting...</p>
-        ) : !conversation ? (
-          <div className="mt-2">
-            <Button
-              size="sm"
-              variant="default"
-              onClick={initializeConversation}
-              disabled={isConnecting}
-              className="w-full">
-              Connect to {profile.name || username}
-            </Button>
-          </div>
-        ) : (
-          <>
-            {/* Message history */}
-            <div className="mt-2 border border-gray-800 rounded-md p-2 max-h-40 overflow-y-auto">
-              {messages.length > 0 ? (
-                messages.map((msg, index) => {
-                  const senderAddress = xmtpId;
-                  const clientAddress = client.inboxId;
-                  const sentTime = msg.sentAtNs
-                    ? new Date(Number(msg.sentAtNs) / 1000000)
-                    : new Date();
-
-                  return (
-                    <div
-                      key={index}
-                      className={`mb-2 text-xs ${
-                        senderAddress === clientAddress
-                          ? "text-right"
-                          : "text-left"
-                      }`}>
-                      <div
-                        className={`inline-block px-2 py-1 rounded-md ${
-                          senderAddress === clientAddress
-                            ? "bg-blue-900 text-white"
-                            : "bg-gray-800 text-gray-200"
-                        }`}>
-                        <p>{String(msg.content)}</p>
-                        <p className="text-[10px] mt-1 opacity-60">
-                          {sentTime.toLocaleTimeString()}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="text-gray-500 text-xs">
-                  No messages yet. Send a message to get started!
-                </p>
-              )}
-            </div>
-
-            {/* Message input */}
-            <div className="mt-2 flex">
-              <input
-                type="text"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                placeholder={`Message ${profile.name || username}...`}
-                className="flex-1 bg-gray-800 text-white text-sm rounded-l-md px-3 py-2 outline-none"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !sending) {
-                    handleSendMessage();
-                  }
-                }}
-              />
-              <Button
-                size="sm"
-                variant="default"
-                onClick={handleSendMessage}
-                disabled={sending || !message.trim()}
-                className="rounded-l-none">
-                {sending ? "Sending..." : "Send"}
-              </Button>
-            </div>
-          </>
-        )}
+      {/* Message Input */}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={newMessage}
+          onChange={(e) => setNewMessage(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+          placeholder="Type a message..."
+          className="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-1 text-sm text-white"
+        />
+        <button
+          onClick={sendMessage}
+          disabled={!conversation || !newMessage.trim()}
+          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-3 py-1 rounded text-sm"
+        >
+          <Send size={14} />
+        </button>
       </div>
     </div>
   );

@@ -1,138 +1,314 @@
-# XMTP mini-app examples
+# XMTP Mini App Examples
 
-This repository provides a debugging toolkit for mini-apps built with the [XMTP](https://docs.xmtp.org/) network and Farcaster Frames.
+This repository contains examples of XMTP mini apps with X402 payment protocol integration, social features, and AI-powered agents.
 
-## Getting started
+## Links
 
-> [!TIP]
-> See XMTP's [xmtp-agents-examples](https://github.com/xmtp/xmtp-agents-examples) for vibe coding agents and best practices.
+https://dstealth.vercel.app/
+https://farcaster.xyz/~/developers/mini-apps/preview?url=https%3A%2F%2Fdstealth.vercel.app
+
+https://github.com/coinbase/x402
+https://github.com/builders-garden/base-minikit-starter/blob/main/app/dynamic-image-example/%5Bid%5D/page.tsx
+https://www.clanker.world/clanker/0x2a810158dD24DC62477540c81194B4F817EB3944
+https://www.empirebuilder.world/
+https://basescan.org/token/0x2a810158dD24DC62477540c81194B4F817EB3944
+https://www.google.com/search?q=github+clanker+fun&oq=github+clanker+fun&gs_lcrp=EgZjaHJvbWUyBggAEEUYOTIHCAEQIRigATIHCAIQIRigATIHCAMQIRigATIHCAQQIRigATIHCAUQIRigATIHCAYQIRiPAjIHCAcQIRiPAtIBCDMxMzNqMGo0qAIAsAIB&sourceid=chrome&ie=UTF-8
+https://docs.bitquery.io/docs/examples/Base/base-clanker-api/ß
+https://basescan.org/address/0x894c663757f6953544548EFA1aebc0846AC08bEa
+https://console.upstash.com/login
+https://basescan.org/token/0x767a739d1a152639e9ea1d8c1bd55fdc5b217d7f?a=0xcba202f6c6684c497c3fb7740a6f6ba14041cde8
+https://docs.veil.cash/veil-cash-protocol/deployments
+https://github.com/xmtp/XIPs/blob/main/XIPs/xip-21-transaction-reference-content-type.md
+https://github.com/ScopeLift/stealth-address-erc-contracts
+https://evmauth.io/#license
+https://github.com/evmauth/evmauth-core
+https://www.veil.cash/
+https://docs.veil.cash/
+https://stealthaddress.dev/contracts/deployments
+https://app.umbra.cash/receive
+https://github.com/ScopeLift/umbra-protocol
+https://docs.fluidkey.com/readme/score
+https://github.com/Fewsats/proxy402-docs
+https://github.com/xmtp/XIPs/blob/main/XIPs/xip-51-agent-messages.md
+https://community.xmtp.org/t/encryption-keys-are-pointless-browser-sdk/933
+http://localhost:3000/api/proxy402/content?url=https%3A%2F%2Fproxy402.com%2Faek56kV2rb&payment=eyJ4NDAyVmVyc2lvbiI6MSwic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiYmFzZS1zZXBvbGlhIiwid2FsbGV0IjoiMHg5QjJGQjdhOGQyMjdjRGFBODAwMmY4MGU4YzhBOTlhMTlCYjFiOTY5IiwicGF5bG9hZCI6eyJ0eEhhc2giOiIweDE5ZmNkODZhMTBmOWRkOTllMDRiYzIzZmUxYjY1MDg1MzNiYWFiOGY3ZjllMjQ2MDMwNWUxN2E1MDEwMzZjOWUiLCJhbW91bnQiOiIwLjAxIiwiYXNzZXQiOiIweDAzNkNiRDUzODQyYzU0MjY2MzRlNzkyOTU0MWVDMjMxOGYzZENGN2UiLCJwYXlUbyI6IjB4NzA2QWZCRTI4YjFlMUNCNDBjZDU1MkZhNTNBMzgwZjY1OGUzODMzMiIsImZyb20iOiIweDlCMkZCN2E4ZDIyN2NEYUE4MDAyZjgwZThjOEE5OWExOUJiMWI5NjkiLCJ0aW1lc3RhbXAiOjE3NDkxMDMyMjA4MTksImNoYWluSWQiOjg0NTMyfX0%3D
+https://github.com/tantodefi/blockbuster
+https://stealthaddress.dev/
+https://app.umbra.cash/faq#how-can-i-scan-just-certain-range-of-blocks
+https://blockbuster-video-demo.vercel.app/
+https://www.basebatches.xyz/#calendar
+https://devfolio.co/projects/replyguy-fd0e
+https://github.com/fluidkey/fluidkey-stealth-account-kit
+https://www.docs.whisk.so/kits/identity
+https://app.fewsats.com/
+https://github.com/Fewsats/fewsats-python
+https://claudette.answer.ai/
+https://paydocs.daimo.com/sdk#themes-and-customization
+https://pay.daimo.com/
+https://zkfetch.com/
+https://github.com/reclaimprotocol/zk-fetch
+https://dev.reclaimprotocol.org/my-applications/0x472D9ec8Da4CB9843627E3D7E23aC0B3B6ebF145
+https://github.com/tantodefi/xmtp-agent-examples/tree/main/examples/xmtp-coinbase-agentkit
+https://www.base.org/builders/minikit
+https://docs.base.org/builderkits/minikit/overview
+https://github.com/builders-garden/base-minikit-starter
+https://www.base.org/builders/onchainkit
+https://docs.base.org/builderkits/onchainkit/api/get-portfolios
+https://github.com/coinbase/x402
+https://tantodefi.convos.org/
+https://www.npmjs.com/package/@reclaimprotocol/zk-fetch
+https://github.com/ephemeraHQ/xmtp-agent-examples/tree/main/examples/xmtp-smart-wallet
+https://reclaimprotocol.org/
+https://base-batch-messaging.devfolio.co/overview
+https://github.com/builders-garden/fluidpay/blob/main/lib/dynamic-api.ts
+https://fluidpay.builders.garden/
+https://github.com/xmtp/xmtp-js/tree/main/apps/xmtp.chat
+https://www.base.org/builders/onchainkit
+https://docs.base.org/cookbook/account-abstraction/gasless-transactions-with-paymaster
+https://docs.base.org/builderkits/minikit/thinking-social
+https://docs.cdp.coinbase.com/agentkit/docs/welcome
+https://docs.base.org/builderkits/minikit/existing-app-integration
+https://farcaster.xyz/
+https://minikit-gold.vercel.app/ // could focus on making this a separatee x042:// viewer app 
+https://github.com/daimo-eth/pay/blob/master/examples/nextjs-app/src/app/checkout/page.tsx
+https://github.com/daimo-eth/pay/blob/master/examples/nextjs-app/src/app/mini-app/page.tsx
+https://paydocs.daimo.com/sdk
+https://daimo-pay-demo.vercel.app/
+https://miniapps.farcaster.xyz/docs/guides/publishing
+https://miniapps.farcaster.xyz/
+https://nextjs.org/docs/app/guides/upgrading/version-15#route-handlers
+https://docs.proxy402.com/getting-started/create-your-first-url
+https://github.com/tantodefi/proxy402
+https://docs.proxy402.com/getting-started/paying-for-content
+https://docs.proxy402.com/api/routes#post-filesupload
+https://proxy402.com/fetch
+https://proxy402.com/aek56kV2rb
+https://proxy402.com/dashboard
+https://docs.proxy402.com/getting-started/verifying-requests
+https://docs.proxy402.com/api
 
 
-This debugging toolkit includes a full-stack mini-app example with both frontend and backend components.
 
-### Repository Structure
 
-The debugger is structured as follows:
 
-- [frontend](./frontend): The debugging frontend is a Next.js application with Farcaster Frames integration.
-- [backend](./backend): The debugging backend is a Node.js application that handles a group chat for the mini-app.
 
-### Requirements
 
-- Node.js v20 or higher
-- Yarn v4 or higher
-- Docker (optional, for local network debugging)
-- A Farcaster account (for Frames integration testing)
 
-### Backend Installation
 
-Clone the repository and setup the backend:
+## 🏗️ Architecture Overview
 
-```bash
-# Clone repository
-git clone https://github.com/xmtp/xmtp-mini-app-examples.git
-# Navigate to backend directory
-cd xmtp-mini-app-examples/backend
-# Install dependencies
-yarn install
-# Create .env file
-cp .env.example .env
-# Generate xmtp env vars: WALLET_KEY and ENCRYPTION_KEY
-yarn run gen:keys
-# Run in development mode
-yarn run dev
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           XMTP + AgentKit Architecture                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────┐    XMTP Messages    ┌─────────────────────────────────┐
+│                      │ ◄─────────────────► │                                 │
+│   Frontend (Vercel)  │                     │   Backend Agent (Render)       │
+│                      │                     │                                 │
+│  • BotChat Component │                     │  • X402BackendAgent             │
+│  • XMTP Browser SDK  │                     │  • XMTP Node SDK                │
+│  • Real-time Stream  │                     │  • Coinbase AgentKit            │
+│  • UI/UX             │                     │  • OpenAI Integration           │
+│                      │                     │  • Smart Wallet Features       │
+└──────────────────────┘                     └─────────────────────────────────┘
+           │                                                   │
+           │                                                   │
+           ▼                                                   ▼
+┌──────────────────────┐                     ┌─────────────────────────────────┐
+│                      │                     │                                 │
+│   X402 Protocol      │                     │   Coinbase Developer Platform   │
+│                      │                     │                                 │
+│  • Payment Gateway   │                     │  • Smart Wallet                │
+│  • Content Gating    │                     │  • Token Operations             │
+│  • USDC on Base      │                     │  • DeFi Integration             │
+│  • JWT Authentication│                     │  • Gas Sponsorship              │
+│                      │                     │                                 │
+└──────────────────────┘                     └─────────────────────────────────┘
+
+Features:
+🤖 AI-Powered Agent with OpenAI GPT-4
+💰 X402:// Payment Protocol for Content Monetization  
+🔗 Coinbase AgentKit for Smart Wallet Operations
+🥷 Ninja Token Rewards & Social Features
+📱 Real-time XMTP Messaging
+🎯 Farcaster Frame Integration
 ```
 
-### Frontend Installation
+## 🚀 Features
 
-Setup the frontend env vars:
+### 💰 **X402 Payment Protocol**
+- Create payment-gated content with `x402://` URLs
+- USDC payments on Base network
+- Real-time earnings tracking
+- JWT-based content authentication
 
+### 🤖 **AI-Powered XMTP Agent**
+- Natural language processing with OpenAI GPT-4
+- Smart wallet operations via Coinbase AgentKit
+- Real-time message streaming
+- Command-based interactions (`/help`, `/create`, `/balance`, etc.)
+
+### 🥷 **Social & Rewards System**
+- Ninja token rewards for achievements
+- Milestone-based progression
+- Farcaster Frame integration
+- Activity tracking and analytics
+
+### 🔗 **Smart Wallet Features** (via AgentKit)
+- Token deployment and management
+- Cross-chain transactions
+- Gas-sponsored operations
+- DeFi protocol interactions
+
+## 📋 Environment Variables
+
+### **Frontend (.env.local on Vercel):**
 ```bash
-# Navigate to backend directory
-cd xmtp-mini-app-examples/frontend
-# Install dependencies
-yarn install
-# Create .env file
-cp .env.example .env
-# Run in development mode
-yarn run dev
+# XMTP Configuration
+NEXT_PUBLIC_XMTP_ENV=production
+
+# Backend Agent Connection
+NEXT_PUBLIC_BACKEND_AGENT_ADDRESS=0xYourBackendAgentAddress
+NEXT_PUBLIC_BACKEND_URL=https://your-backend.onrender.com
+
+# X402 Protocol
+X402_JWT_SECRET=your-jwt-secret-key-min-32-chars
+NEXT_PUBLIC_DEFAULT_PAYMENT_RECIPIENT=0xYourWalletAddress
+
+# Redis (Upstash)
+UPSTASH_REDIS_REST_URL=https://your-database.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your-upstash-token
+
+# Webhooks
+NOTIFICATION_WEBHOOK_URL=https://your-backend.onrender.com/api/webhooks/notifications
+WEBHOOK_SECRET=your-webhook-secret-key
+
+# Payment Configuration
+NEXT_PUBLIC_USDC_CONTRACT_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+NEXT_PUBLIC_DAIMO_PAY_URL=https://daimo.com/l/pay
 ```
 
-## Debugging Examples
-
-- [Wallet Connection](./frontend/src/examples/WalletConnection.tsx): Connect a wallet to the mini-app.
-- [Connection Info](./frontend/src/examples/ConnectionInfo.tsx): Display information about the current connection.
-- [Group Management](./frontend/src/examples/GroupManagement.tsx): Join a group chat and send messages through the XMTP express backend.
-- [Bot Chat](./frontend/src/examples/BotChat.tsx): A simple example of a bot chat using the XMTP client.
-
-## Deployment of Your Debugged App
-
-Once your mini-app is debugged, you can deploy it to any hosting provider:
-
-1. Update production environment variables
-2. For Farcaster Frame integration, update the `farcaster.json` `getFarcasterManifest` [Wallet Connection](./frontend/src/lib/frame.ts) file with:
-   - Generated `accountAssociation` from Warpcast Mobile
-   - Set proper URLs in the manifest
-
-### Generate farcaster.json manifest for your domain
-
-1. Go to Developer Manifest settings:
-   1. On your browser go to [Farcaster Developers > Manifest](https://warpcast.com/~/developers/mini-apps/manifest) 
-   2. On your mobile app go to "Settings > Developers (activate developer mode in advanced) > Domains"
-2. Insert your domain and generate the manifest for it.
-
-Copy the account association object and paste it in the respective variables in the `.env` file.
-
-You now should have updated the following variables:
+### **Backend (.env on Render):**
 ```bash
-# ...
-NEXT_PUBLIC_URL="https://your-domain.com"
-NEXT_PUBLIC_FARCASTER_HEADER="..." # copy accountAssociation.header string here
-NEXT_PUBLIC_FARCASTER_PAYLOAD="..." # copy accountAssociation.payload string here
-NEXT_PUBLIC_FARCASTER_SIGNATURE="..." # copy accountAssociation.signature string here
+# XMTP Configuration
+WALLET_KEY=0x1111111111111111111111111111111111111111111111111111111111111111
+ENCRYPTION_KEY=1111111111111111111111111111111111111111111111111111111111111111
+XMTP_ENV=production
+API_SECRET_KEY=your-api-secret-key
+
+# Coinbase AgentKit (Optional)
+CDP_API_KEY_NAME=your-cdp-api-key-name
+CDP_API_KEY_PRIVATE_KEY=your-cdp-private-key
+CDP_WALLET_DATA=your-wallet-data
+
+# OpenAI (Optional)
+OPENAI_API_KEY=sk-your-openai-api-key
+
+# Redis (same as frontend)
+UPSTASH_REDIS_REST_URL=https://your-database.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your-upstash-token
+
+# Webhooks
+WEBHOOK_SECRET=your-webhook-secret-key
+
+# Service Configuration
+FRONTEND_URL=https://your-frontend.vercel.app
+PORT=5001
 ```
 
+## 🛠️ Setup Instructions
 
-## Debugging Farcaster Frames Integration
-
-To debug your mini-app with Farcaster:
-
-1. Generate domain manifest from Warpcast Mobile
-   - Go to Settings > Developer > Domains
-   - Insert website hostname
-   - Generate domain manifest
-2. Update the `accountAssociation` in your code
-3. Configure your frame with proper URLs and metadata
-4. Use the debugger to validate frame responses
-
-## Debugging with Local XMTP Network
-
-For isolated debugging, use a local XMTP network:
-
-1. Install Docker
-2. Start the XMTP service and database
-
+### **1. Clone and Install**
 ```bash
-./dev/up
+git clone <repository-url>
+cd xmtp-mini-app-examples
+
+# Install frontend dependencies
+cd frontend && yarn install
+
+# Install backend dependencies  
+cd ../backend && yarn install
 ```
 
-3. Change the `.env` files to use the local network
-
+### **2. Generate XMTP Keys**
 ```bash
-XMTP_ENV=local
+# In backend directory
+yarn gen:keys
 ```
 
-## Common Errors
+### **3. Configure Environment Variables**
+- Set up Vercel environment variables for frontend
+- Set up Render environment variables for backend
+- Configure Upstash Redis database
+- Set up Coinbase Developer Platform (optional)
 
-### Error: `Frontend not displaying something even when forced`
+### **4. Deploy**
+```bash
+# Deploy frontend to Vercel
+vercel --prod
 
-This is a common issue when the frontend and the backend operates on different XMTP_ENVs.
-Check the `.env` files to ensure that the frontend and backend are using the same XMTP_ENV network.
+# Deploy backend to Render
+# (Push to connected GitHub repository)
+```
 
+## 🎯 Usage Examples
 
-## Additional resources
+### **Chat with X402 Agent**
+```
+User: "Create a trading guide for 25 USDC"
+Agent: ✅ Content Created Successfully!
+       🔗 X402://: x402://yourapp.com/content/abc123?price=25&currency=USDC
+```
 
-- [xmtp.chat](https://xmtp.chat) - Web best practices with XMTP `browser-sdk`
-- [Farcaster MiniApps Documentation](https://miniapps.farcaster.xyz/docs/getting-started)
-- [Farcaster Frames Documentation](https://docs.farcaster.xyz/reference/frames/spec)
-- [Builders Garden miniapp template](https://github.com/builders-garden/miniapp-next-template)
+### **Smart Wallet Operations**
+```
+User: "/send 5 USDC to vitalik.eth"
+Agent: 🚀 Crypto Transfer Initiated
+       Status: ✅ Confirmed
+       Tx Hash: 0xabc123...
+```
+
+### **Token Deployment**
+```
+User: "/deploy MyToken MTK"
+Agent: 🪙 Token Deployed Successfully!
+       Contract: 0xdef456...
+       Network: Base
+```
+
+## 🔧 Development
+
+### **Local Development**
+```bash
+# Start backend
+cd backend && yarn dev
+
+# Start frontend  
+cd frontend && yarn dev
+```
+
+### **Testing XMTP Integration**
+1. Connect wallet to frontend
+2. Use BotChat component to message backend agent
+3. Try commands like `/help`, `/balance`, `/create`
+
+## 📚 Documentation
+
+- [X402 Protocol Guide](./frontend/X402_PROTOCOL_GUIDE.md)
+- [Social Features Guide](./frontend/SOCIAL_FEATURES_GUIDE.md)
+- [Farcaster Frames Guide](./frontend/FARCASTER_FRAMES_GUIDE.md)
+- [XMTP Integration Guide](https://docs.xmtp.org/)
+- [Coinbase AgentKit Docs](https://docs.cdp.coinbase.com/agentkit/)
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
+
+## 📄 License
+
+MIT License - see [LICENSE](./LICENSE) for details.

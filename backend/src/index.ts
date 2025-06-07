@@ -20,6 +20,8 @@ import {
 import { env } from './config/env.js';
 import fkeyRoutes from './routes/fkey.js';
 import convosRoutes from './routes/convos.js';
+import webhookRoutes from './routes/webhooks.js';
+import { X402BackendAgent } from './agents/x402-agent.js';
 
 const { WALLET_KEY, API_SECRET_KEY, ENCRYPTION_KEY, XMTP_ENV, PORT } =
   validateEnvironment([
@@ -33,6 +35,8 @@ const { WALLET_KEY, API_SECRET_KEY, ENCRYPTION_KEY, XMTP_ENV, PORT } =
 let GROUP_ID = process.env.GROUP_ID;
 // Global XMTP client
 let xmtpClient: Client;
+// Global X402 Backend Agent
+let x402Agent: X402BackendAgent;
 
 // Initialize XMTP client
 const initializeXmtpClient = async () => {
@@ -54,6 +58,9 @@ const initializeXmtpClient = async () => {
     });
 
     console.log("✅ XMTP Client initialized with inbox ID:", xmtpClient.inboxId);
+    
+    // Initialize X402 Backend Agent
+    await initializeX402Agent();
     
     // Only try to setup group functionality if not in Vercel (to avoid memory issues)
     // Vercel has VERCEL=1, Render has RENDER environment variable
@@ -131,6 +138,32 @@ const initializeXmtpClient = async () => {
     }
     
     throw error; // Re-throw for local development
+  }
+};
+
+// Initialize X402 Backend Agent
+const initializeX402Agent = async () => {
+  try {
+    if (x402Agent) {
+      console.log("🤖 X402 Backend Agent already initialized, skipping...");
+      return;
+    }
+
+    console.log("🤖 Initializing X402 Backend Agent...");
+    
+    x402Agent = new X402BackendAgent();
+    const agentInfo = await x402Agent.initialize(WALLET_KEY, ENCRYPTION_KEY, XMTP_ENV as XmtpEnv);
+    
+    console.log("✅ X402 Backend Agent initialized:");
+    console.log(`   📬 Agent Inbox ID: ${agentInfo.inboxId}`);
+    console.log(`   🔑 Agent Address: ${agentInfo.address}`);
+    
+    // Start the agent listening for messages
+    await x402Agent.startListening();
+    
+  } catch (error) {
+    console.error("❌ Failed to initialize X402 Backend Agent:", error);
+    // Don't throw - let the server continue without the agent
   }
 };
 
@@ -249,6 +282,42 @@ app.get("/health", (req, res) => {
     platform: isVercel ? "vercel" : "local",
     timestamp: new Date().toISOString()
   });
+});
+
+// Get X402 Agent contact information
+app.get("/api/agent/info", (req, res) => {
+  try {
+    if (!x402Agent) {
+      return res.status(503).json({
+        success: false,
+        message: "X402 Agent not available",
+        error: "Agent service is temporarily unavailable"
+      });
+    }
+
+    const agentInfo = x402Agent.getContactInfo();
+    res.json({
+      success: true,
+      agent: {
+        inboxId: agentInfo.inboxId,
+        address: agentInfo.address,
+        status: "active",
+        features: [
+          "X402 Content Creation",
+          "Smart Wallet Operations", 
+          "AI-Powered Responses",
+          "Token Management"
+        ]
+      }
+    });
+  } catch (error) {
+    console.error("Error getting agent info:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get agent information",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
 });
 
 app.post(
@@ -404,14 +473,23 @@ app.get(
 
 app.use('/api/fkey', fkeyRoutes);
 app.use('/api/convos', convosRoutes);
+app.use('/api/webhooks', webhookRoutes);
 
 // Start Server
 void (async () => {
   try {
-    await initializeXmtpClient();
-    app.listen(env.PORT, () => {
-      console.log(`Server is running on port ${env.PORT}`);
+    // Start HTTP server first
+    const server = app.listen(env.PORT, () => {
+      console.log(`🚀 Server is running on port ${env.PORT}`);
+      console.log(`🌐 API endpoints available at http://localhost:${env.PORT}`);
     });
+
+    // Initialize XMTP in parallel (don't block server startup)
+    initializeXmtpClient().catch((error) => {
+      console.error("⚠️ XMTP initialization failed, but server continues:", error);
+      // Server continues to run without XMTP for API routes that don't need it
+    });
+
   } catch (error) {
     console.error("Failed to start server:", error);
     process.exit(1);

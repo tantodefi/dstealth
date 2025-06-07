@@ -1,0 +1,115 @@
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.modalContent {
+  background-color: #1a1a1a;
+  padding: 24px;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 400px;
+  max-height: 80vh;
+  overflow-y: auto;
+  color: #fff;
+  border: 1px solid #333;
+  margin: 0 auto;
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #333;
+  padding-bottom: 15px;
+}
+
+.modalHeader h2 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.closeButton {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 1.8rem;
+  cursor: pointer;
+  padding: 4px;
+  min-width: 32px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.accordionItem {
+  border-bottom: 1px solid #333;
+  margin-bottom: 10px;
+}
+
+.accordionButton {
+  background: none;
+  border: none;
+  color: #fff;
+  width: 100%;
+  text-align: left;
+  padding: 15px 0;
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.question {
+  font-weight: 600;
+  flex: 1;
+  margin-right: 12px;
+}
+
+.icon {
+  font-size: 1.4rem;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.answer {
+  padding: 15px;
+  background-color: #222;
+  border-radius: 6px;
+  margin-top: 5px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+/* Mobile optimizations */
+@media (max-width: 480px) {
+  .modalContent {
+    padding: 20px;
+    max-width: calc(100vw - 32px);
+  }
+  
+  .modalHeader h2 {
+    font-size: 1.3rem;
+  }
+  
+  .accordionButton {
+    font-size: 1rem;
+  }
+  
+  .answer {
+    font-size: 0.9rem;
+    padding: 12px;
+  }
+} 

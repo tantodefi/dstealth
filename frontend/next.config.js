@@ -31,6 +31,8 @@ const nextConfig = {
         tls: false,
         crypto: false,
         ws: false,
+        lokijs: false,
+        "pino-pretty": false,
       };
 
       config.module.rules.push({
@@ -52,7 +54,7 @@ const nextConfig = {
         'bufferutil': 'commonjs bufferutil',
       });
     }
-
+    config.externals.push("pino-pretty", "lokijs");
     return config;
   },
 };

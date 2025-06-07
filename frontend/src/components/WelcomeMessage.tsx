@@ -2,26 +2,19 @@ import { useFrame } from "@/context/frame-context";
 import { useAccount, useDisconnect, useSignMessage } from "wagmi";
 import Image from "next/image";
 import { useXMTP } from "@/context/xmtp-context";
-import {
-  Wallet,
-  WalletDropdown,
-  WalletDropdownDisconnect,
-  WalletDropdownLink,
-  WalletDropdownFundLink,
-  WalletDropdownBasename,
-  ConnectWallet,
-} from '@coinbase/onchainkit/wallet';
-import {
-  Avatar as WalletAvatar,
-  Name as WalletName,
-  Identity,
-  EthBalance,
-  Badge,
-  Address,
-} from '@coinbase/onchainkit/identity';
-import { useEffect, useState } from 'react';
-import { privateKeyToAccount } from 'viem/accounts';
-import { Proxy402Balance } from './Proxy402Balance';
+import { useState, useEffect, useRef } from "react";
+import { privateKeyToAccount } from "viem/accounts";
+import { ChevronDown, Copy, Check, Eye, User, Settings, X, RefreshCw } from "lucide-react";
+// Temporarily commented out due to React dependency conflicts
+// import {
+//   Avatar as WalletAvatar,
+//   Name as WalletName,
+//   Identity,
+//   EthBalance,
+//   Badge,
+//   Address,
+// } from '@coinbase/onchainkit/identity';
+import UserAvatar from './UserAvatar';
 
 // Storage keys
 const XMTP_CONNECTION_TYPE_KEY = "xmtp:connectionType";
@@ -33,8 +26,9 @@ interface WelcomeMessageProps {
 
 export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
   const { context } = useFrame();
-  const { address, connector, isConnected } = useAccount();
+  const { address, isConnected: isWalletConnected } = useAccount();
   const { disconnect: disconnectWallet } = useDisconnect();
+  
   const { 
     client, 
     disconnect: disconnectXMTP, 
@@ -42,35 +36,29 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
     isInFarcasterContext, 
     farcasterUser 
   } = useXMTP();
-  const { signMessageAsync } = useSignMessage();
-  const [ephemeralAddress, setEphemeralAddress] = useState<string>("");
+
+  // State
   const [showDropdown, setShowDropdown] = useState(false);
+  const [ephemeralAddress, setEphemeralAddress] = useState<string>("");
   const [copied, setCopied] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [forceRerender, setForceRerender] = useState(0);
+  const [ethName, setEthName] = useState<string | null>(null);
+  const [isLoadingEthName, setIsLoadingEthName] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
+
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Handle mounting state
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Force re-render when connection state changes to help OnchainKit sync
-  useEffect(() => {
-    if (isConnected && address && mounted) {
-      // Small delay to let OnchainKit's internal state sync
-      const timer = setTimeout(() => {
-        setForceRerender(prev => prev + 1);
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [isConnected, address, mounted, connectionType]);
-
   // Get ephemeral address when connection type changes
   useEffect(() => {
     const isEphemeral = connectionType === "ephemeral" || connectionType === "Ephemeral Wallet";
     
     if (isEphemeral) {
-      const savedPrivateKey = localStorage.getItem("xmtp:ephemeralKey");
+      const savedPrivateKey = localStorage.getItem(XMTP_EPHEMERAL_KEY);
       if (savedPrivateKey) {
         try {
       const formattedKey = savedPrivateKey.startsWith("0x")
@@ -79,66 +67,120 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
 
       const account = privateKeyToAccount(formattedKey);
       setEphemeralAddress(account.address);
-          console.log("🔑 Ephemeral address set:", account.address);
         } catch (error) {
           console.error("Error generating ephemeral address:", error);
           setEphemeralAddress("");
         }
-      } else {
-        console.warn("Ephemeral connection type but no key found");
-        setEphemeralAddress("");
       }
     } else {
       setEphemeralAddress("");
     }
   }, [connectionType]);
 
-  // Handle wallet disconnection events - only for non-Farcaster connections
-  useEffect(() => {
-    if (!isConnected && !address && connectionType !== "ephemeral" && connectionType !== "Ephemeral Wallet" && !isInFarcasterContext) {
-      // Regular wallet was disconnected, also disconnect XMTP
-      disconnectXMTP();
-    }
-  }, [isConnected, address, connectionType, disconnectXMTP, isInFarcasterContext]);
-
-  // Determine what to show in the UI
+  // Determine connection state
   const isEphemeralConnection = connectionType === "ephemeral" || connectionType === "Ephemeral Wallet";
-  const isSmartWalletConnection = connectionType === "Coinbase Smart Wallet" || connectionType === "scw";
-  const hasActiveConnection = !!client && (
-    (isConnected && address) || 
-    (isEphemeralConnection && ephemeralAddress)
-  );
+  const hasWalletConnection = isWalletConnected && address;
+  const hasEphemeralConnection = isEphemeralConnection && ephemeralAddress;
+  const hasActiveConnection = !!client && (hasWalletConnection || hasEphemeralConnection);
   
   const displayAddress = address || ephemeralAddress;
 
-  // Enhanced connection check for smart wallets
-  const isSmartWalletReady = mounted && isSmartWalletConnection && isConnected && address && displayAddress;
-
-  // Debug logging
+  // Check backend status periodically
   useEffect(() => {
-    console.log("👋 WelcomeMessage state:", {
-      connectionType,
-      isEphemeralConnection,
-      isSmartWalletConnection,
-      isSmartWalletReady,
-      hasActiveConnection,
-      hasClient: !!client,
-      address,
-      ephemeralAddress,
-      displayAddress,
-      isConnected,
-      mounted,
-      forceRerender,
-      connector: connector?.id,
-    });
-  }, [connectionType, isEphemeralConnection, isSmartWalletConnection, isSmartWalletReady, hasActiveConnection, client, address, ephemeralAddress, displayAddress, isConnected, mounted, forceRerender, connector]);
+    const checkBackendStatus = async () => {
+      try {
+        const response = await fetch('/api/agent/info', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (response.ok) {
+          setBackendStatus('connected');
+        } else {
+          setBackendStatus('disconnected');
+        }
+      } catch (error) {
+        setBackendStatus('disconnected');
+      }
+    };
 
-  // Get display name - prioritize Farcaster user info
+    // Check immediately and then every 30 seconds
+    checkBackendStatus();
+    const interval = setInterval(checkBackendStatus, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Resolve ENS name
+  useEffect(() => {
+    const resolveEthName = async () => {
+      if (!displayAddress || !mounted) return;
+      
+      setIsLoadingEthName(true);
+      try {
+        // Try to resolve ENS name using a public API
+        const response = await fetch(`https://api.ensideas.com/ens/resolve/${displayAddress}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.name) {
+            setEthName(data.name);
+          }
+        }
+      } catch (error) {
+        console.log("ENS resolution failed:", error);
+      } finally {
+        setIsLoadingEthName(false);
+      }
+    };
+
+    const timeoutId = setTimeout(resolveEthName, 500); // Debounce
+    return () => clearTimeout(timeoutId);
+  }, [displayAddress, mounted]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+
+    if (showDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showDropdown]);
+
+  // Get display name - prioritize Farcaster user info, then ENS, then address
   const getDisplayName = () => {
     if (isInFarcasterContext && farcasterUser) {
       return farcasterUser.displayName || farcasterUser.username || "Farcaster User";
     }
-    return null; // Will show address or basename
+    if (ethName) {
+      return ethName;
+    }
+    if (displayAddress) {
+      return `${displayAddress.slice(0, 6)}...${displayAddress.slice(-4)}`;
+    }
+    return "Guest";
+  };
+
+  // Get welcome message
+  const getWelcomeText = () => {
+    const displayName = getDisplayName();
+    
+    if (isInFarcasterContext && farcasterUser) {
+      return `Welcome back, ${farcasterUser.displayName || farcasterUser.username}!`;
+    }
+    if (hasActiveConnection) {
+      return `Welcome back, ${displayName}!`;
+    }
+    return "Connect your wallet to get started";
   };
 
   // Copy to clipboard function
@@ -146,436 +188,201 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000); // Reset after 2 seconds
+      setTimeout(() => setCopied(false), 2000);
     } catch (error) {
       console.error('Failed to copy to clipboard:', error);
     }
   };
 
-  const handleEphemeralDisconnect = () => {
-    // For ephemeral wallets, manually clear everything
+  // Handle disconnect
+  const handleDisconnect = () => {
+    if (isEphemeralConnection) {
     disconnectXMTP();
-    localStorage.removeItem("xmtp:connectionType");
-    localStorage.removeItem("xmtp:ephemeralKey");
+      localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
+      localStorage.removeItem(XMTP_EPHEMERAL_KEY);
     setEphemeralAddress("");
-    setShowDropdown(false);
-  };
-
-  const handleWalletDisconnect = () => {
-    // For regular wallets, disconnect both wallet and XMTP
+    } else {
     disconnectWallet();
     disconnectXMTP();
+    }
     setShowDropdown(false);
   };
 
   // Don't render until mounted to prevent hydration issues
   if (!mounted) {
     return (
-      <div className="bg-gray-800 py-2 px-4">
+      <div className="bg-gray-800 py-3 px-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <p className="text-gray-200">Loading...</p>
-          <div className="flex items-center">
-            <Proxy402Balance onShowChart={onShowEarningsChart} />
-          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-gray-800 py-2 px-4">
-      <div className="max-w-7xl mx-auto flex items-center justify-between relative">
-        <div className="flex items-center gap-2">
-          {hasActiveConnection && displayAddress ? (
-            <div className="relative z-[10000]">
-              {/* Use OnchainKit for Smart Wallet connections */}
-              {isSmartWalletConnection ? (
-                // Check if wagmi also sees the wallet as connected for OnchainKit compatibility
-                isSmartWalletReady ? (
-                  <Wallet key={`smart-wallet-${forceRerender}`}>
-                    <ConnectWallet 
-                      className="!bg-transparent !border-none !p-0 !shadow-none hover:!bg-transparent !text-white !min-h-0"
-                    >
-                      {/* Custom connected state content */}
-                      <div className="flex items-center gap-2 cursor-pointer text-white hover:bg-gray-700 rounded-lg p-2 transition-colors">
-                        <span className="text-gray-200">Welcome,</span>
-                        <WalletAvatar 
-                          address={displayAddress as `0x${string}`}
-                          className="h-6 w-6" 
-                        />
-                        <WalletName 
-                          address={displayAddress as `0x${string}`}
-                          className="text-white text-sm" 
+    <div className="bg-gray-800 py-3 px-4">
+      <div className="max-w-7xl mx-auto flex items-center justify-between">
+        {/* Welcome message with avatar and connection status */}
+        <div className="flex items-center gap-3">
+          {/* Avatar */}
+          <div className="flex-shrink-0">
+            <UserAvatar
+              address={displayAddress || undefined}
+              farcasterUser={isInFarcasterContext ? farcasterUser : undefined}
+              size={32}
                         />
                   </div>
-                </ConnectWallet>
-                    
-                <WalletDropdown className="!z-[10001] !absolute !top-full !left-0 !mt-2">
-                  <Identity
-                    className="px-4 pt-3 pb-2"
-                    hasCopyAddressOnClick
-                    address={displayAddress as `0x${string}`}
-                  >
-                    <WalletAvatar address={displayAddress as `0x${string}`} />
-                    <WalletName address={displayAddress as `0x${string}`}>
-                      <Badge />
-                    </WalletName>
-                    <Address />
-                        <EthBalance 
-                          address={displayAddress as `0x${string}`} 
-                          className="text-green-400"
-                        />
-                  </Identity>
-                  
-                      {/* Connection type indicator */}
-                      <div className="px-4 py-2 text-xs text-gray-500 border-b border-gray-200">
-                        Connection: Coinbase Smart Wallet
+          
+          {/* Name and connection dropdown */}
+          <div className="relative" ref={dropdownRef}>
+            <button
+              onClick={() => setShowDropdown(!showDropdown)}
+              className="flex items-center gap-2 text-gray-200 hover:text-white transition-colors group"
+            >
+              <div>
+                <div className="text-sm font-medium">
+                  {isLoadingEthName ? (
+                    <div className="flex items-center gap-1">
+                      <span>{getDisplayName()}</span>
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                    </div>
+                  ) : (
+                    getDisplayName()
+                  )}
+                </div>
+                <div className="text-xs text-gray-400">
+                  {getWelcomeText()}
+                </div>
                       </div>
-                      
-                    <WalletDropdownBasename />
-                      <WalletDropdownLink
-                        icon="wallet"
-                        href="https://keys.coinbase.com"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        Manage Wallet
-                      </WalletDropdownLink>
-                      <WalletDropdownFundLink />
-                      <WalletDropdownLink
-                        icon="creditCard"
-                        href={`https://etherscan.io/address/${displayAddress}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        View on Etherscan
-                      </WalletDropdownLink>
-                      <WalletDropdownLink
-                        icon="coinbaseWallet"
-                        href="https://www.coinbase.com/web3"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        Learn Web3
-                      </WalletDropdownLink>
-                      
-                      <WalletDropdownDisconnect />
-                    </WalletDropdown>
-                  </Wallet>
-                ) : (
-                  /* Smart wallet connected in XMTP but not wagmi - use custom implementation */
-                  <>
-                    {/* Custom Welcome Button that opens dropdown */}
+              <ChevronDown className="w-4 h-4 text-gray-400 group-hover:text-white transition-transform duration-200" />
+            </button>
+
+            {/* Connection Details Dropdown */}
+            {showDropdown && (
+              <div className="absolute top-full left-0 mt-2 w-80 bg-gray-900 border border-gray-700 rounded-lg shadow-lg z-50">
+                <div className="p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-semibold text-white">Connection Details</h3>
                     <button
-                      onClick={() => setShowDropdown(!showDropdown)}
-                      className="flex items-center gap-2 cursor-pointer text-white hover:bg-gray-700 rounded-lg p-2 transition-colors"
+                      onClick={() => setShowDropdown(false)}
+                      className="text-gray-400 hover:text-white"
                     >
-                      <span className="text-gray-200">Welcome,</span>
-                      <WalletAvatar 
-                        address={displayAddress as `0x${string}`}
-                        className="h-6 w-6" 
-                      />
-                      <WalletName 
-                        address={displayAddress as `0x${string}`}
-                        className="text-white text-sm" 
-                      />
+                      <X className="w-4 h-4" />
                     </button>
-                    
-                    {/* Custom Dropdown for smart wallet not connected via wagmi */}
-                    {showDropdown && (
-                      <div className="absolute top-full left-0 mt-2 z-[10001]">
-                        <div className="w-80 bg-gray-900 border border-gray-700 rounded-lg shadow-lg p-4">
-                          {/* Identity Section */}
-                          <div className="flex items-center gap-3 px-4 pt-3 pb-2">
-                            <WalletAvatar address={displayAddress as `0x${string}`} />
-                            <div className="flex-1">
-                              <div>
-                                <WalletName 
-                                  address={displayAddress as `0x${string}`}
-                                  className="text-white text-sm font-semibold" 
-                                />
-                                <Badge />
-                              </div>
-                            </div>
                           </div>
                           
-                          {/* Address Section with Copy Button */}
-                          <div className="px-4 py-2 border-b border-gray-700">
-                            <div className="text-xs text-gray-400 mb-1">Address</div>
-                            <div className="flex items-center gap-2">
-                              <div className="text-white text-sm font-mono break-all flex-1">
-                                {displayAddress}
-                              </div>
-                              <button
-                                onClick={() => copyToClipboard(displayAddress)}
-                                className="flex-shrink-0 p-1 text-gray-400 hover:text-white transition-colors"
-                                title="Copy address"
-                              >
-                                {copied ? (
-                                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                                    <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
-                                  </svg>
-                                ) : (
-                                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                                    <path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/>
-                                    <path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h1v1a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1v1H2z"/>
-                                  </svg>
-                                )}
-                              </button>
-                            </div>
+                  <div className="space-y-3 text-xs">
+                    {/* Frontend Status */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-400">Frontend:</span>
+                      <span className="text-green-400">✓ Connected</span>
                           </div>
                           
-                          {/* Balance Section */}
-                          <div className="px-4 py-2 border-b border-gray-700">
-                            <EthBalance 
-                              address={displayAddress as `0x${string}`} 
-                              className="text-green-400"
-                            />
+                    {/* Backend Status */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-400">Backend:</span>
+                      <span className={`${
+                        backendStatus === 'connected' ? 'text-green-400' : 
+                        backendStatus === 'disconnected' ? 'text-red-400' : 
+                        'text-yellow-400'
+                      }`}>
+                        {backendStatus === 'connected' ? '✓ Connected' : 
+                         backendStatus === 'disconnected' ? '✗ Disconnected' : 
+                         '↻ Checking...'}
+                      </span>
                           </div>
                           
-                          {/* Connection type indicator */}
-                          <div className="px-4 py-2 text-xs text-gray-400 border-b border-gray-700">
-                            Connection: Coinbase Smart Wallet
+                    {/* Wallet Status */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-400">Wallet:</span>
+                      <span className={`${hasActiveConnection ? "text-green-400" : "text-red-400"}`}>
+                        {hasActiveConnection ? "✓ Connected" : "✗ Not connected"}
+                      </span>
                           </div>
                           
-                          {/* Links */}
-                          <div className="px-4 py-2 border-b border-gray-700">
-                            <a
-                              href="https://keys.coinbase.com"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="block text-blue-400 hover:text-blue-300 text-sm py-1"
-                            >
-                              Manage Wallet
-                            </a>
-                            <a
-                              href={`https://etherscan.io/address/${displayAddress}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="block text-blue-400 hover:text-blue-300 text-sm py-1"
-                            >
-                              View on Etherscan
-                            </a>
-                          </div>
-                          
-                          {/* Disconnect button */}
-                          <div className="px-4 py-2">
+                    {/* Address */}
+                    {displayAddress && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-400">Address:</span>
+                        <div className="flex items-center gap-1">
+                          <span className="text-white text-xs font-mono">
+                            {displayAddress.slice(0, 6)}...{displayAddress.slice(-4)}
+                          </span>
                             <button
-                              onClick={handleWalletDisconnect}
-                              className="w-full px-4 py-2 text-left text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-2 transition-colors"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M8 0C3.6 0 0 3.6 0 8s3.6 8 8 8 8-3.6 8-8-3.6-8-8-8zM8 14c-3.3 0-6-2.7-6-6s2.7-6 6-6 6 2.7 6 6-2.7 6-6 6z"/>
-                        <path d="M11 5L5 11M5 5l6 6"/>
-                      </svg>
-                      Disconnect
+                            onClick={() => copyToClipboard(displayAddress)}
+                            className="text-gray-400 hover:text-blue-400"
+                          >
+                            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                     </button>
-                          </div>
                         </div>
                       </div>
                     )}
                     
-                    {/* Click outside to close dropdown */}
-                    {showDropdown && (
-                      <div 
-                        className="fixed inset-0 z-[10000]" 
-                        onClick={() => setShowDropdown(false)}
-                      />
-                    )}
-                  </>
-                )
-              ) : (
-                /* Custom implementation for EOA and Ephemeral wallets */
-                <>
-                  {/* Custom Welcome Button that opens dropdown */}
-                  <button
-                    onClick={() => setShowDropdown(!showDropdown)}
-                    className="flex items-center gap-2 cursor-pointer text-white hover:bg-gray-700 rounded-lg p-2 transition-colors"
-                  >
-                    <span className="text-gray-200">Welcome,</span>
-                    {isInFarcasterContext && farcasterUser ? (
-                      <>
-                        {farcasterUser.pfpUrl ? (
-                          <Image
-                            src={farcasterUser.pfpUrl}
-                            alt="Profile"
-                            width={24}
-                            height={24}
-                            className="rounded-full"
-                          />
-                        ) : (
-                          <WalletAvatar 
-                            address={displayAddress as `0x${string}`}
-                            className="h-6 w-6" 
-                          />
-                        )}
-                        <span className="text-white text-sm font-medium">
-                          {getDisplayName()}
+                    {/* XMTP Client */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-400">XMTP Client:</span>
+                      <span className={`${client ? "text-green-400" : "text-red-400"}`}>
+                        {client ? "✓ Active" : "✗ Not active"}
                         </span>
-                      </>
-                    ) : isEphemeralConnection ? (
-                      <>
-                        <div className="h-6 w-6 rounded-full bg-yellow-500 flex items-center justify-center">
-                          <span className="text-xs">⚡</span>
-                        </div>
-                        <span className="text-white text-sm font-medium">
-                          anon
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <WalletAvatar 
-                          address={displayAddress as `0x${string}`}
-                          className="h-6 w-6" 
-                        />
-                        <WalletName 
-                          address={displayAddress as `0x${string}`}
-                          className="text-white text-sm" 
-                        />
-                      </>
-                    )}
-                  </button>
-                  
-                  {/* Custom Dropdown - only shown when button is clicked */}
-                  {showDropdown && (
-                    <div className="absolute top-full left-0 mt-2 z-[10001]">
-                      <div className="w-80 bg-gray-900 border border-gray-700 rounded-lg shadow-lg p-4">
-                        {/* Identity Section */}
-                        <div className="flex items-center gap-3 px-4 pt-3 pb-2">
-                          {isInFarcasterContext && farcasterUser?.pfpUrl ? (
-                            <Image
-                              src={farcasterUser.pfpUrl}
-                              alt="Profile"
-                              width={40}
-                              height={40}
-                              className="rounded-full"
-                            />
-                          ) : isEphemeralConnection ? (
-                            <div className="w-10 h-10 rounded-full bg-yellow-500 flex items-center justify-center">
-                              <span className="text-lg">⚡</span>
-                            </div>
-                          ) : (
-                            <WalletAvatar address={displayAddress as `0x${string}`} />
-                          )}
-                          
-                          <div className="flex-1">
-                            {isInFarcasterContext && farcasterUser ? (
-                              <div>
-                                <div className="font-semibold text-sm text-white">{getDisplayName()}</div>
-                                <div className="text-xs text-gray-400">@{farcasterUser.username}</div>
-                              </div>
-                            ) : isEphemeralConnection ? (
-                              <div>
-                                <div className="font-semibold text-sm text-white">Anonymous User</div>
-                                <div className="text-xs text-gray-400">Ephemeral Wallet</div>
-                              </div>
-                            ) : (
-                              <div>
-                                <WalletName 
-                                  address={displayAddress as `0x${string}`}
-                                  className="text-white text-sm font-semibold" 
-                                />
-                                <Badge />
-                              </div>
-                            )}
-                          </div>
                         </div>
                         
-                        {/* Address Section with Copy Button */}
-                        <div className="px-4 py-2 border-b border-gray-700">
-                          <div className="text-xs text-gray-400 mb-1">Address</div>
-                          <div className="flex items-center gap-2">
-                            <div className="text-white text-sm font-mono break-all flex-1">
-                              {displayAddress}
-                            </div>
-                            <button
-                              onClick={() => copyToClipboard(displayAddress)}
-                              className="flex-shrink-0 p-1 text-gray-400 hover:text-white transition-colors"
-                              title="Copy address"
-                            >
-                              {copied ? (
-                                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                                  <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
-                                </svg>
-                              ) : (
-                                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                                  <path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/>
-                                  <path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h1v1a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1v1H2z"/>
-                                </svg>
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                        
-                        {/* Balance Section for non-ephemeral wallets */}
-                        {!isEphemeralConnection && (
-                          <div className="px-4 py-2 border-b border-gray-700">
-                            <EthBalance 
-                              address={displayAddress as `0x${string}`} 
-                              className="text-green-400"
-                            />
-                          </div>
-                        )}
-                        
-                        {/* Connection type indicator */}
-                        <div className="px-4 py-2 text-xs text-gray-400 border-b border-gray-700">
-                          Connection: {isInFarcasterContext ? "Farcaster Frame" : 
-                                      isEphemeralConnection ? "Ephemeral Wallet" : 
-                                      "EOA Wallet"}
-                        </div>
-                        
-                        {/* Links for non-ephemeral wallets */}
-                        {!isEphemeralConnection && (
-                          <div className="px-4 py-2 border-b border-gray-700">
-                            <a
-                              href={`https://etherscan.io/address/${displayAddress}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="block text-blue-400 hover:text-blue-300 text-sm py-1"
-                            >
-                              View on Etherscan
-                            </a>
-                          </div>
-                        )}
-                        
-                        {/* Disconnect button */}
-                        <div className="px-4 py-2">
+                    {/* Inbox ID */}
+                    {client?.inboxId && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-400">Inbox ID:</span>
+                        <div className="flex items-center gap-1">
+                          <span className="text-white text-xs font-mono">
+                            {client.inboxId.slice(0, 8)}...
+                          </span>
                           <button
-                            onClick={isEphemeralConnection ? handleEphemeralDisconnect : handleWalletDisconnect}
-                            className="w-full px-4 py-2 text-left text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-2 transition-colors"
+                            onClick={() => copyToClipboard(client.inboxId || "")}
+                            className="text-gray-400 hover:text-blue-400"
                           >
-                            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                              <path d="M8 0C3.6 0 0 3.6 0 8s3.6 8 8 8 8-3.6 8-8-3.6-8-8-8zM8 14c-3.3 0-6-2.7-6-6s2.7-6 6-6 6 2.7 6 6-2.7 6-6 6z"/>
-                              <path d="M11 5L5 11M5 5l6 6"/>
-                            </svg>
-                            Disconnect
+                            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                           </button>
                         </div>
                       </div>
+                    )}
+
+                    {/* Connection Type */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-400">Type:</span>
+                      <span className="text-white">
+                        {connectionType || "unknown"}
+                      </span>
+                    </div>
+
+                    {/* Environment */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-400">Environment:</span>
+                      <span className="text-white">dev</span>
+                    </div>
+
+                    {/* Ephemeral Key Status */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-400">Ephemeral Key:</span>
+                      <span className="text-white">
+                        {isEphemeralConnection ? "Active" : "Not set"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Action buttons */}
+                  {hasActiveConnection && (
+                    <div className="mt-4 pt-3 border-t border-gray-700">
+                      <button
+                        onClick={handleDisconnect}
+                        className="w-full px-3 py-2 text-left text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-2 transition-colors text-sm"
+                      >
+                        <Settings className="w-4 h-4" />
+                        Disconnect
+                      </button>
                     </div>
                   )}
-                  
-                  {/* Click outside to close dropdown */}
-                  {showDropdown && (
-                    <div 
-                      className="fixed inset-0 z-[10000]" 
-                      onClick={() => setShowDropdown(false)}
-                    />
-                  )}
-                </>
+                </div>
+              </div>
               )}
             </div>
-          ) : (
-            // No active XMTP connection - show simple welcome
-            <p className="text-gray-200">
-              Welcome, <span className="font-medium text-white">anon</span>
-            </p>
-          )}
-        </div>
-        
-        {/* Proxy402 Balance - Far right in green */}
-        <div className="flex items-center">
-          <Proxy402Balance onShowChart={onShowEarningsChart} />
         </div>
       </div>
     </div>

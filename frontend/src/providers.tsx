@@ -64,12 +64,13 @@ if (typeof window !== 'undefined') {
   }, 0);
 }
 
-import { DaimoPayProvider, getDefaultConfig } from '@daimo/pay';
+// import { DaimoPayProvider, getDefaultConfig } from '@daimo/pay';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type ReactNode, useEffect, useState } from 'react';
-import { WagmiProvider, createConfig } from 'wagmi';
-import { OnchainKitProvider } from '@coinbase/onchainkit';
+import { WagmiProvider, createConfig, http } from 'wagmi';
+// import { OnchainKitProvider } from '@coinbase/onchainkit';
 import { coinbaseWallet } from 'wagmi/connectors';
+import { base } from 'wagmi/chains';
 import { ErudaProvider } from '@/providers/eruda';
 import { FrameProvider } from '@/context/frame-context';
 import { XMTPProvider } from '@/context/xmtp-context';
@@ -93,18 +94,31 @@ const queryClient = new QueryClient({
   },
 });
 
-// Use Daimo Pay's default config which includes all required chains
-const wagmiConfig = createConfig(
-  getDefaultConfig({
-    appName: 'XMTP Mini App',
-    // Add any additional configuration here
+// Simple wagmi config without DaimoPay for now
+const wagmiConfig = createConfig({
+  chains: [base],
     connectors: [
       coinbaseWallet({
         appName: 'XMTP Mini App',
       }),
     ],
-  })
-);
+  transports: {
+    [base.id]: http(),
+  },
+});
+
+// Temporarily disabled DaimoPay config
+// const wagmiConfig = createConfig(
+//   getDefaultConfig({
+//     appName: 'XMTP Mini App',
+//     // Add any additional configuration here
+//     connectors: [
+//       coinbaseWallet({
+//         appName: 'XMTP Mini App',
+//       }),
+//     ],
+//   })
+// );
 
 // Error boundary component for DaimoPay
 function DaimoPayErrorBoundary({ children }: { children: ReactNode }) {
@@ -178,23 +192,26 @@ function SafeDaimoPayProvider({ children }: { children: ReactNode }) {
     return <>{children}</>;
   }
 
+  // Temporarily disabled DaimoPayProvider due to Solana dependencies
+  return <>{children}</>;
+
   // Always render children, optionally with DaimoPayProvider
-  if (daimoPayEnabled) {
-    try {
-      return (
-        <DaimoPayErrorBoundary>
-          <DaimoPayProvider>
-            {children}
-          </DaimoPayProvider>
-        </DaimoPayErrorBoundary>
-      );
-    } catch (error) {
-      console.error('Error rendering DaimoPayProvider:', error);
-    }
-  }
+  // if (daimoPayEnabled) {
+  //   try {
+  //     return (
+  //       <DaimoPayErrorBoundary>
+  //         <DaimoPayProvider>
+  //           {children}
+  //         </DaimoPayProvider>
+  //       </DaimoPayErrorBoundary>
+  //     );
+  //   } catch (error) {
+  //     console.error('Error rendering DaimoPayProvider:', error);
+  //   }
+  // }
   
   // Default: render without DaimoPayProvider (this should always work)
-  return <>{children}</>;
+  // return <>{children}</>;
 }
 
 // Create a client-only wrapper to prevent hydration issues
@@ -213,7 +230,7 @@ function ClientProviders({ children }: { children: ReactNode }) {
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
         <SafeDaimoPayProvider>
-          <OnchainKitProvider 
+          {/* <OnchainKitProvider 
             chain={wagmiConfig.chains[0]}
             apiKey={env.NEXT_PUBLIC_ONCHAINKIT_API_KEY}
             config={{
@@ -221,7 +238,7 @@ function ClientProviders({ children }: { children: ReactNode }) {
                 mode: 'dark',
                 theme: 'default'
               }
-            }}>
+            }}> */}
             <ErudaProvider>
               <FrameProvider>
                 <XMTPProvider>
@@ -229,7 +246,7 @@ function ClientProviders({ children }: { children: ReactNode }) {
                 </XMTPProvider>
               </FrameProvider>
             </ErudaProvider>
-          </OnchainKitProvider>
+          {/* </OnchainKitProvider> */}
         </SafeDaimoPayProvider>
       </QueryClientProvider>
     </WagmiProvider>

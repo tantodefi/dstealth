@@ -22,6 +22,17 @@ import {
   createEphemeralSigner,
   createSCWSigner,
 } from "@/lib/xmtp";
+import { WelcomeMessage } from "@/components/WelcomeMessage";
+// OnchainKit imports for Coinbase wallet
+import {
+  Avatar,
+  Name,
+  Identity,
+  EthBalance,
+  Badge,
+  Address,
+} from '@coinbase/onchainkit/identity';
+import { Wallet, WalletDropdown, WalletDropdownLink, WalletDropdownDisconnect } from '@coinbase/onchainkit/wallet';
 
 // Simple local storage keys - use consistent naming
 const XMTP_CONNECTION_TYPE_KEY = "xmtp:connectionType";
@@ -49,6 +60,13 @@ export default function WalletConnection() {
   // Refs to prevent multiple connection attempts
   const connectionAttemptRef = useRef<string>("");
   const initializationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Determine if user is fully connected
+  const isEphemeralConnection = xmtpConnectionType === "ephemeral" || xmtpConnectionType === "Ephemeral Wallet";
+  const hasWalletConnection = isConnected && address;
+  const hasEphemeralConnection = isEphemeralConnection && ephemeralAddress;
+  const isFullyConnected = !!client && (hasWalletConnection || hasEphemeralConnection);
+  const isCoinbaseWallet = connector?.id === "coinbaseWalletSDK";
 
   // Sync local connection type with XMTP context
   useEffect(() => {
@@ -275,6 +293,7 @@ export default function WalletConnection() {
   const connectWithEphemeral = useCallback(() => {
     if (initializing || localInitializing) return;
 
+    console.log("Connecting with Ephemeral wallet...");
     setLocalConnectionType("Ephemeral Wallet");
 
     const privateKey = generatePrivateKey();
@@ -284,6 +303,7 @@ export default function WalletConnection() {
     localStorage.setItem(XMTP_EPHEMERAL_KEY, privateKey);
     localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "Ephemeral Wallet");
 
+    console.log("Created ephemeral address:", account.address);
     initializeXmtp(createEphemeralSigner(privateKey), "ephemeral");
   }, [initializeXmtp, initializing, localInitializing]);
 
@@ -313,6 +333,7 @@ export default function WalletConnection() {
   const connectWithCoinbaseSmartWallet = useCallback(() => {
     if (initializing || localInitializing) return;
 
+    console.log("Connecting with Coinbase Smart Wallet...");
     setLocalConnectionType("Coinbase Smart Wallet");
     localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "Coinbase Smart Wallet");
 
@@ -341,6 +362,44 @@ export default function WalletConnection() {
     };
   }, []);
 
+  // Show WelcomeMessage if user is fully connected
+  if (isFullyConnected) {
+    // For Coinbase wallet, show OnchainKit components
+    if (isCoinbaseWallet && isConnected) {
+      return (
+        <div className="w-full">
+          <div className="bg-gray-800 py-3 px-4">
+            <div className="max-w-7xl mx-auto flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Wallet>
+                  <Identity
+                    address={address}
+                    className="bg-gray-900 rounded-lg p-3"
+                  >
+                    <Avatar />
+                    <Name />
+                    <Address />
+                    <EthBalance />
+                    <Badge />
+                  </Identity>
+                  <WalletDropdown>
+                    <WalletDropdownLink icon="wallet" href="/wallet">
+                      Wallet
+                    </WalletDropdownLink>
+                    <WalletDropdownDisconnect />
+                  </WalletDropdown>
+                </Wallet>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    
+    // For other wallet types and ephemeral connections
+    return <WelcomeMessage />;
+  }
+
   // Show different UI if we're in Farcaster context and already connected
   if (isInFarcasterContext && client) {
     return (
@@ -360,6 +419,7 @@ export default function WalletConnection() {
     );
   }
 
+  // Show connection buttons only if not fully connected
   return (
     <div className="w-full flex flex-col gap-4">
       {/* Debug Information - only show in development or if there are issues */}
@@ -370,6 +430,7 @@ export default function WalletConnection() {
           <div>XMTP Connection Type: {xmtpConnectionType || "None"}</div>
           <div>Wallet Connected: {isConnected ? "Yes" : "No"}</div>
           <div>Wallet Address: {address || "None"}</div>
+          <div>Ephemeral Address: {ephemeralAddress || "None"}</div>
           <div>XMTP Client: {client ? "Connected" : "Not Connected"}</div>
           <div>XMTP Initializing: {initializing ? "Yes" : "No"}</div>
           <div>Local Initializing: {localInitializing ? "Yes" : "No"}</div>
@@ -378,6 +439,7 @@ export default function WalletConnection() {
           <div>Has Encryption Key: {env.NEXT_PUBLIC_ENCRYPTION_KEY ? "Yes" : "No"}</div>
           <div>In Farcaster Context: {isInFarcasterContext ? "Yes" : "No"}</div>
           <div>Connection Attempt: {connectionAttemptRef.current || "None"}</div>
+          <div>Fully Connected: {isFullyConnected ? "Yes" : "No"}</div>
           {error && (
             <div className="text-red-400 mt-2">
               <div className="font-bold">Error:</div>

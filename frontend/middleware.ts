@@ -14,7 +14,9 @@ export default async function middleware(req: NextRequest) {
     req.nextUrl.pathname.includes("/api/og") ||
     req.nextUrl.pathname.includes("/api/webhook") ||
     req.nextUrl.pathname.includes("/api/fkey") ||
-    req.nextUrl.pathname.includes("/api/convos")
+    req.nextUrl.pathname.includes("/api/convos") ||
+    req.nextUrl.pathname.includes("/api/x402") ||
+    req.nextUrl.pathname.includes("/api/proxy402/viewer")
   ) {
     return NextResponse.next();
   }

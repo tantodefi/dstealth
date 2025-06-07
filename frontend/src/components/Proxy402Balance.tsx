@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { DollarSign, TrendingUp } from 'lucide-react';
+import { DollarSign, TrendingUp, Eye, EyeOff, RefreshCw, Plus } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import { useXMTP } from '@/context/xmtp-context';
+import { database } from '@/lib/database';
 
 interface DashboardStats {
   total_earnings?: number;
@@ -14,216 +15,351 @@ interface DashboardStats {
   real_purchases: number;
 }
 
-interface ActivityStats {
-  totalLinks: number;
-  totalPurchases: number;
-  totalRevenue: number;
-  lastUpdated: string;
-}
-
 interface Proxy402BalanceProps {
   onShowChart?: () => void;
+  compact?: boolean; // For header display
 }
 
-export function Proxy402Balance({ onShowChart }: Proxy402BalanceProps) {
-  const [balance, setBalance] = useState<number>(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string>("");
-  const [hasJWT, setHasJWT] = useState(false);
-  const [endpointsCount, setEndpointsCount] = useState<number>(0);
-  const [activityStats, setActivityStats] = useState<ActivityStats | null>(null);
-  
+export function Proxy402Balance({ onShowChart, compact = false }: Proxy402BalanceProps) {
   const { address, isConnected } = useAccount();
-  const { client } = useXMTP();
+  const { client, connectionType } = useXMTP();
+  const [balance, setBalance] = useState<string>('0.00');
+  const [change24h, setChange24h] = useState<number>(0);
+  const [isHidden, setIsHidden] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastFetched, setLastFetched] = useState<Date | null>(null);
+  const [totalLinks, setTotalLinks] = useState<number>(0);
+  const [totalPurchases, setTotalPurchases] = useState<number>(0);
 
-  // Get user-specific storage keys
-  const getJWTKey = (userAddress: string) => `proxy402_jwt_${userAddress.toLowerCase()}`;
-  const getEndpointsKey = (userAddress: string) => `proxy402_endpoints_${userAddress.toLowerCase()}`;
-  const getActivityStatsKey = (userAddress: string) => `proxy402_activity_stats_${userAddress.toLowerCase()}`;
+  // For ephemeral connections, get address from XMTP client
+  const effectiveAddress = address || (connectionType === "ephemeral" && client?.inboxId ? `ephemeral_${client.inboxId}` : undefined);
+  const isAnyConnectionType = isConnected || (connectionType === "ephemeral" && client);
 
-  // Check for JWT and load all stored data
-  const checkJWTAndLoadData = async () => {
-    if (!isConnected || !address) {
-      setHasJWT(false);
-      setBalance(0);
-      setError("");
-      setEndpointsCount(0);
-      setActivityStats(null);
-      return;
-    }
+  // Fetch comprehensive earnings data
+  const fetchEarningsData = async () => {
+    if (!effectiveAddress) return;
 
-    const jwtKey = getJWTKey(address);
-    const endpointsKey = getEndpointsKey(address);
-    const activityStatsKey = getActivityStatsKey(address);
-    
-    const jwt = localStorage.getItem(jwtKey);
-    const endpoints = localStorage.getItem(endpointsKey);
-    const stats = localStorage.getItem(activityStatsKey);
-    
-    console.log('Loading Proxy402 data for wallet:', address);
-    console.log('JWT exists:', !!jwt);
-    console.log('Endpoints count:', endpoints);
-    console.log('Activity stats:', stats);
-    
-    // Load endpoints count
-    if (endpoints) {
-      setEndpointsCount(parseInt(endpoints, 10) || 0);
-    } else {
-      setEndpointsCount(0);
-    }
-    
-    // Load activity stats
-    if (stats) {
-      try {
-        const parsedStats = JSON.parse(stats);
-        setActivityStats(parsedStats);
-      } catch (error) {
-        console.error('Failed to parse activity stats:', error);
-        setActivityStats(null);
-      }
-    } else {
-      setActivityStats(null);
-    }
-    
-    // Load JWT and fetch balance
-    if (jwt) {
-      setHasJWT(true);
-      await fetchBalance(jwt);
-    } else {
-      setHasJWT(false);
-      setBalance(0);
-      setError("");
-    }
-  };
+    setLoading(true);
+    setError(null);
 
-  useEffect(() => {
-    checkJWTAndLoadData();
-
-    // Listen for custom events when JWT is saved
-    const handleJWTSaved = (e: CustomEvent) => {
-      if (e.detail.address === address?.toLowerCase()) {
-        console.log('JWT saved event received for address:', address);
-        checkJWTAndLoadData();
-      }
-    };
-
-    // Listen for storage changes (for other tabs)
-    const handleStorageChange = (e: StorageEvent) => {
-      if (address && (
-        e.key === getJWTKey(address) || 
-        e.key === getEndpointsKey(address) || 
-        e.key === getActivityStatsKey(address)
-      )) {
-        console.log('Storage change detected for Proxy402 data');
-        checkJWTAndLoadData();
-      }
-    };
-
-    // Add event listeners
-    window.addEventListener('proxy402JWTSaved', handleJWTSaved as EventListener);
-    window.addEventListener('storage', handleStorageChange);
-
-    return () => {
-      window.removeEventListener('proxy402JWTSaved', handleJWTSaved as EventListener);
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, [isConnected, address]);
-
-  const fetchBalance = async (jwt?: string) => {
     try {
-      setLoading(true);
-      setError("");
+      // Get user data from database
+      const userData = database.getUser(effectiveAddress);
+      const jwtToken = userData?.jwtToken;
 
-      if (!address) {
-        setError('No wallet connected');
-        return;
-      }
+      // Get current database stats
+      const earningsStats = database.getEarningsStats(effectiveAddress);
+      const calculatedStats = database.calculateUserStats(effectiveAddress);
+      
+      setTotalLinks(calculatedStats.totalLinks);
+      setTotalPurchases(calculatedStats.totalPurchases);
 
-      const jwtToken = jwt || localStorage.getItem(getJWTKey(address));
-      if (!jwtToken) {
-        setError('No JWT found for this wallet');
-        return;
-      }
-
-      console.log('Fetching balance for address:', address);
+      if (jwtToken) {
+        try {
+          // Fetch latest proxy402 data
       const response = await fetch('/api/proxy402/dashboard/stats', {
         headers: {
           'Authorization': `Bearer ${jwtToken}`
         }
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP ${response.status}`);
+          if (response.ok) {
+            const stats: DashboardStats = await response.json();
+            const proxy402Revenue = (stats.total_earnings || 0) / 100;
+            
+            // Update database with latest proxy402 data
+            database.updateEarningsStats(effectiveAddress, {
+              proxy402Revenue,
+              totalPurchases: stats.total_purchases || 0,
+            });
+
+            // Recalculate total with updated data
+            const updatedStats = database.calculateUserStats(effectiveAddress);
+            const newBalance = updatedStats.totalEarnings.toFixed(2);
+            setBalance(newBalance);
+            setTotalPurchases(updatedStats.totalPurchases);
+            
+            // Calculate 24h change using the new balance
+            const previousBalance = parseFloat(localStorage.getItem(`prev_balance_${effectiveAddress}`) || '0');
+            const currentBalance = parseFloat(newBalance);
+            const change = currentBalance - previousBalance;
+            setChange24h(change);
+            
+            // Store current balance for next comparison
+            localStorage.setItem(`prev_balance_${effectiveAddress}`, currentBalance.toString());
+          } else {
+            // Use database data if API fails
+            const dbBalance = calculatedStats.totalEarnings.toFixed(2);
+            setBalance(dbBalance);
+            
+            // Calculate 24h change using database balance
+            const previousBalance = parseFloat(localStorage.getItem(`prev_balance_${effectiveAddress}`) || '0');
+            const currentBalance = parseFloat(dbBalance);
+            const change = currentBalance - previousBalance;
+            setChange24h(change);
+            
+            // Store current balance for next comparison
+            localStorage.setItem(`prev_balance_${effectiveAddress}`, currentBalance.toString());
+          }
+        } catch (apiError) {
+          console.warn('Proxy402 API error, using database data:', apiError);
+          const dbBalance = calculatedStats.totalEarnings.toFixed(2);
+          setBalance(dbBalance);
+          
+          // Calculate 24h change using database balance
+          const previousBalance = parseFloat(localStorage.getItem(`prev_balance_${effectiveAddress}`) || '0');
+          const currentBalance = parseFloat(dbBalance);
+          const change = currentBalance - previousBalance;
+          setChange24h(change);
+          
+          // Store current balance for next comparison
+          localStorage.setItem(`prev_balance_${effectiveAddress}`, currentBalance.toString());
+        }
+      } else {
+        // No JWT, use database data only
+        const dbBalance = calculatedStats.totalEarnings.toFixed(2);
+        setBalance(dbBalance);
+        
+        // Calculate 24h change using database balance
+        const previousBalance = parseFloat(localStorage.getItem(`prev_balance_${effectiveAddress}`) || '0');
+        const currentBalance = parseFloat(dbBalance);
+        const change = currentBalance - previousBalance;
+        setChange24h(change);
+        
+        // Store current balance for next comparison
+        localStorage.setItem(`prev_balance_${effectiveAddress}`, currentBalance.toString());
       }
 
-      const data: DashboardStats = await response.json();
+      setLastFetched(new Date());
+    } catch (err) {
+      console.error('Error fetching earnings:', err);
+      setError('Failed to fetch earnings data');
       
-      // Calculate total balance (real + test earnings, converted from cents to dollars)
-      const totalBalance = ((data.real_earnings || 0) + (data.test_earnings || 0)) / 100;
-      setBalance(totalBalance);
-      setError("");
-      console.log('Balance updated:', totalBalance);
-    } catch (error) {
-      console.error('Failed to fetch Proxy402 balance:', error);
-      setError(error instanceof Error ? error.message : 'Failed to fetch balance');
+      // Fallback to database
+      const calculatedStats = database.calculateUserStats(effectiveAddress);
+      const dbBalance = calculatedStats.totalEarnings.toFixed(2);
+      setBalance(dbBalance);
+      setTotalLinks(calculatedStats.totalLinks);
+      setTotalPurchases(calculatedStats.totalPurchases);
+      
+      // Calculate 24h change using database balance
+      const previousBalance = parseFloat(localStorage.getItem(`prev_balance_${effectiveAddress}`) || '0');
+      const currentBalance = parseFloat(dbBalance);
+      const change = currentBalance - previousBalance;
+      setChange24h(change);
+      
+      // Store current balance for next comparison
+      localStorage.setItem(`prev_balance_${effectiveAddress}`, currentBalance.toString());
     } finally {
       setLoading(false);
     }
   };
 
-  const handleClick = () => {
-    console.log('Balance button clicked, hasJWT:', hasJWT, 'error:', error);
-    if (hasJWT && !error && onShowChart) {
+  // Auto-fetch data on component mount and when address changes
+  useEffect(() => {
+    if (effectiveAddress) {
+      fetchEarningsData();
+    }
+  }, [effectiveAddress]);
+
+  // Also fetch when user data in database changes (e.g., JWT token updated)
+  useEffect(() => {
+    if (effectiveAddress) {
+      const userData = database.getUser(effectiveAddress);
+      if (userData?.jwtToken) {
+        // If there's a JWT token, refetch the data
+        fetchEarningsData();
+      }
+    }
+  }, [effectiveAddress]);
+
+  // Listen for custom refresh events
+  useEffect(() => {
+    const handleRefreshEvent = () => {
+      if (effectiveAddress) {
+        console.log('Earnings refresh event received');
+        fetchEarningsData();
+      }
+    };
+
+    window.addEventListener('proxy402-earnings-refresh', handleRefreshEvent);
+    return () => {
+      window.removeEventListener('proxy402-earnings-refresh', handleRefreshEvent);
+    };
+  }, [effectiveAddress]);
+
+  // Refresh data every 5 minutes
+  useEffect(() => {
+    if (effectiveAddress && !compact) { // Only auto-refresh for non-compact version
+      const interval = setInterval(fetchEarningsData, 5 * 60 * 1000);
+      return () => clearInterval(interval);
+    }
+  }, [effectiveAddress, compact]);
+
+  // Handle manual refresh
+  const handleRefresh = () => {
+    fetchEarningsData();
+  };
+
+  // Handle earnings display toggle
+  const toggleVisibility = () => {
+    setIsHidden(!isHidden);
+  };
+
+  // Handle show chart
+  const handleShowChart = () => {
+    if (onShowChart) {
       onShowChart();
     }
   };
 
-  // Don't render if no wallet is connected
-  if (!isConnected || !address) {
-    return null;
+  if (!isAnyConnectionType) {
+    return compact ? (
+      <div className="bg-gradient-to-r from-green-900/20 to-emerald-900/20 border border-green-600/30 rounded-lg px-3 py-2">
+        <div className="flex items-center text-gray-400 text-sm">
+          <DollarSign className="h-4 w-4 mr-1" />
+          <span>Connect wallet</span>
+        </div>
+      </div>
+    ) : (
+      <div className="bg-gradient-to-r from-green-900/20 to-emerald-900/20 border border-green-600/30 rounded-lg p-4">
+        <div className="flex items-center justify-center text-gray-400">
+          <span className="text-sm">Connect wallet to view earnings</span>
+        </div>
+      </div>
+    );
   }
 
-  console.log('Proxy402Balance render:', { 
-    hasJWT, 
-    loading, 
-    error, 
-    balance, 
-    endpointsCount, 
-    activityStats 
-  });
+  if (compact) {
+    return (
+      <div className="bg-gradient-to-r from-green-900/20 to-emerald-900/20 border border-green-600/30 rounded-lg px-3 py-2">
+        <div className="flex items-center gap-2">
+          <DollarSign className="h-4 w-4 text-green-400" />
+          <span className="text-green-400 font-semibold text-sm">
+            {isHidden ? '••••••' : `$${balance}`}
+          </span>
+          <button
+            onClick={toggleVisibility}
+            className="text-green-400 hover:text-green-300 transition-colors"
+            title={isHidden ? 'Show amount' : 'Hide amount'}
+          >
+            {isHidden ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+          </button>
+          
+          {change24h !== 0 && (
+            <div className="flex items-center gap-1 text-xs">
+              <TrendingUp className={`h-3 w-3 ${change24h >= 0 ? 'text-green-400' : 'text-red-400'}`} />
+              <span className={change24h >= 0 ? 'text-green-400' : 'text-red-400'}>
+                {change24h >= 0 ? '+' : ''}{change24h.toFixed(2)}
+              </span>
+            </div>
+          )}
+          
+          <button
+            onClick={handleRefresh}
+            disabled={loading}
+            className="text-green-400 hover:text-green-300 transition-colors disabled:opacity-50"
+            title="Refresh earnings"
+          >
+            <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          
+          <button
+            onClick={handleShowChart}
+            className="bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-xs font-semibold transition-colors flex items-center gap-1"
+          >
+            <Plus className="h-3 w-3" />
+            View
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
+    <div className="bg-gradient-to-r from-green-900/20 to-emerald-900/20 border border-green-600/30 rounded-lg p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <DollarSign className="h-5 w-5 text-green-400" />
+            <span className="text-green-400 font-semibold">
+              {isHidden ? '••••••' : `$${balance}`}
+            </span>
+            <button
+              onClick={toggleVisibility}
+              className="text-green-400 hover:text-green-300 transition-colors"
+              title={isHidden ? 'Show amount' : 'Hide amount'}
+            >
+              {isHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+            </button>
+          </div>
+          
+          <div className="flex items-center gap-1 text-sm">
+            <TrendingUp className={`h-4 w-4 ${change24h >= 0 ? 'text-green-400' : 'text-red-400'}`} />
+            <span className={change24h >= 0 ? 'text-green-400' : 'text-red-400'}>
+              {change24h >= 0 ? '+' : ''}{change24h.toFixed(2)}
+            </span>
+            <span className="text-gray-400">24h</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Refresh button */}
+          <button
+            onClick={handleRefresh}
+            disabled={loading}
+            className="text-green-400 hover:text-green-300 transition-colors disabled:opacity-50"
+            title="Refresh earnings data"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+
+          {/* Show chart button */}
     <button
-      onClick={handleClick}
-      disabled={loading || !hasJWT}
-      className="flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      title={
-        !hasJWT 
-          ? 'Configure Proxy402 JWT in settings to view earnings' 
-          : error 
-            ? error 
-            : `Click to view earnings dashboard (${endpointsCount} links)`
-      }
-    >
-      <DollarSign className="w-4 h-4 text-white" />
-      <span className="text-white font-medium">
-        {loading ? (
-          <span className="flex items-center gap-1">
-            <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
-            Loading...
+            onClick={handleShowChart}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
+          >
+            <DollarSign className="h-4 w-4" />
+            Earnings
+          </button>
+        </div>
+      </div>
+
+      {/* Extended stats for non-compact version */}
+      <div className="mt-3 grid grid-cols-3 gap-4 text-xs">
+        <div className="text-center">
+          <div className="text-green-400 font-semibold">{totalLinks}</div>
+          <div className="text-gray-500">Links Created</div>
+        </div>
+        <div className="text-center">
+          <div className="text-green-400 font-semibold">{totalPurchases}</div>
+          <div className="text-gray-500">Total Purchases</div>
+        </div>
+        <div className="text-center">
+          <div className="text-green-400 font-semibold">
+            {lastFetched ? lastFetched.toLocaleTimeString() : 'Never'}
+          </div>
+          <div className="text-gray-500">Last Updated</div>
+        </div>
+      </div>
+
+      {/* Status info */}
+      <div className="mt-3 flex items-center justify-between text-xs">
+        <div className="flex items-center gap-4">
+          {error && (
+            <span className="text-red-400">
+              {error}
+            </span>
+          )}
+        </div>
+        
+        {client?.inboxId && (
+          <span className="text-gray-500">
+            XMTP: {client.inboxId.slice(0, 8)}...
           </span>
-        ) : !hasJWT ? (
-          "$0.00"
-        ) : error ? (
-          <span className="text-red-200">Error</span>
-        ) : (
-          `$${balance.toFixed(2)}`
         )}
-      </span>
-      {!loading && hasJWT && !error && (
-        <TrendingUp className="w-4 h-4 text-white" />
-      )}
-    </button>
+      </div>
+    </div>
   );
 } 

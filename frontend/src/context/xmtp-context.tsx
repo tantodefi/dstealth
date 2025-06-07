@@ -485,13 +485,25 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
       
       setConnectionType("ephemeral");
       
+      // Use the saved ephemeral key to create signer
+      const signer = createEphemeralSigner(ephemeralKey);
+      
       initialize({ 
         connectionType: "ephemeral",
-        env: envConfig.NEXT_PUBLIC_XMTP_ENV
+        env: envConfig.NEXT_PUBLIC_XMTP_ENV,
+        signer // Pass the signer directly
+      }).then((client) => {
+        if (client) {
+          logger.log("Ephemeral connection restored successfully");
+          // Force a re-render by updating connection type again
+          setConnectionType("ephemeral");
+        }
       }).catch((e) => {
         logger.log("Error restoring ephemeral connection:", e);
         // Clear ephemeral key if it's invalid
         storage.remove(STORAGE_KEYS.EPHEMERAL_KEY);
+        storage.remove(STORAGE_KEYS.CONNECTION_TYPE);
+        setConnectionType("");
       });
     } 
     // Priority 3: Restore EOA/SCW wallet connection if wallet is connected

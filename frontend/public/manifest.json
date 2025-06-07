@@ -1,0 +1,97 @@
+{
+  "name": "X402 Protocol Viewer",
+  "short_name": "X402",
+  "description": "A decentralized content payment and viewing application supporting the X402 protocol",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a2e",
+  "theme_color": "#8b5cf6",
+  "orientation": "portrait-primary",
+  "categories": ["finance", "social", "utilities"],
+  "lang": "en",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512x512.png", 
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-192x192.png",
+      "sizes": "192x192", 
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png", 
+      "purpose": "maskable"
+    }
+  ],
+  "protocol_handlers": [
+    {
+      "protocol": "x402",
+      "url": "/viewer?x402_uri=%s"
+    }
+  ],
+  "url_handlers": [
+    {
+      "origin": "https://x402.org"
+    }
+  ],
+  "share_target": {
+    "action": "/viewer",
+    "method": "GET",
+    "params": {
+      "url": "x402_uri"
+    }
+  },
+  "shortcuts": [
+    {
+      "name": "Create X402 Content",
+      "short_name": "Create",
+      "description": "Create new payment-gated content",
+      "url": "/?action=create",
+      "icons": [
+        {
+          "src": "/icon-192x192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "View Earnings",
+      "short_name": "Earnings",
+      "description": "View your content earnings",
+      "url": "/?action=earnings",
+      "icons": [
+        {
+          "src": "/icon-192x192.png", 
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "related_applications": [
+    {
+      "platform": "web",
+      "url": "https://x402.org/app"
+    }
+  ],
+  "prefer_related_applications": false,
+  "scope": "/",
+  "edge_side_panel": {
+    "preferred_width": 400
+  },
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  }
+} 

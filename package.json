@@ -1,0 +1,33 @@
+{
+  "name": "xmtp-stealth-indexer",
+  "version": "1.0.0",
+  "description": "Ponder indexer for XMTP mini app stealth address protocols",
+  "main": "src/index.ts",
+  "packageManager": "yarn@1.22.22",
+  "private": true,
+  "scripts": {
+    "dev": "ponder dev",
+    "start": "ponder start",
+    "build": "ponder build",
+    "serve": "ponder serve",
+    "codegen": "ponder codegen",
+    "frontend:dev": "cd frontend && yarn dev",
+    "frontend:build": "cd frontend && yarn build",
+    "backend:dev": "cd backend && yarn dev",
+    "backend:build": "cd backend && yarn build",
+    "gen:keys": "node -e \"const crypto = require('crypto'); const wallet = crypto.randomBytes(32).toString('hex'); const encryption = crypto.randomBytes(32).toString('hex'); console.log('\\n# Generated keys for .env:\\nWALLET_KEY=0x' + wallet + '\\nENCRYPTION_KEY=' + encryption + '\\nXMTP_ENV=dev\\n# Public address: ' + require('viem').privateKeyToAddress('0x' + wallet));\""
+  },
+  "dependencies": {
+    "@ponder/core": "^0.4.0",
+    "@tanstack/query-core": "^5.80.6",
+    "viem": "^2.0.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,133 +1,108 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
-import { FullPageLoader } from "@/components/FullPageLoader";
-import { Header } from "@/components/Header";
+import { useState, useEffect } from 'react';
+import { useAccount } from 'wagmi';
 import { SafeAreaContainer } from "@/components/SafeAreaContainer";
-import { useXMTP } from "@/context/xmtp-context";
+import { Header } from "@/components/Header";
 import WalletConnection from "@/examples/WalletConnection";
 import MainInterface from "@/components/MainInterface";
+import FAQ from '@/components/FAQ';
+import { useXMTP } from "@/context/xmtp-context";
 
 export default function Home() {
-  const { client, initializing, disconnect, isInFarcasterContext } = useXMTP();
-  const [mounted, setMounted] = useState(false);
+  const { isConnected } = useAccount();
+  const { client, connectionType } = useXMTP();
   const [showLoader, setShowLoader] = useState(true);
+  const [isFaqOpen, setIsFaqOpen] = useState(false);
   const [showEarningsChart, setShowEarningsChart] = useState(false);
-  
-  // Use refs to prevent unnecessary re-renders and state loops
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const loaderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const forceLoaderHiddenRef = useRef(false);
 
-  // Mark as mounted on client-side
+  // Determine if user is fully connected (wallet + XMTP)
+  const isFullyConnected = Boolean(
+    client && (
+      // Traditional wallet connection
+      (isConnected && connectionType) ||
+      // Ephemeral connection (doesn't need wagmi wallet)
+      (connectionType === "ephemeral" || connectionType === "Ephemeral Wallet")
+    )
+  );
+
   useEffect(() => {
-    console.log("📱 Page: Mounting...");
-    setMounted(true);
-    forceLoaderHiddenRef.current = false;
-
-    // Add a safety timeout to ensure app always loads (increased to 10 seconds)
-    timeoutRef.current = setTimeout(() => {
-      console.log("⏰ Page: Force hiding loader after timeout");
-      forceLoaderHiddenRef.current = true;
+    // Show loader for 2 seconds on initial load
+    const timer = setTimeout(() => {
       setShowLoader(false);
-    }, 10000); // 10 seconds max wait time
+    }, 2000);
 
-    return () => {
-      console.log("📱 Page: Unmounting...");
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-      if (loaderTimeoutRef.current) {
-        clearTimeout(loaderTimeoutRef.current);
-      }
-    };
+    return () => clearTimeout(timer);
   }, []);
-
-  // Update loader state based on initializing - improved logic
-  useEffect(() => {
-    console.log("🔄 Page: XMTP state changed:", { initializing, hasClient: !!client, forceHidden: forceLoaderHiddenRef.current });
-    
-    // If force hidden by timeout, don't show loader again
-    if (forceLoaderHiddenRef.current) {
-      setShowLoader(false);
-      return;
-    }
-    
-    // Clear any existing loader timeout
-    if (loaderTimeoutRef.current) {
-      clearTimeout(loaderTimeoutRef.current);
-      loaderTimeoutRef.current = null;
-    }
-    
-    // If XMTP is not initializing, hide loader after a brief delay
-    if (!initializing) {
-      loaderTimeoutRef.current = setTimeout(() => {
-        if (mounted && !forceLoaderHiddenRef.current) {
-          setShowLoader(false);
-        }
-      }, 1000); // Increased delay for better UX
-    } else {
-      // If initializing started, show loader (but only if not force hidden and mounted)
-      if (mounted && !forceLoaderHiddenRef.current) {
-        setShowLoader(true);
-      }
-    }
-  }, [initializing, client, mounted]);
-
-  // Debug logging for client state changes
-  useEffect(() => {
-    console.log("🌐 Page: XMTP client state:", { 
-      hasClient: !!client, 
-      isInFarcasterContext,
-      initializing 
-    });
-  }, [client, isInFarcasterContext, initializing]);
-
-  console.log("🎯 Page: Render state:", { 
-    mounted, 
-    showLoader, 
-    initializing, 
-    hasClient: !!client,
-    isInFarcasterContext,
-    forceHidden: forceLoaderHiddenRef.current
-  });
-
-  // Show loader while not mounted or during initial load (with better conditions)
-  if (!mounted || (showLoader && initializing && !forceLoaderHiddenRef.current)) {
-    console.log("⏳ Page: Showing loader - mounted:", mounted, "showLoader:", showLoader, "initializing:", initializing, "forceHidden:", forceLoaderHiddenRef.current);
-    return (
-      <SafeAreaContainer>
-        <div className="flex flex-col w-full max-w-md mx-auto h-screen bg-black">
-          <FullPageLoader />
-          <div className="text-white text-xs text-center mt-2">
-            {!mounted ? "Loading app..." : 
-             initializing ? "Initializing XMTP..." : 
-             "Getting ready..."}
-          </div>
-        </div>
-      </SafeAreaContainer>
-    );
-  }
 
   return (
     <SafeAreaContainer>
-      <div className="flex flex-col w-full max-w-md mx-auto h-screen bg-black">
-        <Header 
-          isConnected={!!client} 
-          onShowEarningsChart={() => setShowEarningsChart(true)}
-        />
-
-        <div className="flex flex-col gap-4 px-4 py-4 h-full overflow-auto">
-          {!client ? (
-            <WalletConnection />
-          ) : (
-            <MainInterface 
-              showEarningsChart={showEarningsChart}
-              onCloseEarningsChart={() => setShowEarningsChart(false)}
+      {/* Mobile viewport container with proper height constraints */}
+      <div className="max-w-md mx-auto bg-gray-900 text-white min-h-screen flex flex-col">
+        {showLoader ? (
+          /* Loader - inside mini app viewport */
+          <div className="flex flex-col items-center justify-center h-screen">
+            <div className="relative">
+              <div className="w-16 h-16 border-4 border-blue-200 border-solid rounded-full animate-spin border-t-blue-600"></div>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-blue-400 text-xs font-medium">⚡</span>
+              </div>
+            </div>
+            <p className="text-white mt-4 text-sm">Loading myf⚡key...</p>
+          </div>
+        ) : (
+          <>
+            {/* Header with 'myf key' title, earnings, settings */}
+            <Header 
+              isConnected={isFullyConnected}
+              onShowEarningsChart={() => setShowEarningsChart(true)}
             />
-          )}
-        </div>
+            
+            {/* Welcome message and wallet connection info - hide when fully connected */}
+            {!isFullyConnected && (
+              <div className="flex-shrink-0">
+                <WalletConnection />
+              </div>
+            )}
+            
+            {/* Main content area with scroll */}
+            <main className="flex-grow overflow-y-auto min-h-0">
+              <div className="p-4">
+                {!isFullyConnected ? (
+                  <div className="text-center py-8">
+                    <h1 className="text-xl font-bold text-white mb-2">Welcome to myf⚡key</h1>
+                    <p className="text-gray-300 text-sm">
+                      {connectionType === "ephemeral" || connectionType === "Ephemeral Wallet" 
+                        ? "Setting up your ephemeral connection..." 
+                        : "Connect your wallet to access the app"}
+                    </p>
+                  </div>
+                ) : (
+                  <MainInterface 
+                    showEarningsChart={showEarningsChart}
+                    onCloseEarningsChart={() => setShowEarningsChart(false)}
+                  />
+                )}
+              </div>
+            </main>
+            
+            {/* Footer - always visible at bottom */}
+            <footer className="flex-shrink-0 text-center p-4 border-t border-gray-800 bg-gray-900">
+              <p className="text-xs text-gray-400 mb-3">
+                Built with ❤️ on XMTP
+              </p>
+              <button 
+                onClick={() => setIsFaqOpen(true)} 
+                className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors duration-200 border border-blue-500 shadow-lg"
+              >
+                FAQ
+              </button>
+            </footer>
+          </>
+        )}
       </div>
+      
+      <FAQ isOpen={isFaqOpen} onClose={() => setIsFaqOpen(false)} />
     </SafeAreaContainer>
   );
 }
