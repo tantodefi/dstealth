@@ -18,6 +18,7 @@ import ViewerComponent from './ViewerComponent';
 import X402TestComponent from './X402TestComponent';
 import UserProfile from './UserProfile';
 import { DebugJWT } from './DebugJWT';
+import { ConvosSearch } from './ConvosSearch';
 
 type ViewType = "main" | "search" | "agent" | "chat" | "receipts" | "x402" | "earnings" | "rewards" | "stealth" | "profile" | "viewer";
 
@@ -49,6 +50,14 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
         return (
           <div className="space-y-4">
             <TantoConvosChat />
+            <div className="bg-gradient-to-r from-orange-900/20 to-red-900/20 border border-orange-600/30 rounded-lg p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <Search className="h-5 w-5 text-orange-400" />
+                <h2 className="text-lg font-semibold text-white">Search convos</h2>
+                <span className="text-sm text-orange-300">Find users on convos.org</span>
+              </div>
+              <ConvosSearch />
+            </div>
             <GroupChat />
           </div>
         );
@@ -77,7 +86,7 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
               <div className="flex items-center gap-3 mb-3">
                 <Search className="h-5 w-5 text-blue-400" />
                 <h2 className="text-lg font-semibold text-white">User Search</h2>
-                <span className="text-sm text-blue-300">Find and connect with users</span>
+                <span className="text-sm text-blue-300">Find stealth address to pay</span>
               </div>
               <FkeySearch />
             </div>

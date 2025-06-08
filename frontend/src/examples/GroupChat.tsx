@@ -201,7 +201,7 @@ export default function GroupManagement() {
             variant="outline"
             onClick={handleManualRefresh}
             disabled={isRefreshing || !client}
-            className="h-7 text-xs text-black">
+            className="h-7 text-xs text-white">
             {isRefreshing ? "Refreshing..." : "Refresh"}
           </Button>
         </div>

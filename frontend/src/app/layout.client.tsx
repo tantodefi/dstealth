@@ -18,8 +18,8 @@ export default function ClientLayout({
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <head>
-        {/* Mobile Viewport Optimization */}
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+        {/* Mobile Viewport Optimization for smooth scrolling */}
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover" />
         
         {/* X402 Protocol Meta Tags */}
         <meta name="x402:app" content="true" />
@@ -71,7 +71,7 @@ export default function ClientLayout({
         />
         <link rel="icon" href="/favicon.ico" />
       </head>
-      <body className={`${inter.className} bg-gray-900 text-white overflow-hidden`}>
+      <body className={`${inter.className} bg-gray-900 text-white`}>
         <Providers>
           {children}
         </Providers>

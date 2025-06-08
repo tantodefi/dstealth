@@ -236,9 +236,18 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
       {/* Connection Status */}
       <div className="flex items-center justify-between text-xs">
         <div className="flex items-center gap-2">
+          <img 
+            src={profile.avatar} 
+            alt={profile.name || username}
+            className="w-6 h-6 rounded-full border border-gray-600"
+            onError={(e) => {
+              const target = e.target as HTMLImageElement;
+              target.src = `https://api.dicebear.com/7.x/identicon/svg?seed=${username}`;
+            }}
+          />
           <div className={`w-2 h-2 rounded-full ${streamActive ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
           <span className={streamActive ? 'text-green-400' : 'text-yellow-400'}>
-            {streamActive ? 'Connected to' : 'Connecting to'} {username}.convos.org
+            {streamActive ? 'Connected to' : 'Connecting to'} {profile.name || username}
           </span>
         </div>
         <a
@@ -274,22 +283,60 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
             ? new Date(Number(message.sentAtNs) / 1000000)
             : new Date();
 
+          // Handle message content
+          let messageContent = '';
+          let isSystemMessage = false;
+          
+          if (typeof message.content === 'string') {
+            messageContent = message.content;
+          } else {
+            // Try to detect system messages (conversation initialization, etc.)
+            const contentObj = message.content;
+            if (contentObj && typeof contentObj === 'object') {
+              // Check if it's a conversation system message
+              if (contentObj.initiatedByInboxId || contentObj.addedInboxes || contentObj.removedInboxes) {
+                isSystemMessage = true;
+                if (contentObj.addedInboxes && contentObj.addedInboxes.length > 0) {
+                  messageContent = `${profile.name || username} was added to the conversation`;
+                } else if (contentObj.removedInboxes && contentObj.removedInboxes.length > 0) {
+                  messageContent = 'Someone left the conversation';
+                } else {
+                  messageContent = 'Conversation started';
+                }
+              } else {
+                // Other JSON content - format it nicely
+                messageContent = JSON.stringify(contentObj, null, 2);
+              }
+            } else {
+              messageContent = String(message.content);
+            }
+          }
+
           return (
             <div
               key={index}
               className={`text-xs ${isFromUser ? 'text-right' : 'text-left'}`}
             >
               <div
-                className={`inline-block p-2 rounded max-w-[80%] ${
-                  isFromUser
+                className={`inline-block p-2 rounded max-w-[85%] break-words ${
+                  isSystemMessage
+                    ? 'bg-gray-700 text-gray-300 italic text-center mx-auto'
+                    : isFromUser
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-600 text-gray-200'
                 }`}
+                style={{ 
+                  wordBreak: 'break-word',
+                  overflowWrap: 'break-word',
+                  whiteSpace: 'pre-wrap'
+                }}
               >
-                {typeof message.content === 'string' ? message.content : JSON.stringify(message.content)}
-                <div className="text-gray-400 text-xs mt-1">
-                  {sentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </div>
+                {messageContent}
+                {!isSystemMessage && (
+                  <div className="text-gray-400 text-xs mt-1 opacity-75">
+                    {sentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                )}
               </div>
             </div>
           );

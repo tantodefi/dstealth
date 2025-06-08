@@ -93,7 +93,12 @@ export default function WalletConnection() {
     if (!isConnected || !walletData) return null;
 
     if (localConnectionType === "EOA Wallet" || localConnectionType === "eoa") {
-      return createEOASigner(walletData.account.address, signMessageAsync);
+      return createEOASigner(walletData.account.address, async ({ message }) => {
+        return await signMessageAsync({ 
+          message, 
+          account: walletData.account.address 
+        });
+      });
     }
 
     if (
@@ -102,7 +107,12 @@ export default function WalletConnection() {
     ) {
       return createSCWSigner(
         walletData.account.address,
-        signMessageAsync,
+        async ({ message }) => {
+          return await signMessageAsync({ 
+            message, 
+            account: walletData.account.address 
+          });
+        },
         BigInt(mainnet.id),
       );
     }
@@ -368,29 +378,25 @@ export default function WalletConnection() {
     if (isCoinbaseWallet && isConnected) {
       return (
         <div className="w-full">
-          <div className="bg-gray-800 py-3 px-4">
-            <div className="max-w-7xl mx-auto flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Wallet>
-                  <Identity
-                    address={address}
-                    className="bg-gray-900 rounded-lg p-3"
-                  >
-                    <Avatar />
-                    <Name />
-                    <Address />
-                    <EthBalance />
-                    <Badge />
-                  </Identity>
-                  <WalletDropdown>
-                    <WalletDropdownLink icon="wallet" href="/wallet">
-                      Wallet
-                    </WalletDropdownLink>
-                    <WalletDropdownDisconnect />
-                  </WalletDropdown>
-                </Wallet>
-              </div>
-            </div>
+          <div className="bg-gray-800 py-3 px-4 rounded-lg">
+            <Wallet>
+              <Identity
+                address={address}
+                className="bg-transparent"
+              >
+                <Avatar />
+                <Name />
+                <Address />
+                <EthBalance />
+                <Badge />
+              </Identity>
+              <WalletDropdown>
+                <WalletDropdownLink icon="wallet" href="/wallet">
+                  Wallet
+                </WalletDropdownLink>
+                <WalletDropdownDisconnect />
+              </WalletDropdown>
+            </Wallet>
           </div>
         </div>
       );

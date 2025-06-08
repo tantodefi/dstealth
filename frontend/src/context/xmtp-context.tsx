@@ -306,17 +306,32 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
               storage.set(STORAGE_KEYS.EPHEMERAL_KEY, `0x${privateKey}`);
             } else if (isCoinbaseWallet) {
               logger.log("Using Coinbase Wallet signer");
-              xmtpSigner = createEOASigner(address as `0x${string}`, signMessageAsync);
+              xmtpSigner = createEOASigner(address as `0x${string}`, async ({ message }) => {
+                return await signMessageAsync({ 
+                  message, 
+                  account: address as `0x${string}` 
+                });
+              });
             } else if (forceSCW || connector?.id === "safe") {
               logger.log("Using Smart Contract Wallet signer");
               xmtpSigner = createSCWSigner(
                 address as `0x${string}`,
-                signMessageAsync,
+                async ({ message }) => {
+                  return await signMessageAsync({ 
+                    message, 
+                    account: address as `0x${string}` 
+                  });
+                },
                 BigInt(8453) // Base mainnet
               );
             } else {
               logger.log("Using EOA signer");
-              xmtpSigner = createEOASigner(address as `0x${string}`, signMessageAsync);
+              xmtpSigner = createEOASigner(address as `0x${string}`, async ({ message }) => {
+                return await signMessageAsync({ 
+                  message, 
+                  account: address as `0x${string}` 
+                });
+              });
             }
           }
 

@@ -91,7 +91,7 @@ export default function TantoConvosChat() {
           <Button
             onClick={initializeConversation}
             disabled={isConnecting}
-            className="bg-purple-600 hover:bg-purple-700"
+            className="bg-purple-600 hover:bg-purple-700 text-white"
           >
             {isConnecting ? "Connecting..." : "Start Chat"}
           </Button>

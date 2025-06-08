@@ -35,6 +35,7 @@ export default function UserPage() {
 
   // Get the current user's address (either wallet or ephemeral)
   const getCurrentUserAddress = () => {
+    if (!mounted) return null; // Prevent SSR issues
     if (address) return address;
     
     // Check for ephemeral address

@@ -37,8 +37,8 @@ export default function Home() {
 
   return (
     <SafeAreaContainer>
-      {/* Mobile viewport container with proper height constraints */}
-      <div className="max-w-md mx-auto bg-gray-900 text-white min-h-screen flex flex-col">
+      {/* Mobile viewport container with proper height constraints and smooth scrolling */}
+      <div className="max-w-md mx-auto bg-gray-900 text-white min-h-screen flex flex-col mobile-scroll hide-scrollbar">
         {showLoader ? (
           /* Loader - inside mini app viewport */
           <div className="flex flex-col items-center justify-center h-screen">
@@ -65,9 +65,9 @@ export default function Home() {
               </div>
             )}
             
-            {/* Main content area with scroll */}
-            <main className="flex-grow overflow-y-auto min-h-0">
-              <div className="p-4">
+            {/* Main content area with smooth scrolling - no explicit height constraints */}
+            <main className="flex-grow mobile-scroll hide-scrollbar">
+              <div className="p-4 pb-24"> {/* Extra bottom padding for scroll space */}
                 {!isFullyConnected ? (
                   <div className="text-center py-8">
                     <h1 className="text-xl font-bold text-white mb-2">Welcome to myf⚡key</h1>
@@ -86,14 +86,11 @@ export default function Home() {
               </div>
             </main>
             
-            {/* Footer - always visible at bottom */}
-            <footer className="flex-shrink-0 text-center p-4 border-t border-gray-800 bg-gray-900">
-              <p className="text-xs text-gray-400 mb-3">
-                Built with ❤️ on XMTP
-              </p>
+            {/* Footer - fixed at bottom with backdrop */}
+            <footer className="flex-shrink-0 text-center p-4 border-t border-gray-800 bg-gray-900/95 backdrop-blur-sm sticky bottom-0">
               <button 
                 onClick={() => setIsFaqOpen(true)} 
-                className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors duration-200 border border-blue-500 shadow-lg"
+                className="text-white text-sm font-medium tracking-wider hover:text-gray-300 transition-colors duration-200"
               >
                 FAQ
               </button>

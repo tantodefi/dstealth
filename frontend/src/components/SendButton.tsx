@@ -2,9 +2,8 @@
 
 import { getAddress, type Address } from "viem";
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { useWriteContract, useWaitForTransactionReceipt, useSwitchChain, useChainId } from "wagmi";
+import { useWriteContract, useWaitForTransactionReceipt, useSwitchChain, useChainId, useAccount } from "wagmi";
 import { base } from 'wagmi/chains';
-import { useAccount } from 'wagmi';
 
 // Extend Navigator type to include wallets
 declare global {
@@ -62,6 +61,9 @@ export default function SendButton({
   const [error, setError] = useState<string | null>(null);
   const [buttonCounter, setButtonCounter] = useState(0);
   
+  // Get account information
+  const { address: accountAddress } = useAccount();
+
   // Custom transaction state
   const { 
     data: hash, 
@@ -189,13 +191,14 @@ export default function SendButton({
         abi: ERC20_ABI,
         functionName: "transfer",
         args: [formattedAddress, amountInWei],
-        chainId: USDC_BASE.chainId, // Explicitly set chain ID
+        account: accountAddress,
+        chain: base,
       });
     } catch (error) {
       console.error("Custom payment error:", error);
       setError("Transaction failed. Please ensure you're connected to Base network.");
     }
-  }, [formattedAddress, isValidAmount, decimalAmount, writeContract, onPaymentStarted, chainId, switchChain]);
+  }, [formattedAddress, isValidAmount, decimalAmount, writeContract, onPaymentStarted, chainId, switchChain, accountAddress]);
 
   // Handle transaction success
   useEffect(() => {

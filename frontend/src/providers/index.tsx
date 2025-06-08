@@ -1,17 +1,10 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { FrameProvider } from "@/context/frame-context";
 import { XMTPProvider } from "@/context/xmtp-context";
 import MiniAppWalletProvider from "@/providers/miniapp-wallet-provider";
+import { ErudaProvider } from "@/providers/eruda";
 import { type ReactNode } from 'react';
-
-const ErudaProvider = dynamic(
-  () => import("@/providers/eruda").then((c) => c.ErudaProvider),
-  {
-    ssr: false,
-  },
-);
 
 // Initialize navigator.wallets on the client side
 if (typeof window !== 'undefined') {

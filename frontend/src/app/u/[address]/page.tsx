@@ -1,83 +1,53 @@
-import { Metadata } from 'next';
-import { notFound } from 'next/navigation';
-import UserProfile from '@/components/UserProfile';
-import { env } from '@/lib/env';
+"use client";
 
-interface UserProfilePageProps {
+import { useState, useEffect } from 'react';
+import UserProfile from '@/components/UserProfile';
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
+
+interface PageProps {
   params: Promise<{
     address: string;
   }>;
-  searchParams: Promise<{
-    frame?: string;
-    action?: 'pay' | 'connect';
-  }>;
 }
 
-// Generate OG metadata for Farcaster Frames
-export async function generateMetadata({ params }: UserProfilePageProps): Promise<Metadata> {
-  const { address } = await params;
-  
-  // Validate Ethereum address format
-  if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
-    return {
-      title: 'Invalid User Profile',
-      description: 'User not found'
+export default function UserProfilePage({ params }: PageProps) {
+  const [address, setAddress] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const getParams = async () => {
+      const resolvedParams = await params;
+      setAddress(resolvedParams.address);
+      setIsLoading(false);
     };
-  }
+    
+    getParams();
+  }, [params]);
 
-  // In a real app, you'd fetch user data here
-  const baseUrl = env.NEXT_PUBLIC_URL;
-  const frameImageUrl = `${baseUrl}/api/og/user-profile?address=${address}`;
-  
-  return {
-    title: `${address.slice(0, 8)}... - X402 Profile`,
-    description: `View ${address.slice(0, 8)}...'s X402 profile, payment links, and content. Pay with crypto and access exclusive content.`,
-    openGraph: {
-      title: `${address.slice(0, 8)}... on X402`,
-      description: `Crypto payments • Content monetization • Farcaster integration`,
-      images: [frameImageUrl],
-      type: 'website',
-    },
-    twitter: {
-      card: 'summary_large_image',
-      title: `${address.slice(0, 8)}... - X402 Profile`,
-      description: `View profile and make crypto payments`,
-      images: [frameImageUrl],
-    },
-    // Farcaster Frame metadata
-    other: {
-      'fc:frame': 'vNext',
-      'fc:frame:image': frameImageUrl,
-      'fc:frame:image:aspect_ratio': '1.91:1',
-      'fc:frame:button:1': 'View Profile',
-      'fc:frame:button:1:action': 'link',
-      'fc:frame:button:1:target': `${baseUrl}/u/${address}`,
-      'fc:frame:button:2': 'Make Payment',
-      'fc:frame:button:2:action': 'link', 
-      'fc:frame:button:2:target': `${baseUrl}/u/${address}?action=pay`,
-      'fc:frame:button:3': 'Connect Wallet',
-      'fc:frame:button:3:action': 'link',
-      'fc:frame:button:3:target': `${baseUrl}/u/${address}?action=connect`,
-    },
-  };
-}
-
-export default async function UserProfilePage({ params, searchParams }: UserProfilePageProps) {
-  const { address } = await params;
-  const resolvedSearchParams = await searchParams;
-  
-  // Validate Ethereum address format
-  if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
-    notFound();
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900">
-      <UserProfile 
-        address={address} 
-        frameAction={resolvedSearchParams.frame}
-        initialAction={resolvedSearchParams.action}
-      />
+    <div className="min-h-screen bg-gray-900 text-white">
+      {/* Back Navigation */}
+      <div className="max-w-md mx-auto p-4">
+        <Link 
+          href="/"
+          className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors mb-4"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to App
+        </Link>
+      </div>
+
+      {/* User Profile Component */}
+      <UserProfile address={address} viewOnly={true} />
     </div>
   );
 } 

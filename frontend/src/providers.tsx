@@ -67,6 +67,7 @@ if (typeof window !== 'undefined') {
 // import { DaimoPayProvider, getDefaultConfig } from '@daimo/pay';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type ReactNode, useEffect, useState } from 'react';
+import React from 'react';
 import { WagmiProvider, createConfig, http } from 'wagmi';
 // import { OnchainKitProvider } from '@coinbase/onchainkit';
 import { coinbaseWallet } from 'wagmi/connectors';
@@ -75,7 +76,6 @@ import { ErudaProvider } from '@/providers/eruda';
 import { FrameProvider } from '@/context/frame-context';
 import { XMTPProvider } from '@/context/xmtp-context';
 import { env } from '@/lib/env';
-import dynamic from 'next/dynamic';
 
 // Extend Navigator type to include wallets
 declare global {
@@ -253,7 +253,5 @@ function ClientProviders({ children }: { children: ReactNode }) {
   );
 }
 
-// Export with dynamic loading to ensure client-side only
-export const Providers = dynamic(() => Promise.resolve(ClientProviders), {
-  ssr: false,
-}); 
+// Export directly without dynamic loading since this is already client-side only
+export const Providers = ClientProviders; 

@@ -97,7 +97,7 @@ export default function XMTPAgentManager() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 mobile-scroll hide-scrollbar">
       {/* Agent Status Header */}
       <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 rounded-lg p-6">
         <div className="flex items-center justify-between mb-4">
