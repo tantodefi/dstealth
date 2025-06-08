@@ -10,10 +10,10 @@ interface X402Content {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { contentId: string } }
+  { params }: { params: Promise<{ contentId: string }> }
 ) {
   try {
-    const { contentId } = params;
+    const { contentId } = await params;
     
     // For demo, we'll use mock data - in production, fetch from your database
     const mockContent: X402Content = {

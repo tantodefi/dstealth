@@ -14,11 +14,11 @@ interface X402Content {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { contentId: string } }
+  { params }: { params: Promise<{ contentId: string }> }
 ) {
+  const { contentId } = await params;
+
   try {
-    const { contentId } = params;
-    
     // For demo, we'll use mock data - in production, fetch from your database
     const mockContent: X402Content = {
       id: contentId,
@@ -115,10 +115,10 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { contentId: string } }
+  { params }: { params: Promise<{ contentId: string }> }
 ) {
+  const { contentId } = await params;
   try {
-    const { contentId } = params;
     const body = await request.json();
     
     // Handle Frame button interactions

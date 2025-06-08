@@ -486,7 +486,7 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
       setConnectionType("ephemeral");
       
       // Use the saved ephemeral key to create signer
-      const signer = createEphemeralSigner(ephemeralKey);
+      const signer = createEphemeralSigner(ephemeralKey as `0x${string}`);
       
       initialize({ 
         connectionType: "ephemeral",

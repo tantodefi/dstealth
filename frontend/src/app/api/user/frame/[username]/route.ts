@@ -46,10 +46,10 @@ const getUserProfile = async (username: string): Promise<UserProfile | null> => 
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { username: string } }
+  { params }: { params: Promise<{ username: string }> }
 ) {
+  const { username } = await params;
   try {
-    const username = params.username;
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
     
     // Fetch user profile

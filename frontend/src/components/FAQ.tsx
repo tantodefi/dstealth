@@ -1,6 +1,18 @@
 import React, { useState } from 'react';
 import styles from '../styles/FAQ.module.css';
 
+interface AccordionItemProps {
+  question: string;
+  answer: string;
+  isOpen: boolean;
+  onClick: () => void;
+}
+
+interface FAQProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
 const faqData = [
   {
     question: 'What is this application?',
@@ -28,7 +40,7 @@ const faqData = [
   },
 ];
 
-const AccordionItem = ({ question, answer, isOpen, onClick }) => (
+const AccordionItem: React.FC<AccordionItemProps> = ({ question, answer, isOpen, onClick }) => (
   <div className={styles.accordionItem}>
     <button className={styles.accordionButton} onClick={onClick}>
       <span className={styles.question}>{question}</span>
@@ -38,14 +50,14 @@ const AccordionItem = ({ question, answer, isOpen, onClick }) => (
   </div>
 );
 
-const FAQ = ({ isOpen, onClose }) => {
-  const [openIndex, setOpenIndex] = useState(null);
+const FAQ: React.FC<FAQProps> = ({ isOpen, onClose }) => {
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
 
   if (!isOpen) {
     return null;
   }
 
-  const handleToggle = (index) => {
+  const handleToggle = (index: number) => {
     setOpenIndex(openIndex === index ? null : index);
   };
 

@@ -474,7 +474,7 @@ export default function UserProfile({ address: propAddress, frameAction, initial
       <div className="min-h-[400px] flex items-center justify-center">
         <div className="text-center text-white">
           <h1 className="text-2xl font-bold mb-4 text-white">Profile Not Found</h1>
-          <p className="text-gray-400">This user profile doesn't exist or couldn't be loaded.</p>
+          <p className="text-gray-400">This user profile doesn&apos;t exist or couldn&apos;t be loaded.</p>
         </div>
       </div>
     );

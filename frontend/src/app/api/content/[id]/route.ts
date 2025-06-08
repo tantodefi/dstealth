@@ -105,10 +105,10 @@ const contentDatabase: Record<string, ContentData> = {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const contentId = params.id;
+    const { id: contentId } = await params;
     
     // Look up content in database
     const content = contentDatabase[contentId];

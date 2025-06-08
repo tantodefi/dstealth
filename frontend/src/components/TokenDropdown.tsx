@@ -1,12 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
-// import { TokenSelectDropdown, type Token } from '@coinbase/onchainkit/token';
-// import { Transaction } from '@coinbase/onchainkit/transaction';
-// import { getPortfolios } from '@coinbase/onchainkit/api';
+import { TokenSelectDropdown, type Token } from '@coinbase/onchainkit/token';
+import { Transaction } from '@coinbase/onchainkit/transaction';
+import { getPortfolios } from '@coinbase/onchainkit/api';
 import { useAccount } from 'wagmi';
 import { useChainId } from 'wagmi';
 import { parseEther } from 'viem';
-import { TokenSelectDropdown } from './TokenSelectDropdown';
-import { Transaction } from './Transaction';
 
 interface TokenData {
   name: string;
@@ -44,9 +42,9 @@ export const TokenDropdown: React.FC<{
     setError(null);
     try {
       console.log("Fetching portfolio for address:", address);
-      // const response = await getPortfolios({
-      //   addresses: [address],
-      // });
+      const response = await getPortfolios({
+        addresses: [address],
+      });
       
       if ('portfolios' in response && response.portfolios?.[0]) {
         console.log("Portfolio response:", response.portfolios[0]);

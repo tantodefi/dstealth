@@ -290,7 +290,7 @@ export default function BotChat() {
                 })
               ) : (
                 <p className="text-gray-500 text-xs">
-                  No messages yet. Try "/help" to see what the X402 agent can do!
+                  No messages yet. Try &quot;/help&quot; to see what the X402 agent can do!
                 </p>
               )}
             </div>

@@ -4,18 +4,18 @@ import UserProfile from '@/components/UserProfile';
 import { env } from '@/lib/env';
 
 interface UserProfilePageProps {
-  params: {
+  params: Promise<{
     address: string;
-  };
-  searchParams: {
+  }>;
+  searchParams: Promise<{
     frame?: string;
     action?: 'pay' | 'connect';
-  };
+  }>;
 }
 
 // Generate OG metadata for Farcaster Frames
 export async function generateMetadata({ params }: UserProfilePageProps): Promise<Metadata> {
-  const { address } = params;
+  const { address } = await params;
   
   // Validate Ethereum address format
   if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
@@ -62,8 +62,9 @@ export async function generateMetadata({ params }: UserProfilePageProps): Promis
   };
 }
 
-export default function UserProfilePage({ params, searchParams }: UserProfilePageProps) {
-  const { address } = params;
+export default async function UserProfilePage({ params, searchParams }: UserProfilePageProps) {
+  const { address } = await params;
+  const resolvedSearchParams = await searchParams;
   
   // Validate Ethereum address format
   if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
@@ -74,8 +75,8 @@ export default function UserProfilePage({ params, searchParams }: UserProfilePag
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900">
       <UserProfile 
         address={address} 
-        frameAction={searchParams.frame}
-        initialAction={searchParams.action}
+        frameAction={resolvedSearchParams.frame}
+        initialAction={resolvedSearchParams.action}
       />
     </div>
   );

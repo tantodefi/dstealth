@@ -367,7 +367,7 @@ export default function XMTPAgentManager() {
           
           <div>
             <h4 className="font-semibold text-white mb-2">3. Natural Language</h4>
-            <p className="text-sm">You can also ask questions naturally like "How do I earn tokens?" or "What&apos;s the pricing?"</p>
+            <p className="text-sm">You can also ask questions naturally like &quot;How do I earn tokens?&quot; or &quot;What&apos;s the pricing?&quot;</p>
           </div>
         </div>
       </div>

@@ -266,7 +266,7 @@ export default function UserPage() {
           </div>
 
           {/* Convos Chat Integration */}
-          {showConvosChat && convosUsername && (
+          {showConvosChat && convosUsername && userData?.inboxId && (
             <div className="bg-gray-900 rounded-lg p-4">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="font-semibold">Convos Chat</h2>
@@ -277,7 +277,18 @@ export default function UserPage() {
                   ×
                 </button>
               </div>
-              <ConvosChat username={convosUsername} />
+              <ConvosChat 
+                xmtpId={userData.inboxId}
+                username={convosUsername}
+                url={`https://${convosUsername}.convos.org`}
+                profile={{
+                  name: userData?.farcasterProfile?.displayName || convosUsername,
+                  username: convosUsername,
+                  description: userData?.farcasterProfile?.bio || null,
+                  avatar: userData?.farcasterProfile?.pfpUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${convosUsername}`,
+                  address: currentAddress
+                }}
+              />
             </div>
           )}
         </div>

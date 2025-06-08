@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { MessageCircle, Send, ExternalLink } from 'lucide-react';
 import { useXMTP } from '@/context/xmtp-context';
-import { Conversation, DecodedMessage } from '@xmtp/browser-sdk';
+import { Conversation, DecodedMessage, Dm } from '@xmtp/browser-sdk';
 
 interface ConvosChatProps {
   xmtpId: string;
@@ -63,25 +63,30 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
         const conversations = await client.conversations.list();
         addDebugLog(`Found ${conversations.length} conversations`);
         
-        // Look for existing conversation - need to handle async peerInboxId
+        // Look for existing DM conversation with the specified xmtpId
         let existingConversation = null;
         for (const conv of conversations) {
           try {
-            const peerInboxId = await conv.peerInboxId();
-            addDebugLog(`Checking conversation with peer: ${peerInboxId}`);
-            if (peerInboxId?.toLowerCase() === xmtpId.toLowerCase()) {
-              existingConversation = conv;
-              addDebugLog('Found matching conversation');
-              break;
+            // Only check peerInboxId for DM conversations
+            if (conv instanceof Dm) {
+              const peerInboxId = await conv.peerInboxId();
+              addDebugLog(`Checking DM conversation with peer: ${peerInboxId}`);
+              if (peerInboxId?.toLowerCase() === xmtpId.toLowerCase()) {
+                existingConversation = conv;
+                addDebugLog('Found matching DM conversation');
+                break;
+              }
+            } else {
+              addDebugLog('Skipping Group conversation in DM search');
             }
           } catch (error) {
-            addDebugLog('Error getting peerInboxId for conversation', error);
+            addDebugLog('Error checking conversation', error);
             // Skip this conversation and continue
           }
         }
 
         if (!existingConversation) {
-          addDebugLog('No existing conversation found, creating new DM');
+          addDebugLog('No existing DM found, creating new DM');
           try {
             existingConversation = await client.conversations.newDm(xmtpId);
             addDebugLog('New DM created successfully');
@@ -90,7 +95,7 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
             throw dmError;
           }
         } else {
-          addDebugLog('Found existing conversation');
+          addDebugLog('Found existing DM conversation');
         }
         
         setConversation(existingConversation);
