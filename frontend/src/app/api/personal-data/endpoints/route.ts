@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 
+// Configure maximum duration for Vercel Functions (60s for hobby tier)
+export const maxDuration = 60;
+
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
 
 export async function GET() {

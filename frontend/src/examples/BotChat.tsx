@@ -135,7 +135,7 @@ export default function BotChat() {
       streamStartedRef.current = false;
       return undefined;
     }
-  }, [client, botConversation, streamActive]);
+  }, [client, botConversation]);
 
   // Fetch agent info on component mount
   useEffect(() => {
@@ -157,7 +157,6 @@ export default function BotChat() {
     if (
       client &&
       botConversation &&
-      !streamActive &&
       !streamStartedRef.current
     ) {
       startMessageStream().then((cleanupFn) => {
@@ -171,7 +170,7 @@ export default function BotChat() {
         cleanup();
       }
     };
-  }, [client, botConversation, streamActive, startMessageStream]);
+  }, [client, botConversation, startMessageStream]);
 
   // Send message to the X402 agent
   const handleSendMessage = async () => {

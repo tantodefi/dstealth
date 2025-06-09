@@ -1,6 +1,9 @@
 import { NextRequest } from 'next/server';
 import { env } from '@/lib/env';
 
+// Configure maximum duration for Vercel Functions (60s for hobby tier)
+export const maxDuration = 60;
+
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ username: string }> }

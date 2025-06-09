@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { verifyProof } from '@reclaimprotocol/js-sdk';
 
+// Configure maximum duration for Vercel Functions (60s for hobby tier)
+export const maxDuration = 60;
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();

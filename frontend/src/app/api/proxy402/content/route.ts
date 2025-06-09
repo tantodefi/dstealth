@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 
+// Configure maximum duration for Vercel Functions (60s for hobby tier)
+export const maxDuration = 60;
+
 function corsHeaders(response: Response) {
   response.headers.set('Access-Control-Allow-Origin', '*');
   response.headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS');

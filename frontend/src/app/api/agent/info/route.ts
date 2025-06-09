@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// Configure maximum duration for Vercel Functions (60s for hobby tier)
+export const maxDuration = 60;
+
 export async function GET(request: NextRequest) {
   try {
     // Get backend URL - adjust to correct port from logs

@@ -1,26 +1,38 @@
 "use client";
 
-import { useState } from "react";
-import { Bot, MessageCircle, List, Settings, Trophy, Umbrella, User, Eye, Link as LinkIcon, Search, ChevronDown, ChevronUp } from "lucide-react";
-import { Stats } from "./Stats";
+import React, { useState } from "react";
+import { 
+  User, 
+  Eye, 
+  Link as LinkIcon, 
+  Bot, 
+  MessageCircle, 
+  Receipt, 
+  Trophy,
+  Umbrella,
+  Search,
+  ChevronDown,
+  ChevronUp
+} from "lucide-react";
+import Link from "next/link";
+import UserProfile from "./UserProfile";
 import { FkeySearch } from "./FkeySearch";
+import ViewerComponent from "./ViewerComponent";
+import X402TestComponent from "./X402TestComponent";
+import XMTPAgentManager from "./XMTPAgentManager";
+import BotChat from "@/examples/BotChat";
+import ConvosChat from "./ConvosChat";
 import TantoConvosChat from "./TantoConvosChat";
 import ZkReceipts from "./ZkReceipts";
-import GroupChat from "@/examples/GroupChat";
-import BotChat from "@/examples/BotChat";
-import Proxy402Settings from "./Proxy402Settings";
+import NinjaRewards from "./NinjaRewards";
+import StealthScanner from "./StealthScanner";
 import { EarningsChart } from "./EarningsChart";
-import StevenRewards from "./NinjaRewards";
-import Link from "next/link";
-import XMTPAgentManager from './XMTPAgentManager';
-import StealthScanner from './StealthScanner';
-import ViewerComponent from './ViewerComponent';
-import X402TestComponent from './X402TestComponent';
-import UserProfile from './UserProfile';
+import GroupChat from "@/examples/GroupChat";
+import { Stats } from "./Stats";
 import { DebugJWT } from './DebugJWT';
 import { ConvosSearch } from './ConvosSearch';
 
-type ViewType = "main" | "search" | "agent" | "chat" | "receipts" | "x402" | "earnings" | "rewards" | "stealth" | "profile" | "viewer";
+type ViewType = "main" | "agent" | "chat" | "receipts" | "x402" | "earnings" | "rewards" | "privacy" | "profile" | "viewer";
 
 interface MainInterfaceProps {
   showEarningsChart?: boolean;
@@ -41,12 +53,6 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
     }
 
     switch (currentView) {
-      case "search":
-        return (
-          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
-            <FkeySearch />
-          </div>
-        );
       case "agent":
         return (
           <div className="space-y-4 mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
@@ -90,10 +96,10 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
       case "rewards":
         return (
           <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
-            <StevenRewards />
+            <NinjaRewards />
           </div>
         );
-      case "stealth":
+      case "privacy":
         return (
           <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
             <StealthScanner />
@@ -163,7 +169,7 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
   return (
     <div className="h-full flex flex-col mobile-scroll hide-scrollbar">
       {/* Enhanced Navigation Icons - Two Rows */}
-      <div className="w-full flex-shrink-0">        
+      <div className="w-full flex-shrink-0 mb-6">        
         {/* First Row - 4 icons */}
         <div className="grid grid-cols-4 gap-3 mb-3">
           <button
@@ -173,12 +179,11 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
                 ? "bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 text-white shadow-lg" 
                 : "bg-gray-800/80 text-gray-400 hover:bg-gray-700/80 hover:text-white border border-gray-600/30"
             }`}
-            title="User Profile"
           >
-            <User className="h-9 w-9 mb-1" />
-            <span className="text-xs font-medium text-white">Profile</span>
+            <User className="h-6 w-6 mb-2" />
+            <span className="text-xs font-medium">Profile</span>
           </button>
-          
+
           <button
             onClick={() => setCurrentView(currentView === "viewer" ? "main" : "viewer")}
             className={`flex flex-col items-center justify-center p-4 rounded-lg transition-all duration-200 ${
@@ -186,25 +191,23 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
                 ? "bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 text-white shadow-lg" 
                 : "bg-gray-800/80 text-gray-400 hover:bg-gray-700/80 hover:text-white border border-gray-600/30"
             }`}
-            title="Content Viewer"
           >
-            <Eye className="h-9 w-9 mb-1" />
-            <span className="text-xs font-medium text-white">Viewer</span>
+            <Eye className="h-6 w-6 mb-2" />
+            <span className="text-xs font-medium">Viewer</span>
           </button>
-          
+
           <button
             onClick={() => setCurrentView(currentView === "x402" ? "main" : "x402")}
             className={`flex flex-col items-center justify-center p-4 rounded-lg transition-all duration-200 ${
               currentView === "x402" 
-                ? "bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 text-white shadow-lg" 
+                ? "bg-gradient-to-r from-green-900/20 to-blue-900/20 border border-green-600/30 text-white shadow-lg" 
                 : "bg-gray-800/80 text-gray-400 hover:bg-gray-700/80 hover:text-white border border-gray-600/30"
             }`}
-            title="X402 Test Tool & Link Creator"
           >
-            <LinkIcon className="h-9 w-9 mb-1" />
-            <span className="text-xs font-medium text-white">X402</span>
+            <LinkIcon className="h-6 w-6 mb-2" />
+            <span className="text-xs font-medium">X402</span>
           </button>
-          
+
           <button
             onClick={() => setCurrentView(currentView === "agent" ? "main" : "agent")}
             className={`flex flex-col items-center justify-center p-4 rounded-lg transition-all duration-200 ${
@@ -212,10 +215,9 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
                 ? "bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 text-white shadow-lg" 
                 : "bg-gray-800/80 text-gray-400 hover:bg-gray-700/80 hover:text-white border border-gray-600/30"
             }`}
-            title="X402 Agent Chat & Management"
           >
-            <Bot className="h-9 w-9 mb-1" />
-            <span className="text-xs font-medium text-white">Agent</span>
+            <Bot className="h-6 w-6 mb-2" />
+            <span className="text-xs font-medium">Agent</span>
           </button>
         </div>
 
@@ -225,52 +227,48 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
             onClick={() => setCurrentView(currentView === "chat" ? "main" : "chat")}
             className={`flex flex-col items-center justify-center p-4 rounded-lg transition-all duration-200 ${
               currentView === "chat" 
-                ? "bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 text-white shadow-lg" 
+                ? "bg-gradient-to-r from-purple-900/20 to-pink-900/20 border border-purple-600/30 text-white shadow-lg" 
                 : "bg-gray-800/80 text-gray-400 hover:bg-gray-700/80 hover:text-white border border-gray-600/30"
             }`}
-            title="Group status & dev chat"
           >
-            <MessageCircle className="h-9 w-9 mb-1" />
-            <span className="text-xs font-medium text-white">Chat</span>
+            <MessageCircle className="h-6 w-6 mb-2" />
+            <span className="text-xs font-medium">Chat</span>
           </button>
-          
+
           <button
             onClick={() => setCurrentView(currentView === "receipts" ? "main" : "receipts")}
             className={`flex flex-col items-center justify-center p-4 rounded-lg transition-all duration-200 ${
               currentView === "receipts" 
-                ? "bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 text-white shadow-lg" 
+                ? "bg-gradient-to-r from-purple-900/20 to-blue-900/20 border border-purple-600/30 text-white shadow-lg" 
                 : "bg-gray-800/80 text-gray-400 hover:bg-gray-700/80 hover:text-white border border-gray-600/30"
             }`}
-            title="ZK receipts"
           >
-            <List className="h-9 w-9 mb-1" />
-            <span className="text-xs font-medium text-white">Receipts</span>
+            <Receipt className="h-6 w-6 mb-2" />
+            <span className="text-xs font-medium">Receipts</span>
           </button>
 
           <button
             onClick={() => setCurrentView(currentView === "rewards" ? "main" : "rewards")}
             className={`flex flex-col items-center justify-center p-4 rounded-lg transition-all duration-200 ${
               currentView === "rewards" 
-                ? "bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 text-white shadow-lg" 
+                ? "bg-gradient-to-r from-yellow-900/20 to-orange-900/20 border border-yellow-600/30 text-white shadow-lg" 
                 : "bg-gray-800/80 text-gray-400 hover:bg-gray-700/80 hover:text-white border border-gray-600/30"
             }`}
-            title="Ninja Rewards"
           >
-            <Trophy className="h-9 w-9 mb-1" />
-            <span className="text-xs font-medium text-white">Rewards</span>
+            <Trophy className="h-6 w-6 mb-2" />
+            <span className="text-xs font-medium">Rewards</span>
           </button>
 
           <button
-            onClick={() => setCurrentView(currentView === "stealth" ? "main" : "stealth")}
+            onClick={() => setCurrentView(currentView === "privacy" ? "main" : "privacy")}
             className={`flex flex-col items-center justify-center p-4 rounded-lg transition-all duration-200 ${
-              currentView === "stealth" 
-                ? "bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 text-white shadow-lg" 
+              currentView === "privacy" 
+                ? "bg-gradient-to-r from-gray-900/20 to-slate-900/20 border border-gray-600/30 text-white shadow-lg" 
                 : "bg-gray-800/80 text-gray-400 hover:bg-gray-700/80 hover:text-white border border-gray-600/30"
             }`}
-            title="Stealth Address Scanner - Base & Veil Cash Privacy"
           >
-            <Umbrella className="h-9 w-9 mb-1" />
-            <span className="text-xs font-medium text-white">Privacy</span>
+            <Umbrella className="h-6 w-6 mb-2" />
+            <span className="text-xs font-medium">Privacy</span>
           </button>
         </div>
       </div>
