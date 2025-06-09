@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useWallet } from "@/hooks/useWallet";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import SendButton from "./SendButton";
@@ -194,6 +194,18 @@ export function FkeySearch() {
     uniqueRecipients: 0,
   });
 
+  // Clear results when username changes (immediate clearing on input change)
+  useEffect(() => {
+    // Clear all search results when username changes
+    setProfile(null);
+    setConvosData(null);
+    setZkProofs({});
+    setZkVerification({});
+    setZkSuccess(false);
+    setError(null);
+    setZkFetching(false);
+  }, [username]);
+
   const handleSearch = async () => {
     if (!username) return;
 
@@ -367,9 +379,9 @@ export function FkeySearch() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 mobile-scroll hide-scrollbar">
       {/* Search Form */}
-      <div className="flex gap-4">
+      <div className="flex gap-4 mobile-scroll hide-scrollbar">
                 <input
                   type="text"
                   value={username}
@@ -393,14 +405,14 @@ export function FkeySearch() {
 
       {/* Simple Loading/Status Messages */}
       {zkFetching && (
-        <div className="flex items-center gap-2 text-blue-400 bg-gray-800 p-3 rounded-lg">
+        <div className="flex items-center gap-2 text-blue-400 bg-gray-800 p-3 rounded-lg mobile-scroll hide-scrollbar">
           <SpinnerIcon className="animate-spin h-5 w-5" />
           <span>{zkFetchingMessage}</span>
         </div>
       )}
 
       {zkSuccess && (
-        <div className="flex items-center gap-2 text-green-400 bg-gray-800 p-3 rounded-lg">
+        <div className="flex items-center gap-2 text-green-400 bg-gray-800 p-3 rounded-lg mobile-scroll hide-scrollbar">
           <CheckIcon className="h-5 w-5" />
           <button
             onClick={() => setShowZkModal(true)}
@@ -412,14 +424,14 @@ export function FkeySearch() {
       )}
 
             {error && (
-        <div className="text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+        <div className="text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg p-3 mobile-scroll hide-scrollbar">
                 {error}
               </div>
             )}
 
       {profile && (
-        <div className="space-y-4 p-4 bg-gray-800 rounded-lg">
-          <div className="flex items-center gap-4">
+        <div className="space-y-4 p-4 bg-gray-800 rounded-lg mobile-scroll hide-scrollbar">
+          <div className="flex items-center gap-4 mobile-scroll hide-scrollbar">
             {profile.avatar && (
               <img 
                 src={profile.avatar} 
@@ -427,7 +439,7 @@ export function FkeySearch() {
                 className="w-12 h-12 rounded-full"
               />
             )}
-            <div>
+            <div className="mobile-scroll hide-scrollbar">
               <div className="flex items-center gap-2">
                 <h3 className="text-xl font-bold text-white">{profile.name || username}.fkey.id</h3>
                 <CopyButton text={`${username}.fkey.id`} title="Copy .fkey.id address" />
@@ -442,7 +454,7 @@ export function FkeySearch() {
                 </div>
                 </div>
 
-                <div>
+                <div className="mobile-scroll hide-scrollbar">
                   <label className="block text-sm font-medium text-gray-300 mb-2">
               Amount (USDC)
                   </label>
@@ -467,34 +479,38 @@ export function FkeySearch() {
             </div>
           </div>
 
-          <SendButton
-            recipientAddress={profile.address}
-            amount={amount}
-            onPaymentCompleted={handlePaymentCompleted}
-            disabled={!isConnected || !amount || parseFloat(amount) <= 0}
-            paymentMethod={paymentMethod}
-            onPaymentMethodChange={setPaymentMethod}
-          />
+          <div className="mobile-scroll hide-scrollbar">
+            <SendButton
+              recipientAddress={profile.address}
+              amount={amount}
+              onPaymentCompleted={handlePaymentCompleted}
+              disabled={!isConnected || !amount || parseFloat(amount) <= 0}
+              paymentMethod={paymentMethod}
+              onPaymentMethodChange={setPaymentMethod}
+            />
+          </div>
         </div>
       )}
 
       {/* Render ConvosChat if we have convos data */}
       {convosData && (
-        <>
+        <div className="mobile-scroll hide-scrollbar">
           {!profile?.address && (
             <div className="w-full max-w-md mx-auto px-4 mb-2">
-              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 text-sm text-yellow-200">
+              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 text-sm text-yellow-200 mobile-scroll hide-scrollbar">
                 <p>💡 Click the message input below to send an invite to {convosData.profile.name || convosData.username}</p>
               </div>
             </div>
           )}
-          <ConvosChat
-            xmtpId={convosData.xmtpId}
-            username={convosData.username}
-            url={convosData.url}
-            profile={convosData.profile}
-          />
-        </>
+          <div className="mobile-scroll hide-scrollbar">
+            <ConvosChat
+              xmtpId={convosData.xmtpId}
+              username={convosData.username}
+              url={convosData.url}
+              profile={convosData.profile}
+            />
+          </div>
+        </div>
       )}
 
       {/* ZK Proof Modal */}

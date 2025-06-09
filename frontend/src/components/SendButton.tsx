@@ -265,12 +265,12 @@ export default function SendButton({
   });
 
   return (
-    <div className="w-full">
+    <div className="w-full mobile-scroll hide-scrollbar">
       {/* Payment Method Toggle */}
       {onPaymentMethodChange && (
-        <div className="mb-3">
+        <div className="mb-3 mobile-scroll hide-scrollbar">
           <div className="text-xs text-gray-400 mb-2">Payment Method</div>
-          <div className="flex gap-1 bg-gray-800 rounded-lg p-1">
+          <div className="flex gap-1 bg-gray-800 rounded-lg p-1 mobile-scroll hide-scrollbar">
             {(["daimo", "custom", "minikit"] as PaymentMethod[]).map((method) => (
               <button
                 key={method}
@@ -289,23 +289,23 @@ export default function SendButton({
       )}
 
       {error && (
-        <div className="text-red-500 text-sm mb-2">
+        <div className="text-red-500 text-sm mb-2 mobile-scroll hide-scrollbar">
           {error}
         </div>
       )}
       
       {/* Debug Info */}
-      <div className="text-xs text-gray-500 mb-2 font-mono">
+      <div className="text-xs text-gray-500 mb-2 font-mono mobile-scroll hide-scrollbar">
         Debug: amount={amount} | decimal={decimalAmount} | method={paymentMethod} | counter={buttonCounter} | chain={chainId} | targetChain={USDC_BASE.chainId}
       </div>
       
       {shouldShowButton ? (
-        <div className="relative">
+        <div className="relative mobile-scroll hide-scrollbar">
           {paymentMethod === "daimo" && (
-            <div key={`daimo-container-${mountKey}`}>
-              <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-lg overflow-hidden">
+            <div key={`daimo-container-${mountKey}`} className="mobile-scroll hide-scrollbar">
+              <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-lg overflow-hidden mobile-scroll hide-scrollbar">
                 {/* Daimo Pay Header */}
-                <div className="px-4 py-3 bg-green-700/20 border-b border-green-500/30">
+                <div className="px-4 py-3 bg-green-700/20 border-b border-green-500/30 mobile-scroll hide-scrollbar">
                   <div className="flex items-center gap-2">
                     <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
                       <span className="text-white text-xs font-bold">D</span>
@@ -316,7 +316,7 @@ export default function SendButton({
                 </div>
                 
                 {/* Payment Details */}
-                <div className="px-4 py-3">
+                <div className="px-4 py-3 mobile-scroll hide-scrollbar">
                   <div className="flex items-center justify-between mb-3">
                     <div>
                       <div className="text-white font-semibold">{decimalAmount} USDC</div>

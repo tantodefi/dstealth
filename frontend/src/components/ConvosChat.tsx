@@ -232,135 +232,115 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
   }
 
   return (
-    <div className="space-y-3">
-      {/* Connection Status */}
-      <div className="flex items-center justify-between text-xs">
-        <div className="flex items-center gap-2">
+    <div className="bg-gray-800 rounded-lg border border-gray-700 mobile-scroll hide-scrollbar">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-gray-700 mobile-scroll hide-scrollbar">
+        <div className="flex items-center gap-3">
           <img 
             src={profile.avatar} 
-            alt={profile.name || username}
-            className="w-6 h-6 rounded-full border border-gray-600"
-            onError={(e) => {
-              const target = e.target as HTMLImageElement;
-              target.src = `https://api.dicebear.com/7.x/identicon/svg?seed=${username}`;
-            }}
+            alt={profile.name} 
+            className="w-8 h-8 rounded-full"
           />
-          <div className={`w-2 h-2 rounded-full ${streamActive ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
-          <span className={streamActive ? 'text-green-400' : 'text-yellow-400'}>
-            {streamActive ? 'Connected to' : 'Connecting to'} {profile.name || username}
-          </span>
+          <div>
+            <h3 className="text-white font-medium text-sm">{profile.name}</h3>
+            <p className="text-gray-400 text-xs">@{profile.username}</p>
+          </div>
         </div>
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-400 hover:text-blue-300 flex items-center gap-1"
-        >
-          <ExternalLink size={12} />
-          Open
-        </a>
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${streamActive ? 'bg-green-500' : 'bg-gray-500'}`}></div>
+          <span className="text-xs text-gray-400">
+            {streamActive ? 'Live' : 'Offline'}
+          </span>
+          <a 
+            href={url} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="text-gray-400 hover:text-white ml-2"
+          >
+            <ExternalLink size={14} />
+          </a>
+        </div>
       </div>
 
-      {/* Debug Info */}
-      {debugLog.length > 0 && (
-        <div className="text-xs text-gray-600">
-          <details>
-            <summary className="cursor-pointer">Debug Info</summary>
-            <div className="mt-2 bg-gray-900 rounded p-2 max-h-24 overflow-y-auto">
-              {debugLog.slice(-3).map((log, i) => (
-                <div key={i} className="text-xs break-words">{log}</div>
-              ))}
-            </div>
-          </details>
+      {error && (
+        <div className="p-4 bg-red-500/10 border-b border-red-500/20 mobile-scroll hide-scrollbar">
+          <p className="text-red-400 text-sm">{error}</p>
         </div>
       )}
 
       {/* Messages */}
-      <div className="bg-gray-800 rounded p-3 h-40 overflow-y-auto space-y-2">
-        {messages.map((message, index) => {
-          const isFromUser = message.senderInboxId === client.inboxId;
-          const sentTime = message.sentAtNs 
-            ? new Date(Number(message.sentAtNs) / 1000000)
-            : new Date();
-
-          // Handle message content
-          let messageContent = '';
-          let isSystemMessage = false;
-          
-          if (typeof message.content === 'string') {
-            messageContent = message.content;
-          } else {
-            // Try to detect system messages (conversation initialization, etc.)
-            const contentObj = message.content;
-            if (contentObj && typeof contentObj === 'object') {
-              // Check if it's a conversation system message
-              if (contentObj.initiatedByInboxId || contentObj.addedInboxes || contentObj.removedInboxes) {
-                isSystemMessage = true;
-                if (contentObj.addedInboxes && contentObj.addedInboxes.length > 0) {
-                  messageContent = `${profile.name || username} was added to the conversation`;
-                } else if (contentObj.removedInboxes && contentObj.removedInboxes.length > 0) {
-                  messageContent = 'Someone left the conversation';
-                } else {
-                  messageContent = 'Conversation started';
-                }
-              } else {
-                // Other JSON content - format it nicely
-                messageContent = JSON.stringify(contentObj, null, 2);
-              }
-            } else {
-              messageContent = String(message.content);
-            }
-          }
-
-          return (
-            <div
-              key={index}
-              className={`text-xs ${isFromUser ? 'text-right' : 'text-left'}`}
-            >
-              <div
-                className={`inline-block p-2 rounded max-w-[85%] break-words ${
-                  isSystemMessage
-                    ? 'bg-gray-700 text-gray-300 italic text-center mx-auto'
-                    : isFromUser
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-600 text-gray-200'
-                }`}
-                style={{ 
-                  wordBreak: 'break-word',
-                  overflowWrap: 'break-word',
-                  whiteSpace: 'pre-wrap'
-                }}
-              >
-                {messageContent}
-                {!isSystemMessage && (
-                  <div className="text-gray-400 text-xs mt-1 opacity-75">
-                    {sentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </div>
-                )}
+      <div className="h-64 overflow-y-auto p-4 space-y-3 mobile-scroll hide-scrollbar">
+        {messages.length === 0 ? (
+          <div className="text-center text-gray-400 text-sm">
+            <MessageCircle className="mx-auto mb-2" size={24} />
+            <p>No messages yet. Send a message to start the conversation!</p>
+          </div>
+        ) : (
+          <div className="space-y-2 mobile-scroll hide-scrollbar">
+            {messages.map((message, index) => (
+              <div key={index} className="flex flex-col mobile-scroll hide-scrollbar">
+                <div className="flex items-center gap-2 text-xs text-gray-500">
+                  <span>
+                    {message.senderInboxId === client?.inboxId ? 'You' : profile.name}
+                  </span>
+                  <span>•</span>
+                  <span>{message.sentAt ? message.sentAt.toLocaleTimeString() : 'Unknown time'}</span>
+                </div>
+                <div className={`p-2 rounded-lg max-w-xs break-words text-sm ${
+                  message.senderInboxId === client?.inboxId
+                    ? 'bg-blue-600 text-white ml-auto'
+                    : 'bg-gray-700 text-gray-100'
+                }`}>
+                  {typeof message.content === 'string' 
+                    ? message.content 
+                    : typeof message.content === 'object' 
+                      ? JSON.stringify(message.content) 
+                      : String(message.content)
+                  }
+                </div>
               </div>
-            </div>
-          );
-        })}
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Message Input */}
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={newMessage}
-          onChange={(e) => setNewMessage(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-          placeholder="Type a message..."
-          className="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-1 text-sm text-white"
-        />
-        <button
-          onClick={sendMessage}
-          disabled={!conversation || !newMessage.trim()}
-          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-3 py-1 rounded text-sm"
-        >
-          <Send size={14} />
-        </button>
+      <div className="p-4 border-t border-gray-700 mobile-scroll hide-scrollbar">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            placeholder={`Message ${profile.name}...`}
+            className="flex-1 bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none"
+            onKeyPress={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
+          />
+          <button
+            onClick={sendMessage}
+            disabled={!newMessage.trim()}
+            className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg px-3 py-2 text-sm flex items-center gap-1"
+          >
+            <Send size={14} />
+          </button>
+        </div>
       </div>
+
+      {/* Debug Panel (visible in development) */}
+      {process.env.NODE_ENV === 'development' && debugLog.length > 0 && (
+        <details className="p-4 border-t border-gray-700 mobile-scroll hide-scrollbar">
+          <summary className="text-xs text-gray-500 cursor-pointer">Debug Information</summary>
+          <div className="mt-2 bg-gray-900 rounded p-2 max-h-32 overflow-y-auto text-xs mobile-scroll hide-scrollbar">
+            {debugLog.map((log, i) => (
+              <div key={i} className="text-gray-400 font-mono break-words">{log}</div>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 } 
