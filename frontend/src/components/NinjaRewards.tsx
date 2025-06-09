@@ -350,7 +350,7 @@ export default function StevenRewards() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 mobile-scroll hide-scrollbar overflow-y-auto">
       {/* Notification Modal */}
       <NotificationModal
         isOpen={notification.isOpen}
@@ -363,11 +363,16 @@ export default function StevenRewards() {
       />
 
       {/* Header */}
-      <div className="text-center">
-        <h3 className="text-2xl font-bold text-white mb-2">🥷 Rewards</h3>
-        <p className="text-gray-400">
-          Complete milestones and earn 🥷 tokens for your stealth content creation skills
-        </p>
+      <div className="bg-gradient-to-r from-yellow-900/20 to-orange-900/20 border border-yellow-600/30 rounded-lg p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 bg-gradient-to-br from-yellow-500 to-orange-600 rounded-lg flex items-center justify-center">
+            <span className="text-white font-bold">🥷</span>
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-white">Ninja Rewards</h2>
+            <p className="text-yellow-300">Earn 🥷 tokens for privacy actions and milestones</p>
+          </div>
+        </div>
       </div>
 
       {/* Status Messages */}

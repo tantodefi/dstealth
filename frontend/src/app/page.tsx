@@ -38,7 +38,7 @@ export default function Home() {
   return (
     <SafeAreaContainer>
       {/* Mobile viewport container with proper height constraints and smooth scrolling */}
-      <div className="max-w-md mx-auto bg-gray-900 text-white min-h-screen flex flex-col mobile-scroll hide-scrollbar">
+      <div className="max-w-md mx-auto bg-gray-900 text-white h-screen flex flex-col mobile-scroll hide-scrollbar">
         {showLoader ? (
           /* Loader - inside mini app viewport */
           <div className="flex flex-col items-center justify-center h-screen">
@@ -65,9 +65,9 @@ export default function Home() {
               </div>
             )}
             
-            {/* Main content area with smooth scrolling - no explicit height constraints */}
-            <main className="flex-grow mobile-scroll hide-scrollbar">
-              <div className="p-4 pb-24"> {/* Extra bottom padding for scroll space */}
+            {/* Main content area with proper height and overflow for scrolling */}
+            <main className="flex-1 overflow-y-auto mobile-scroll hide-scrollbar">
+              <div className="p-4 pb-24 min-h-full"> {/* Extra bottom padding for scroll space */}
                 {!isFullyConnected ? (
                   <div className="text-center py-8">
                     <h1 className="text-xl font-bold text-white mb-2">Welcome to myf⚡key</h1>

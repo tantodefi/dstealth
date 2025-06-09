@@ -444,163 +444,26 @@ export default function UserProfile({ address: propAddress, viewOnly = false }: 
   }
 
   return (
-    <div className="space-y-6 max-w-md mx-auto p-4 mobile-scroll hide-scrollbar min-h-screen">
+    <div className="space-y-6 mobile-scroll hide-scrollbar overflow-y-auto">
       {/* Profile Header */}
-      <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 rounded-lg p-4">
-        <div className="flex flex-col gap-4">
-          <div className="flex items-start gap-4">
-            <div className="flex-shrink-0">
-              <img
-                src={userData?.avatar}
-                alt={userData?.username}
-                className="w-16 h-16 rounded-full border-2 border-blue-400"
-              />
-            </div>
-            
-            <div className="flex-1 min-w-0">
-              {/* Identity Section */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-lg font-bold text-white truncate">
-                    {userData?.username}
-                  </h1>
-                  {isOwnProfile && (
-                    <span className="bg-green-600/20 text-green-400 text-xs px-2 py-1 rounded-full border border-green-600/30 flex-shrink-0">
-                      Your Profile
-                    </span>
-                  )}
-                </div>
-
-                {/* Identity Stack */}
-                <div className="space-y-1 text-sm">
-                  {userData?.farcasterProfile?.username && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-purple-400 truncate">@{userData.farcasterProfile!.username}</span>
-                      <ExternalLink 
-                        className="h-3 w-3 cursor-pointer hover:text-purple-400 flex-shrink-0"
-                        onClick={() => window.open(`https://warpcast.com/${userData.farcasterProfile!.username}`, '_blank')}
-                      />
-                    </div>
-                  )}
-                  
-                  {userData?.ensName && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-blue-400 truncate">{userData.ensName}</span>
-                      <ExternalLink 
-                        className="h-3 w-3 cursor-pointer hover:text-blue-400 flex-shrink-0"
-                        onClick={() => window.open(`https://app.ens.domains/name/${userData.ensName}`, '_blank')}
-                      />
-                    </div>
-                  )}
-
-                  {userData?.baseName && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-blue-300 truncate">{userData.baseName}</span>
-                      <ExternalLink 
-                        className="h-3 w-3 cursor-pointer hover:text-blue-300 flex-shrink-0"
-                        onClick={() => window.open(`https://www.base.org/name/${userData.baseName}`, '_blank')}
-                      />
-                    </div>
-                  )}
-
-                  {userData?.fkeyProfile?.username && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-green-400 truncate">{userData.fkeyProfile!.username}.fkey.id</span>
-                      <ExternalLink 
-                        className="h-3 w-3 cursor-pointer hover:text-green-400 flex-shrink-0"
-                        onClick={() => window.open(`https://${userData.fkeyProfile!.username}.fkey.id`, '_blank')}
-                      />
-                    </div>
-                  )}
-
-                  {userData?.convosProfile?.username && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-yellow-400 truncate">{userData.convosProfile!.username}.convos.org</span>
-                      <ExternalLink 
-                        className="h-3 w-3 cursor-pointer hover:text-yellow-400 flex-shrink-0"
-                        onClick={() => window.open(`https://${userData.convosProfile!.username}.convos.org`, '_blank')}
-                      />
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-2 text-xs text-gray-400 font-mono">
-                    <span className="truncate">{targetAddress}</span>
-                    <Copy 
-                      className="h-3 w-3 cursor-pointer hover:text-blue-400 transition-colors flex-shrink-0"
-                      onClick={() => copyLink(targetAddress!)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Bio */}
-              {userData?.bio && (
-                <p className="text-gray-300 text-sm mt-2">{userData.bio}</p>
-              )}
-            </div>
+      <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 rounded-lg p-6">
+        <div className="flex items-center gap-4 mb-4">
+          <div className="relative">
+            <img
+              src={userData?.avatar}
+              alt={userData?.username}
+              className="w-16 h-16 rounded-full border-2 border-blue-500"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${targetAddress}`;
+              }}
+            />
           </div>
-
-          {/* Action Buttons */}
-          <div className="flex gap-2">
-            <Button
-              onClick={shareProfile}
-              className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2 text-sm px-3 py-2"
-            >
-              <Share className="h-3 w-3" />
-              Share
-            </Button>
-            {userData?.farcasterProfile?.username && (
-              <Button
-                onClick={() => window.open(`https://warpcast.com/${userData.farcasterProfile!.username}`, '_blank')}
-                className="bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-2 text-sm px-3 py-2"
-              >
-                <ExternalLink className="h-3 w-3" />
-                Warpcast
-              </Button>
-            )}
-          </div>
-
-          {/* Stats Grid */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-gray-800/50 rounded-lg p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <DollarSign className="h-3 w-3 text-green-400" />
-                <span className="text-xs text-gray-400">Earnings</span>
-              </div>
-              <div className="text-lg font-bold text-green-400">
-                ${userData?.stats.totalEarnings.toFixed(2)}
-              </div>
-            </div>
-            
-            <div className="bg-gray-800/50 rounded-lg p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <LinkIcon className="h-3 w-3 text-blue-400" />
-                <span className="text-xs text-gray-400">X402 Links</span>
-              </div>
-              <div className="text-lg font-bold text-blue-400">
-                {userData?.stats.totalLinks}
-              </div>
-            </div>
-            
-            <div className="bg-gray-800/50 rounded-lg p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <Shield className="h-3 w-3 text-purple-400" />
-                <span className="text-xs text-gray-400">Privacy</span>
-              </div>
-              <div className="text-lg font-bold text-purple-400">
-                {userData?.stats.privacyScore}
-              </div>
-            </div>
-            
-            <div className="bg-gray-800/50 rounded-lg p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <Eye className="h-3 w-3 text-yellow-400" />
-                <span className="text-xs text-gray-400">Stealth</span>
-              </div>
-              <div className="text-lg font-bold text-yellow-400">
-                {userData?.stats.stealthActions}
-              </div>
-            </div>
+          <div className="flex-1">
+            <h2 className="text-2xl font-bold text-white mb-1">
+              {userData?.username}
+            </h2>
+            <p className="text-blue-300 text-sm font-mono">{targetAddress}</p>
           </div>
         </div>
       </div>

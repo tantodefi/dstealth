@@ -159,7 +159,7 @@ export default function ViewerComponent() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 mobile-scroll hide-scrollbar overflow-y-auto">
       {/* X402 URI Input */}
       <div className="bg-gradient-to-r from-purple-900/20 to-blue-900/20 border border-purple-600/30 rounded-lg p-6">
         <div className="flex items-center gap-3 mb-4">
@@ -205,17 +205,16 @@ export default function ViewerComponent() {
       </div>
 
       {/* Header */}
-      <div className="bg-gradient-to-r from-purple-900/20 to-blue-900/20 border border-purple-600/30 rounded-lg p-6">
-        <div className="flex items-center gap-3 mb-3">
-          <Eye className="h-8 w-8 text-purple-400" />
+      <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 rounded-lg p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+            <span className="text-white font-bold">👁️</span>
+          </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">{content.name}</h1>
-            <p className="text-purple-300">Premium content viewer and creator dashboard</p>
+            <h2 className="text-2xl font-bold text-white">Content Viewer</h2>
+            <p className="text-blue-300">View and interact with X402 protected content</p>
           </div>
         </div>
-        {content.description && (
-          <p className="text-gray-300 text-sm">{content.description}</p>
-        )}
       </div>
 
       {/* User Stats Dashboard - only show if connected */}

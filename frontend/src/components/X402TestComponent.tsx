@@ -232,14 +232,16 @@ export default function X402TestComponent() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 mobile-scroll hide-scrollbar overflow-y-auto">
       {/* Header */}
-      <div className="bg-gradient-to-r from-orange-900/20 to-red-900/20 border border-orange-600/30 rounded-lg p-6">
-        <div className="flex items-center gap-3 mb-3">
-          <LinkIcon className="h-8 w-8 text-orange-400" />
+      <div className="bg-gradient-to-r from-green-900/20 to-blue-900/20 border border-green-600/30 rounded-lg p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-blue-600 rounded-lg flex items-center justify-center">
+            <span className="text-white font-bold">🔗</span>
+          </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">X402 Test Tool & Link Creator</h1>
-            <p className="text-orange-300">Create X402 payment links and test payment protocols</p>
+            <h2 className="text-2xl font-bold text-white">X402 Link Creator & Tester</h2>
+            <p className="text-green-300">Create and test monetized content links</p>
           </div>
         </div>
       </div>

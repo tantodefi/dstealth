@@ -33,22 +33,30 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
 
   const renderCurrentView = () => {
     if (showEarningsChart) {
-      return <EarningsChart onClose={onCloseEarningsChart || (() => {})} />;
+      return (
+        <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+          <EarningsChart onClose={onCloseEarningsChart || (() => {})} />
+        </div>
+      );
     }
 
     switch (currentView) {
       case "search":
-        return <FkeySearch />;
+        return (
+          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+            <FkeySearch />
+          </div>
+        );
       case "agent":
         return (
-          <div className="space-y-4">
+          <div className="space-y-4 mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
             <BotChat />
             <XMTPAgentManager />
           </div>
         );
       case "chat":
         return (
-          <div className="space-y-4">
+          <div className="space-y-4 mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
             <TantoConvosChat />
             <div className="bg-gradient-to-r from-orange-900/20 to-red-900/20 border border-orange-600/30 rounded-lg p-4">
               <div className="flex items-center gap-3 mb-3">
@@ -62,22 +70,50 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
           </div>
         );
       case "receipts":
-        return <ZkReceipts />;
+        return (
+          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+            <ZkReceipts />
+          </div>
+        );
       case "x402":
-        return <X402TestComponent />;
+        return (
+          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+            <X402TestComponent />
+          </div>
+        );
       case "earnings":
-        return <EarningsChart onClose={() => setCurrentView("main")} />;
+        return (
+          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+            <EarningsChart onClose={() => setCurrentView("main")} />
+          </div>
+        );
       case "rewards":
-        return <StevenRewards />;
+        return (
+          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+            <StevenRewards />
+          </div>
+        );
       case "stealth":
-        return <StealthScanner />;
+        return (
+          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+            <StealthScanner />
+          </div>
+        );
       case "profile":
-        return <UserProfile address="0x0000000000000000000000000000000000000000" />;
+        return (
+          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+            <UserProfile address="0x0000000000000000000000000000000000000000" />
+          </div>
+        );
       case "viewer":
-        return <ViewerComponent />;
+        return (
+          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+            <ViewerComponent />
+          </div>
+        );
       default:
         return (
-          <div className="space-y-4">
+          <div className="space-y-4 mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
             {/* Debug JWT Component - Temporary for troubleshooting */}
             <DebugJWT />
             
@@ -125,9 +161,9 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
   };
 
   return (
-    <div className="space-y-4">
+    <div className="h-full flex flex-col mobile-scroll hide-scrollbar">
       {/* Enhanced Navigation Icons - Two Rows */}
-      <div className="w-full">        
+      <div className="w-full flex-shrink-0">        
         {/* First Row - 4 icons */}
         <div className="grid grid-cols-4 gap-3 mb-3">
           <button
@@ -239,8 +275,10 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
         </div>
       </div>
       
-      {/* Current view content */}
-      {renderCurrentView()}
+      {/* Current view content - flex-1 with height constraint for proper scrolling */}
+      <div className="flex-1 overflow-hidden">
+        {renderCurrentView()}
+      </div>
     </div>
   );
 } 

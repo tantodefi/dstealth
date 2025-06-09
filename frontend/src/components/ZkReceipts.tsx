@@ -124,8 +124,19 @@ export default function ZkReceipts() {
   }
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-bold text-white">ZK Receipts</h2>
+    <div className="space-y-6 mobile-scroll hide-scrollbar overflow-y-auto">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-purple-900/20 to-blue-900/20 border border-purple-600/30 rounded-lg p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-blue-600 rounded-lg flex items-center justify-center">
+            <span className="text-white font-bold">📋</span>
+          </div>
+          <div>
+            <h2 className="text-xl font-semibold text-white">ZK Receipts</h2>
+            <p className="text-gray-400 text-sm">Privacy-preserving payment receipts</p>
+          </div>
+        </div>
+      </div>
       <div className="space-y-3">
         {stealthPayments.map((payment, index) => (
           <div key={index} className="bg-gray-800 rounded-lg overflow-hidden">

@@ -412,7 +412,7 @@ export default function StealthScanner() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 mobile-scroll hide-scrollbar overflow-y-auto">
       {/* Header with centered emoji and clean design */}
       <div className="text-center mb-6">
         <div className="flex flex-col items-center gap-3 mb-4">
