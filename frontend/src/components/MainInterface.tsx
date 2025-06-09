@@ -120,9 +120,6 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
       default:
         return (
           <div className="space-y-4 mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
-            {/* Debug JWT Component - Temporary for troubleshooting */}
-            <DebugJWT />
-            
             {/* Always show search component prominently */}
             <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 rounded-lg p-4">
               <div className="flex items-center gap-3 mb-3">
@@ -161,6 +158,9 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
                 </div>
               )}
             </div>
+
+            {/* Debug JWT Component - Moved to bottom */}
+            <DebugJWT />
           </div>
         );
     }

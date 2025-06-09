@@ -15,6 +15,7 @@ import { ChevronDown, Copy, Check, Eye, User, Settings, X, RefreshCw } from "luc
 //   Address,
 // } from '@coinbase/onchainkit/identity';
 import UserAvatar from './UserAvatar';
+import { useRouter } from "next/navigation";
 
 // Storage keys
 const XMTP_CONNECTION_TYPE_KEY = "xmtp:connectionType";
@@ -36,6 +37,8 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
     isInFarcasterContext, 
     farcasterUser 
   } = useXMTP();
+
+  const router = useRouter();
 
   // State
   const [showDropdown, setShowDropdown] = useState(false);
@@ -197,15 +200,22 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
   // Handle disconnect
   const handleDisconnect = () => {
     if (isEphemeralConnection) {
-    disconnectXMTP();
+      disconnectXMTP();
       localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
       localStorage.removeItem(XMTP_EPHEMERAL_KEY);
-    setEphemeralAddress("");
+      setEphemeralAddress("");
     } else {
-    disconnectWallet();
-    disconnectXMTP();
+      disconnectWallet();
+      disconnectXMTP();
     }
+    
+    // Clear all other connection-related localStorage items
+    localStorage.removeItem('fkey:jwt');
+    
     setShowDropdown(false);
+    
+    // Navigate to home page to show login view
+    router.push('/');
   };
 
   // Don't render until mounted to prevent hydration issues

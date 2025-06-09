@@ -46,8 +46,21 @@ export default function UserAvatar({
           return;
         }
 
-        // Priority 2: ENS Avatar
+        // Priority 2: ENS Avatar - Multiple attempts
         try {
+          // Try ENS metadata service first
+          const ensMetadataResponse = await fetch(`https://metadata.ens.domains/mainnet/avatar/${address}`);
+          if (ensMetadataResponse.ok && ensMetadataResponse.headers.get('content-type')?.includes('image')) {
+            setAvatarUrl(ensMetadataResponse.url);
+            setLoading(false);
+            return;
+          }
+        } catch (error) {
+          console.log('ENS metadata avatar lookup failed:', error);
+        }
+
+        try {
+          // Try alternative ENS service
           const ensResponse = await fetch(`https://api.ensideas.com/ens/resolve/${address}`);
           if (ensResponse.ok) {
             const ensData = await ensResponse.json();
@@ -58,7 +71,7 @@ export default function UserAvatar({
             }
           }
         } catch (error) {
-          console.log('ENS avatar lookup failed:', error);
+          console.log('ENS ideas avatar lookup failed:', error);
         }
 
         // Priority 3: Basename Avatar
@@ -76,16 +89,31 @@ export default function UserAvatar({
           console.log('Basename avatar lookup failed:', error);
         }
 
-        // Priority 4: Try Ethereum Avatar Service
+        // Priority 4: Try another ENS resolver
         try {
-          const avatarResponse = await fetch(`https://metadata.ens.domains/mainnet/avatar/${address}`);
-          if (avatarResponse.ok && avatarResponse.headers.get('content-type')?.includes('image')) {
-            setAvatarUrl(avatarResponse.url);
+          const ensDirectResponse = await fetch(`https://api.web3.bio/profile/eth/${address}`);
+          if (ensDirectResponse.ok) {
+            const ensDirectData = await ensDirectResponse.json();
+            if (ensDirectData.avatar) {
+              setAvatarUrl(ensDirectData.avatar);
+              setLoading(false);
+              return;
+            }
+          }
+        } catch (error) {
+          console.log('Web3.bio avatar lookup failed:', error);
+        }
+
+        // Priority 5: Universal avatar service
+        try {
+          const universalResponse = await fetch(`https://universal-avatar.com/avatar/${address}`);
+          if (universalResponse.ok) {
+            setAvatarUrl(universalResponse.url);
             setLoading(false);
             return;
           }
         } catch (error) {
-          console.log('ENS metadata avatar lookup failed:', error);
+          console.log('Universal avatar lookup failed:', error);
         }
 
         // No avatar found
@@ -98,7 +126,7 @@ export default function UserAvatar({
       }
     };
 
-    const timeoutId = setTimeout(resolveAvatar, 300); // Debounce
+    const timeoutId = setTimeout(resolveAvatar, 100); // Reduce debounce time
     return () => clearTimeout(timeoutId);
   }, [address, farcasterUser?.profileImage]);
 

@@ -500,7 +500,7 @@ export function FkeySearch() {
       {/* ZK Proof Modal */}
       {showZkModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-2 z-50">
-          <div className="bg-gray-900 rounded-lg p-4 w-full max-w-md mx-auto max-h-[90vh] overflow-auto">
+          <div className="bg-gray-900 rounded-lg p-4 w-full max-w-md mx-auto max-h-[90vh] overflow-y-auto mobile-scroll hide-scrollbar">
             <div className="flex justify-between items-center mb-4">
               <div className="flex items-center gap-4">
                 <h3 className="text-white text-sm font-medium">ZKfetch Proof</h3>
@@ -561,7 +561,7 @@ export function FkeySearch() {
             )}
 
             {zkProofs[selectedProofType] ? (
-              <pre className="bg-black rounded-md p-3 overflow-auto text-xs">
+              <pre className="bg-black rounded-md p-3 overflow-auto text-xs mobile-scroll hide-scrollbar">
                 <code className="text-gray-300 whitespace-pre-wrap break-all">
                   {JSON.stringify(zkProofs[selectedProofType], null, 2)}
                 </code>

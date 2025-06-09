@@ -122,10 +122,15 @@ export default function StevenRewards() {
   // Format token balance for display
   const formattedBalance = tokenBalance && tokenDecimals 
     ? formatUnits(tokenBalance, tokenDecimals)
-    : '0';
+    : undefined;
 
   // Check if user has FluidKey Score tokens
   const hasFKS = fksBalance && fksDecimals && Number(formatUnits(fksBalance, fksDecimals)) > 0;
+
+  // Get formatted FKS balance
+  const formattedFKSBalance = fksBalance && fksDecimals 
+    ? formatUnits(fksBalance, fksDecimals)
+    : undefined;
   
   // Storage keys for user-specific data
   const getCompletedMilestonesKey = (userAddress: string) => `steven_completed_milestones_${userAddress.toLowerCase()}`;
@@ -395,7 +400,7 @@ export default function StevenRewards() {
           <div>
             <div className="text-white font-semibold">Your {tokenSymbol || '🥷'} Balance</div>
             <div className="text-2xl font-bold text-purple-300">
-              {parseFloat(formattedBalance).toLocaleString()} {tokenSymbol || '🥷'}
+              {formattedBalance ? formattedBalance.toLocaleString() : 'Loading...'} {tokenSymbol || '🥷'}
             </div>
             <div className="text-xs text-gray-400 mt-1">
               {tokenName || 'Token Name'} • Base Mainnet
@@ -426,7 +431,7 @@ export default function StevenRewards() {
                 42,000 🥷 Bonus Available
               </div>
               <div className="text-xs text-gray-400 mt-1">
-                FKS Balance: {fksBalance && fksDecimals ? formatUnits(fksBalance, fksDecimals) : '0'} FKS
+                FKS Balance: {formattedFKSBalance ? formattedFKSBalance.toLocaleString() : 'Loading...'} FKS
               </div>
             </div>
           </div>
