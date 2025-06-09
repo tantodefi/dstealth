@@ -284,7 +284,7 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
                     {message.senderInboxId === client?.inboxId ? 'You' : profile.name}
                   </span>
                   <span>•</span>
-                  <span>{message.sentAt ? message.sentAt.toLocaleTimeString() : 'Unknown time'}</span>
+                  <span>{message.sentAtNs ? new Date(Number(message.sentAtNs) / 1000000).toLocaleTimeString() : 'Unknown time'}</span>
                 </div>
                 <div className={`p-2 rounded-lg max-w-xs break-words text-sm ${
                   message.senderInboxId === client?.inboxId

@@ -412,9 +412,9 @@ export default function StealthScanner() {
   }
 
   return (
-    <div className="space-y-6 mobile-scroll hide-scrollbar overflow-y-auto">
+    <div className="space-y-6 max-w-md mx-auto p-4 mobile-scroll hide-scrollbar overflow-y-auto">
       {/* Header with centered emoji and clean design */}
-      <div className="text-center mb-6">
+      <div className="text-center mb-6 mobile-scroll hide-scrollbar">
         <div className="flex flex-col items-center gap-3 mb-4">
           <div className="text-4xl">🛡️</div>
           <h1 className="text-2xl font-bold text-white">Privacy Scanner</h1>
@@ -425,7 +425,7 @@ export default function StealthScanner() {
       </div>
 
       {/* Address Input Section - Prominently Featured */}
-      <div className="bg-gray-800 border border-gray-600 rounded-lg p-6 mb-6">
+      <div className="bg-gray-800 border border-gray-600 rounded-lg p-6 mb-6 mobile-scroll hide-scrollbar">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-blue-600 rounded-lg flex items-center justify-center">
             <span className="text-white font-bold">🔍</span>
@@ -438,7 +438,7 @@ export default function StealthScanner() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 mobile-scroll hide-scrollbar">
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">
               Ethereum Address or ENS Name
@@ -495,7 +495,7 @@ export default function StealthScanner() {
           </div>
 
           {/* Scanner Features - Row 1 */}
-          <div className="grid grid-cols-4 gap-4 mt-4 pt-4 border-t border-gray-700">
+          <div className="grid grid-cols-4 gap-4 mt-4 pt-4 border-t border-gray-700 mobile-scroll hide-scrollbar">
             <div className="text-center">
               <div className="text-2xl mb-2">⚡</div>
               <div className="text-green-400 font-semibold">Fast</div>
@@ -521,9 +521,9 @@ export default function StealthScanner() {
       </div>
 
       {/* Privacy Metrics - Reorganized into two clean rows */}
-      <div className="space-y-4">
+      <div className="space-y-4 mobile-scroll hide-scrollbar">
         {/* Row 1 - Main Privacy Stats */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-4 gap-4 mobile-scroll hide-scrollbar">
           <div className="bg-gray-900/50 border border-gray-600/30 rounded-lg p-4 text-center">
             <div className="text-2xl mb-2">🔑</div>
             <div className="text-2xl font-bold text-purple-400">{metadata.registrations}</div>
@@ -547,7 +547,7 @@ export default function StealthScanner() {
         </div>
 
         {/* Row 2 - Scores */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-3 gap-4 mobile-scroll hide-scrollbar">
           <div className="bg-gray-900/50 border border-gray-600/30 rounded-lg p-4 text-center">
             <div className="text-2xl mb-2">💎</div>
             <div className="text-2xl font-bold text-cyan-400">{metadata.fksTokenBalance.toFixed(0)}</div>
@@ -567,7 +567,7 @@ export default function StealthScanner() {
       </div>
 
       {/* Activities List */}
-      <div className="bg-gray-900/50 border border-gray-600/30 rounded-lg p-6">
+      <div className="bg-gray-900/50 border border-gray-600/30 rounded-lg p-6 mobile-scroll hide-scrollbar">
         <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
           <Eye className="h-5 w-5" />
           Stealth Activities ({activities.length})
@@ -584,9 +584,9 @@ export default function StealthScanner() {
             </p>
           </div>
         ) : (
-          <div className="space-y-3 max-h-96 overflow-y-auto">
+          <div className="space-y-3 max-h-96 overflow-y-auto mobile-scroll hide-scrollbar">
             {activities.map((activity, index) => (
-              <div key={index} className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/50">
+              <div key={index} className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/50 mobile-scroll hide-scrollbar">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
                     <span className="text-2xl">{getActivityIcon(activity.type)}</span>
@@ -658,9 +658,9 @@ export default function StealthScanner() {
       </div>
 
       {/* Integration Links */}
-      <div className="bg-gray-900/50 border border-gray-600/30 rounded-lg p-6">
+      <div className="bg-gray-900/50 border border-gray-600/30 rounded-lg p-6 mobile-scroll hide-scrollbar">
         <h3 className="text-xl font-bold text-white mb-4">Privacy Protocol Integration</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mobile-scroll hide-scrollbar">
           <a
             href="https://stealthaddress.dev"
             target="_blank"
@@ -704,6 +704,9 @@ export default function StealthScanner() {
           </a>
         </div>
       </div>
+
+      {/* Bottom padding for mobile scroll */}
+      <div className="pb-24"></div>
     </div>
   );
 } 

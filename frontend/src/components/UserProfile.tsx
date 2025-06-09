@@ -444,9 +444,9 @@ export default function UserProfile({ address: propAddress, viewOnly = false }: 
   }
 
   return (
-    <div className="space-y-6 mobile-scroll hide-scrollbar overflow-y-auto">
+    <div className="space-y-6 max-w-md mx-auto p-4 mobile-scroll hide-scrollbar overflow-y-auto">
       {/* Profile Header */}
-      <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 rounded-lg p-6">
+      <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 rounded-lg p-6 mobile-scroll hide-scrollbar">
         <div className="flex items-center gap-4 mb-4">
           <div className="relative">
             <img
@@ -469,19 +469,19 @@ export default function UserProfile({ address: propAddress, viewOnly = false }: 
       </div>
 
       {/* Content Sections */}
-      <div className="space-y-6">
+      <div className="space-y-6 mobile-scroll hide-scrollbar">
         {/* X402 Links */}
         {userData?.x402Links && userData.x402Links.length > 0 && (
-          <div className="space-y-4">
+          <div className="space-y-4 mobile-scroll hide-scrollbar">
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
               <LinkIcon className="h-5 w-5 text-blue-400" />
               X402 Links
             </h2>
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid grid-cols-1 gap-4 mobile-scroll hide-scrollbar">
               {userData.x402Links.map((link) => (
                 <div
                   key={link.id}
-                  className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 hover:border-blue-500/50 transition-colors"
+                  className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 hover:border-blue-500/50 transition-colors mobile-scroll hide-scrollbar"
                 >
                   <h3 className="text-lg font-semibold text-white mb-2">{link.title}</h3>
                   <p className="text-gray-400 text-sm mb-4">{link.description}</p>
@@ -510,16 +510,16 @@ export default function UserProfile({ address: propAddress, viewOnly = false }: 
 
         {/* Proxy402 URLs - Only show for own profile */}
         {isOwnProfile && userData?.proxy402Urls && userData.proxy402Urls.length > 0 && (
-          <div className="space-y-4">
+          <div className="space-y-4 mobile-scroll hide-scrollbar">
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
               <Shield className="h-5 w-5 text-green-400" />
               Proxy402 URLs
             </h2>
-            <div className="space-y-2">
+            <div className="space-y-2 mobile-scroll hide-scrollbar">
               {userData.proxy402Urls.map((url, index) => (
                 <div
                   key={index}
-                  className="bg-gray-800/50 border border-gray-700 rounded-lg p-3"
+                  className="bg-gray-800/50 border border-gray-700 rounded-lg p-3 mobile-scroll hide-scrollbar"
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-green-400 text-sm font-mono truncate">{url}</span>
@@ -538,12 +538,12 @@ export default function UserProfile({ address: propAddress, viewOnly = false }: 
 
         {/* ZK Receipts - Only show for own profile */}
         {isOwnProfile && userData?.zkReceipts && userData.zkReceipts.length > 0 && (
-          <div className="space-y-4">
+          <div className="space-y-4 mobile-scroll hide-scrollbar">
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
               <Shield className="h-5 w-5 text-purple-400" />
               ZK Receipts
             </h2>
-            <div className="space-y-4">
+            <div className="space-y-4 mobile-scroll hide-scrollbar">
               {userData.zkReceipts.map((receipt) => (
                 <ZKReceiptCard key={receipt.id} receipt={receipt} />
               ))}

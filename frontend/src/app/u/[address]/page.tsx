@@ -27,16 +27,16 @@ export default function UserProfilePage({ params }: PageProps) {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center mobile-scroll hide-scrollbar">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="min-h-screen bg-gray-900 text-white mobile-scroll hide-scrollbar">
       {/* Back Navigation */}
-      <div className="max-w-md mx-auto p-4">
+      <div className="max-w-md mx-auto p-4 mobile-scroll hide-scrollbar">
         <Link 
           href="/"
           className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors mb-4"
@@ -47,7 +47,9 @@ export default function UserProfilePage({ params }: PageProps) {
       </div>
 
       {/* User Profile Component */}
-      <UserProfile address={address} viewOnly={true} />
+      <div className="mobile-scroll hide-scrollbar overflow-y-auto">
+        <UserProfile address={address} viewOnly={true} />
+      </div>
     </div>
   );
 } 
