@@ -342,6 +342,43 @@ export default function WalletConnection() {
   // Add effect to handle post-connection initialization
   useEffect(() => {
     let initTimeout: NodeJS.Timeout;
+    let retryTimeout: NodeJS.Timeout;
+    let retryCount = 0;
+    const MAX_RETRIES = 3;
+    
+    const attemptInitialization = async () => {
+      console.log("Attempting XMTP initialization, attempt:", retryCount + 1);
+      const signer = getSigner();
+      if (signer) {
+        try {
+          console.log("Initializing XMTP with SCW signer");
+          await initializeXmtp(signer, "scw");
+          console.log("XMTP initialization successful");
+        } catch (error) {
+          console.error("Error initializing XMTP:", error);
+          if (retryCount < MAX_RETRIES) {
+            retryCount++;
+            console.log(`Retrying initialization (${retryCount}/${MAX_RETRIES})...`);
+            retryTimeout = setTimeout(attemptInitialization, 2000);
+          } else {
+            console.error("Max retries reached, clearing connection state");
+            localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
+            setLocalConnectionType("");
+          }
+        }
+      } else {
+        console.error("Failed to get signer");
+        if (retryCount < MAX_RETRIES) {
+          retryCount++;
+          console.log(`Retrying signer creation (${retryCount}/${MAX_RETRIES})...`);
+          retryTimeout = setTimeout(attemptInitialization, 2000);
+        } else {
+          console.error("Max retries reached, clearing connection state");
+          localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
+          setLocalConnectionType("");
+        }
+      }
+    };
     
     if (isConnected && connector?.id === "coinbaseWalletSDK" && !localConnectionType) {
       console.log("Coinbase Wallet connected, preparing XMTP initialization...");
@@ -350,27 +387,16 @@ export default function WalletConnection() {
       setLocalConnectionType("Coinbase Smart Wallet");
       localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "Coinbase Smart Wallet");
       
-      // Add a small delay for mobile to ensure wallet is fully ready
-      initTimeout = setTimeout(() => {
-        const signer = getSigner();
-        if (signer) {
-          console.log("Initializing XMTP with SCW signer");
-          initializeXmtp(signer, "scw").catch((error) => {
-            console.error("Error initializing XMTP:", error);
-            localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
-            setLocalConnectionType("");
-          });
-        } else {
-          console.error("Failed to get signer after wallet connection");
-          localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
-          setLocalConnectionType("");
-        }
-      }, 1000); // Reduced delay to 1 second
+      // Add a delay for mobile to ensure wallet is fully ready
+      initTimeout = setTimeout(attemptInitialization, 1500);
     }
 
     return () => {
       if (initTimeout) {
         clearTimeout(initTimeout);
+      }
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
       }
     };
   }, [isConnected, connector, localConnectionType, getSigner, initializeXmtp]);
@@ -381,6 +407,7 @@ export default function WalletConnection() {
       console.log("Wallet disconnected, cleaning up...");
       localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
       setLocalConnectionType("");
+      setLocalInitializing(false);
     }
   }, [isConnected, localConnectionType]);
 
@@ -398,14 +425,23 @@ export default function WalletConnection() {
           setLocalConnectionType("");
         }
         
+        // Force a clean state before connecting
+        setLocalInitializing(true);
+        
         connect({
           connector: coinbaseWallet({
             appName: "XMTP Mini App",
             preference: { options: "smartWalletOnly" },
           }),
+        }).catch((error) => {
+          console.error("Error during wallet connection:", error);
+          setLocalInitializing(false);
+          localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
+          setLocalConnectionType("");
         });
       } catch (error) {
         console.error("Error connecting to Coinbase Wallet:", error);
+        setLocalInitializing(false);
         localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
         setLocalConnectionType("");
       }
