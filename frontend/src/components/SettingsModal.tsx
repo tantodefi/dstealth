@@ -130,10 +130,11 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         convosUsername,
       });
       
-      // Keep localStorage for backward compatibility
+      // Save to localStorage with consistent keys
       localStorage.setItem('fkey:jwt', jwtToken);
       localStorage.setItem('fkey:username', fkeyUsername);
       localStorage.setItem('convos:username', convosUsername);
+      localStorage.setItem(`proxy402_jwt_${address.toLowerCase()}`, jwtToken);
       
       // Test JWT validity and fetch user data if provided
       if (jwtToken && isValidJWT) {

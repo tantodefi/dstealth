@@ -46,7 +46,13 @@ export function Proxy402Balance({ onShowChart, compact = false }: Proxy402Balanc
     try {
       // Get user data from database
       const userData = database.getUser(effectiveAddress);
-      const jwtToken = userData?.jwtToken;
+      let jwtToken = userData?.jwtToken;
+
+      // If not in database, try localStorage
+      if (!jwtToken) {
+        const jwtKey = `proxy402_jwt_${effectiveAddress.toLowerCase()}`;
+        jwtToken = localStorage.getItem(jwtKey);
+      }
 
       // Get current database stats
       const earningsStats = database.getEarningsStats(effectiveAddress);
@@ -58,11 +64,11 @@ export function Proxy402Balance({ onShowChart, compact = false }: Proxy402Balanc
       if (jwtToken) {
         try {
           // Fetch latest proxy402 data
-      const response = await fetch('/api/proxy402/dashboard/stats', {
-        headers: {
-          'Authorization': `Bearer ${jwtToken}`
-        }
-      });
+          const response = await fetch('/api/proxy402/dashboard/stats', {
+            headers: {
+              'Authorization': `Bearer ${jwtToken}`
+            }
+          });
 
           if (response.ok) {
             const stats: DashboardStats = await response.json();

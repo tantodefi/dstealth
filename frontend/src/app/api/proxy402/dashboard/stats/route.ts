@@ -20,7 +20,8 @@ export async function GET(request: NextRequest) {
 
     console.log('Fetching dashboard stats from Proxy402:', {
       url: `${PROXY402_BASE_URL}/dashboard/stats`,
-      jwtLength: jwt.length
+      jwtLength: jwt.length,
+      jwtPreview: jwt.substring(0, 10) + '...'
     });
 
     // Forward the request to Proxy402 API with timeout
@@ -31,11 +32,12 @@ export async function GET(request: NextRequest) {
       const response = await fetch(`${PROXY402_BASE_URL}/dashboard/stats`, {
         method: 'GET',
         headers: {
-          // Use Cookie authentication as proven by our other routes
           'Cookie': `jwt=${jwt}`,
           'Accept': 'application/json',
-          'User-Agent': 'XMTP-MiniApp/1.0'
+          'User-Agent': 'XMTP-MiniApp/1.0',
+          'Content-Type': 'application/json'
         },
+        credentials: 'include',
         cache: 'no-store',
         signal: controller.signal
       });
@@ -44,36 +46,85 @@ export async function GET(request: NextRequest) {
 
       console.log('Proxy402 dashboard stats response:', {
         status: response.status,
+        statusText: response.statusText,
         contentType: response.headers.get('content-type'),
-        ok: response.ok
+        ok: response.ok,
+        headers: Object.fromEntries(response.headers.entries())
       });
 
       // Get response text first for debugging
       const responseText = await response.text();
-      console.log('Dashboard stats response preview:', responseText.substring(0, 200));
+      console.log('Dashboard stats response preview:', responseText.substring(0, 500));
+
+      // If the response wasn't successful, return error
+      if (!response.ok) {
+        console.error('Proxy402 dashboard stats API error:', {
+          status: response.status,
+          statusText: response.statusText,
+          responseText
+        });
+        return NextResponse.json(
+          { 
+            error: 'Failed to fetch dashboard stats',
+            status: response.status,
+            details: responseText
+          },
+          { status: response.status }
+        );
+      }
 
       // Try to parse as JSON
       let data;
       try {
         data = JSON.parse(responseText);
+        
+        // Validate the response structure matches the API spec
+        if (!data || typeof data !== 'object') {
+          throw new Error('Invalid response structure');
+        }
+
+        // Ensure required fields are present
+        const requiredFields = ['test_earnings', 'test_purchases', 'real_earnings', 'real_purchases', 'daily_purchases'];
+        const missingFields = requiredFields.filter(field => !(field in data));
+        if (missingFields.length > 0) {
+          throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+        }
+
+        // Validate daily_purchases array
+        if (!Array.isArray(data.daily_purchases)) {
+          throw new Error('daily_purchases must be an array');
+        }
+
+        // Validate each daily purchase entry
+        data.daily_purchases.forEach((entry: any, index: number) => {
+          const requiredDailyFields = ['date', 'test_earnings', 'test_count', 'real_earnings', 'real_count'];
+          const missingDailyFields = requiredDailyFields.filter(field => !(field in entry));
+          if (missingDailyFields.length > 0) {
+            throw new Error(`Missing required fields in daily_purchases[${index}]: ${missingDailyFields.join(', ')}`);
+          }
+        });
+
       } catch (jsonError) {
-        console.error('Failed to parse dashboard stats JSON:', jsonError);
+        console.error('Failed to parse or validate dashboard stats JSON:', {
+          error: jsonError,
+          responseText,
+          contentType: response.headers.get('content-type')
+        });
         return NextResponse.json(
-          { error: 'Invalid JSON response from Proxy402 API', details: responseText.substring(0, 200) },
+          { 
+            error: 'Invalid JSON response from Proxy402 API',
+            details: jsonError instanceof Error ? jsonError.message : 'Unknown error',
+            responseText
+          },
           { status: 500 }
         );
       }
 
-      // If the response wasn't successful, forward the error
-      if (!response.ok) {
-        console.error('Proxy402 dashboard stats API error:', data);
-        return NextResponse.json(
-          { error: data.error || 'Failed to fetch dashboard stats', status: response.status },
-          { status: response.status }
-        );
-      }
-
-      console.log('Successfully fetched proxy402 dashboard stats');
+      console.log('Successfully fetched proxy402 dashboard stats:', {
+        dataKeys: Object.keys(data),
+        hasDailyPurchases: Array.isArray(data.daily_purchases),
+        dailyPurchasesLength: data.daily_purchases?.length
+      });
 
       // Return the successful response with CORS headers
       return new NextResponse(JSON.stringify(data), {
@@ -82,10 +133,11 @@ export async function GET(request: NextRequest) {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          'Access-Control-Allow-Credentials': 'true'
         }
       });
-    } catch (fetchError: unknown) {
+    } catch (fetchError) {
       clearTimeout(timeoutId);
       if (fetchError instanceof Error && fetchError.name === 'AbortError') {
         return NextResponse.json(
@@ -121,7 +173,8 @@ export async function OPTIONS(request: NextRequest) {
     headers: {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Credentials': 'true'
     }
   });
 } 

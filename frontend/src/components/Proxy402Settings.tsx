@@ -8,6 +8,7 @@ import { XIcon } from "@/components/icons/XIcon";
 import { Copy, ExternalLink, Eye } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import { createX402ShareableURLs } from '@/lib/x402-frame';
+import { database } from '@/lib/database';
 
 interface Proxy402Link {
   id: string | number;
@@ -94,13 +95,21 @@ export default function Proxy402Settings() {
       return;
     }
 
-    const jwtKey = getJWTKey(address);
+    // Get JWT from database first
+    const userData = database.getUser(address);
+    let savedJwt = userData?.jwtToken;
+
+    // If not in database, try localStorage
+    if (!savedJwt) {
+      const jwtKey = getJWTKey(address);
+      savedJwt = localStorage.getItem(jwtKey);
+    }
+
     const linksKey = getLinksKey(address);
     const x402LinksKey = getX402LinksKey(address);
     const endpointsKey = getEndpointsKey(address);
     const activityStatsKey = getActivityStatsKey(address);
     
-    const savedJwt = localStorage.getItem(jwtKey);
     const savedLinks = localStorage.getItem(linksKey);
     const savedX402Links = localStorage.getItem(x402LinksKey);
     const savedEndpoints = localStorage.getItem(endpointsKey);
@@ -977,7 +986,7 @@ export default function Proxy402Settings() {
 
         {/* URL Format Explanation */}
         <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-          <h4 className="text-sm font-medium text-white mb-3">�� URL Format Guide</h4>
+          <h4 className="text-sm font-medium text-white mb-3">URL Format Guide</h4>
           <div className="space-y-3 text-xs">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { useAccount } from 'wagmi';
+import { database } from '@/lib/database';
 
 interface DailyStats {
   date: string;
@@ -36,6 +37,11 @@ export function EarningsChart({ onClose }: EarningsChartProps) {
   // Get user-specific JWT key
   const getJWTKey = (userAddress: string) => `proxy402_jwt_${userAddress.toLowerCase()}`;
 
+  // Convert uint64 to dollar value (divide by 1000000 for 6 decimal places)
+  const convertToDollars = (value: number) => {
+    return value / 1000000;
+  };
+
   useEffect(() => {
     fetchEarningsData();
   }, [address, isConnected]);
@@ -48,8 +54,15 @@ export function EarningsChart({ onClose }: EarningsChartProps) {
         return;
       }
 
-      const jwtKey = getJWTKey(address);
-      const jwt = localStorage.getItem(jwtKey);
+      // Get JWT from database first
+      const userData = database.getUser(address);
+      let jwt = userData?.jwtToken;
+
+      // If not in database, try localStorage
+      if (!jwt) {
+        const jwtKey = getJWTKey(address);
+        jwt = localStorage.getItem(jwtKey);
+      }
       
       if (!jwt) {
         setError('No JWT token found for this wallet. Please configure Proxy402 in settings.');
@@ -69,7 +82,20 @@ export function EarningsChart({ onClose }: EarningsChartProps) {
       }
 
       const data = await response.json();
-      setStats(data);
+      
+      // Convert uint64 values to dollar amounts
+      const convertedData = {
+        ...data,
+        test_earnings: convertToDollars(data.test_earnings),
+        real_earnings: convertToDollars(data.real_earnings),
+        daily_purchases: data.daily_purchases.map((day: any) => ({
+          ...day,
+          test_earnings: convertToDollars(day.test_earnings),
+          real_earnings: convertToDollars(day.real_earnings)
+        }))
+      };
+      
+      setStats(convertedData);
     } catch (error) {
       console.error('Failed to fetch earnings data:', error);
       setError(error instanceof Error ? error.message : 'Failed to fetch earnings data');
@@ -128,7 +154,7 @@ export function EarningsChart({ onClose }: EarningsChartProps) {
                   fontSize="9" 
                   textAnchor="end"
                 >
-                  ${(maxEarnings * (1 - ratio)).toFixed(2)}
+                  ${(maxEarnings * (1 - ratio)).toFixed(6)}
                 </text>
               </g>
             );
@@ -243,13 +269,13 @@ export function EarningsChart({ onClose }: EarningsChartProps) {
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-gray-900 rounded p-3 text-center">
                   <div className="text-lg font-bold text-green-400">
-                    ${((stats.real_earnings || 0) / 100).toFixed(2)}
+                    ${stats.real_earnings.toFixed(2)}
                   </div>
                   <div className="text-xs text-gray-400">Real Earnings</div>
                 </div>
                 <div className="bg-gray-900 rounded p-3 text-center">
                   <div className="text-lg font-bold text-blue-400">
-                    ${((stats.test_earnings || 0) / 100).toFixed(2)}
+                    ${stats.test_earnings.toFixed(2)}
                   </div>
                   <div className="text-xs text-gray-400">Test Earnings</div>
                 </div>
