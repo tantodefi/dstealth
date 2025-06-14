@@ -26,6 +26,7 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 // OnchainKit imports
 import { OnchainKitProvider } from '@coinbase/onchainkit';
+import { MiniKitProvider } from '@coinbase/onchainkit/minikit';
 import { base } from 'wagmi/chains';
 import { env } from "@/lib/env";
 
@@ -84,9 +85,19 @@ export default function MiniAppWalletProvider({
         <OnchainKitProvider
           apiKey={env.NEXT_PUBLIC_ONCHAINKIT_API_KEY || ""}
           chain={base}
-          schemaId="0x72c5e5b2e6b5c6bb6b15e3f5e0b9f5e3b5f5b5f5b5f5b5f5b5f5b5f5b5f5b5f5"
+          config={{
+            appearance: {
+              mode: 'dark',
+              theme: 'default'
+            }
+          }}
         >
-          <SafeDaimoPayProvider>{children}</SafeDaimoPayProvider>
+          <MiniKitProvider
+            apiKey={env.NEXT_PUBLIC_ONCHAINKIT_API_KEY || ""}
+            chain={base}
+          >
+            <SafeDaimoPayProvider>{children}</SafeDaimoPayProvider>
+          </MiniKitProvider>
         </OnchainKitProvider>
       </QueryClientProvider>
     </WagmiProvider>

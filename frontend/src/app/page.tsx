@@ -8,6 +8,7 @@ import WalletConnection from "@/examples/WalletConnection";
 import MainInterface from "@/components/MainInterface";
 import FAQ from '@/components/FAQ';
 import { useXMTP } from "@/context/xmtp-context";
+import { useMiniKit } from '@coinbase/onchainkit/minikit';
 
 export default function Home() {
   const { isConnected } = useAccount();
@@ -15,6 +16,7 @@ export default function Home() {
   const [showLoader, setShowLoader] = useState(true);
   const [isFaqOpen, setIsFaqOpen] = useState(false);
   const [showEarningsChart, setShowEarningsChart] = useState(false);
+  const { setFrameReady, isFrameReady } = useMiniKit();
 
   // Determine if user is fully connected (wallet + XMTP)
   const isFullyConnected = Boolean(
@@ -34,6 +36,13 @@ export default function Home() {
 
     return () => clearTimeout(timer);
   }, []);
+
+  // The setFrameReady() function is called when your mini-app is ready to be shown
+  useEffect(() => {
+    if (!isFrameReady) {
+      setFrameReady();
+    }
+  }, [setFrameReady, isFrameReady]);
 
   return (
     <SafeAreaContainer>

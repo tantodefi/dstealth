@@ -1,7 +1,7 @@
 "use client";
 
 import "./globals.css";
-// import "@coinbase/onchainkit/styles.css";
+import "@coinbase/onchainkit/styles.css";
 import { Inter } from "next/font/google";
 import { Providers } from "@/providers/index";
 import "./config";

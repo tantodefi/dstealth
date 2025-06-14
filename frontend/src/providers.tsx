@@ -69,7 +69,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type ReactNode, useEffect, useState } from 'react';
 import React from 'react';
 import { WagmiProvider, createConfig, http } from 'wagmi';
-// import { OnchainKitProvider } from '@coinbase/onchainkit';
+import { OnchainKitProvider } from '@coinbase/onchainkit';
 import { coinbaseWallet } from 'wagmi/connectors';
 import { base } from 'wagmi/chains';
 import { ErudaProvider } from '@/providers/eruda';
@@ -230,7 +230,7 @@ function ClientProviders({ children }: { children: ReactNode }) {
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
         <SafeDaimoPayProvider>
-          {/* <OnchainKitProvider 
+          <OnchainKitProvider 
             chain={wagmiConfig.chains[0]}
             apiKey={env.NEXT_PUBLIC_ONCHAINKIT_API_KEY}
             config={{
@@ -238,7 +238,7 @@ function ClientProviders({ children }: { children: ReactNode }) {
                 mode: 'dark',
                 theme: 'default'
               }
-            }}> */}
+            }}>
             <ErudaProvider>
               <FrameProvider>
                 <XMTPProvider>
@@ -246,7 +246,7 @@ function ClientProviders({ children }: { children: ReactNode }) {
                 </XMTPProvider>
               </FrameProvider>
             </ErudaProvider>
-          {/* </OnchainKitProvider> */}
+          </OnchainKitProvider>
         </SafeDaimoPayProvider>
       </QueryClientProvider>
     </WagmiProvider>
