@@ -73,7 +73,7 @@ export function Header({ onLogout, isConnected, onShowEarningsChart }: HeaderPro
     <>
       <header className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
         <Link href="/" className="flex items-center gap-2">
-          <span className="text-white font-medium">myf⚡key</span>
+          <span className="text-white font-medium">Dstealth</span>
         </Link>
 
         {/* Compact Earnings Component - Center */}

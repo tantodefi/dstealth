@@ -48,7 +48,7 @@ export default function Home() {
                 <span className="text-blue-400 text-xs font-medium">⚡</span>
               </div>
             </div>
-            <p className="text-white mt-4 text-sm">Loading myf⚡key...</p>
+            <p className="text-white mt-4 text-sm">Loading Dstealth...</p>
           </div>
         ) : (
           <>
@@ -70,7 +70,7 @@ export default function Home() {
               <div className="p-4 pb-24 min-h-full"> {/* Extra bottom padding for scroll space */}
                 {!isFullyConnected ? (
                   <div className="text-center py-8">
-                    <h1 className="text-xl font-bold text-white mb-2">Welcome to myf⚡key</h1>
+                    <h1 className="text-xl font-bold text-white mb-2">Welcome to Dstealth</h1>
                     <p className="text-gray-300 text-sm">
                       {connectionType === "ephemeral" || connectionType === "Ephemeral Wallet" 
                         ? "Setting up your ephemeral connection..." 
