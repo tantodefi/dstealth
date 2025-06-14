@@ -445,8 +445,8 @@ export default function WalletConnection() {
       }
     } else {
       // If already connected with Coinbase wallet, set connection type and initialize
-      setLocalConnectionType("Coinbase Smart Wallet");
-      localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "Coinbase Smart Wallet");
+      setLocalConnectionType("scw");
+      localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "scw");
       
       const signer = getSigner();
       if (signer) {

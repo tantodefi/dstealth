@@ -306,12 +306,38 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
               storage.set(STORAGE_KEYS.EPHEMERAL_KEY, `0x${privateKey}`);
             } else if (isCoinbaseWallet) {
               logger.log("Using Coinbase Wallet signer");
-              xmtpSigner = createEOASigner(address as `0x${string}`, async ({ message }) => {
-                return await signMessageAsync({ 
-                  message, 
-                  account: address as `0x${string}` 
+              // Check if it's a smart wallet
+              const isSmartWallet = connector?.id === "coinbaseWalletSDK" && 
+                (requestedConnectionType === "scw" || requestedConnectionType === "Coinbase Smart Wallet");
+              
+              if (isSmartWallet) {
+                logger.log("Creating Smart Contract Wallet signer");
+                xmtpSigner = createSCWSigner(
+                  address as `0x${string}`,
+                  async ({ message }) => {
+                    try {
+                      const signature = await signMessageAsync({ 
+                        message, 
+                        account: address as `0x${string}` 
+                      });
+                      logger.log("Smart Contract Wallet signature received:", signature);
+                      return signature;
+                    } catch (error) {
+                      logger.error("Error getting SCW signature:", error);
+                      throw error;
+                    }
+                  },
+                  BigInt(8453) // Base mainnet
+                );
+              } else {
+                logger.log("Creating EOA signer for Coinbase Wallet");
+                xmtpSigner = createEOASigner(address as `0x${string}`, async ({ message }) => {
+                  return await signMessageAsync({ 
+                    message, 
+                    account: address as `0x${string}` 
+                  });
                 });
-              });
+              }
             } else if (forceSCW || connector?.id === "safe") {
               logger.log("Using Smart Contract Wallet signer");
               xmtpSigner = createSCWSigner(
