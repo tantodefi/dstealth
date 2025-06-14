@@ -354,6 +354,7 @@ export default function WalletConnection() {
           console.log("Initializing XMTP with SCW signer");
           await initializeXmtp(signer, "scw");
           console.log("XMTP initialization successful");
+          setLocalInitializing(false);
         } catch (error) {
           console.error("Error initializing XMTP:", error);
           if (retryCount < MAX_RETRIES) {
@@ -364,6 +365,7 @@ export default function WalletConnection() {
             console.error("Max retries reached, clearing connection state");
             localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
             setLocalConnectionType("");
+            setLocalInitializing(false);
           }
         }
       } else {
@@ -376,6 +378,7 @@ export default function WalletConnection() {
           console.error("Max retries reached, clearing connection state");
           localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
           setLocalConnectionType("");
+          setLocalInitializing(false);
         }
       }
     };
@@ -433,11 +436,6 @@ export default function WalletConnection() {
             appName: "XMTP Mini App",
             preference: { options: "smartWalletOnly" },
           }),
-        }).catch((error) => {
-          console.error("Error during wallet connection:", error);
-          setLocalInitializing(false);
-          localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
-          setLocalConnectionType("");
         });
       } catch (error) {
         console.error("Error connecting to Coinbase Wallet:", error);
