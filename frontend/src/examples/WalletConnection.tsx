@@ -339,50 +339,92 @@ export default function WalletConnection() {
     console.log("State cleared - ready for fresh connection attempt");
   }, []);
 
-  // Connect with Coinbase Smart Wallet
+  // Add effect to handle post-connection initialization
+  useEffect(() => {
+    let initTimeout: NodeJS.Timeout;
+    
+    if (isConnected && connector?.id === "coinbaseWalletSDK" && !localConnectionType) {
+      console.log("Coinbase Wallet connected, preparing XMTP initialization...");
+      
+      // Set connection type immediately when wallet connects
+      setLocalConnectionType("Coinbase Smart Wallet");
+      localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "Coinbase Smart Wallet");
+      
+      // Add a small delay for mobile to ensure wallet is fully ready
+      initTimeout = setTimeout(() => {
+        const signer = getSigner();
+        if (signer) {
+          console.log("Initializing XMTP with SCW signer");
+          initializeXmtp(signer, "scw").catch((error) => {
+            console.error("Error initializing XMTP:", error);
+            localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
+            setLocalConnectionType("");
+          });
+        } else {
+          console.error("Failed to get signer after wallet connection");
+          localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
+          setLocalConnectionType("");
+        }
+      }, 1000); // Reduced delay to 1 second
+    }
+
+    return () => {
+      if (initTimeout) {
+        clearTimeout(initTimeout);
+      }
+    };
+  }, [isConnected, connector, localConnectionType, getSigner, initializeXmtp]);
+
+  // Add effect to handle connection state changes
+  useEffect(() => {
+    if (!isConnected && localConnectionType === "Coinbase Smart Wallet") {
+      console.log("Wallet disconnected, cleaning up...");
+      localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
+      setLocalConnectionType("");
+    }
+  }, [isConnected, localConnectionType]);
+
   const connectWithCoinbaseSmartWallet = useCallback(() => {
     if (initializing || localInitializing) return;
 
     console.log("Connecting with Coinbase Smart Wallet...");
-    setLocalConnectionType("Coinbase Smart Wallet");
-    localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "Coinbase Smart Wallet");
-
+    
     if (!isConnected || connector?.id !== "coinbaseWalletSDK") {
       console.log("Connecting to Coinbase Wallet...");
       try {
+        // Only clear state if we're not already connected
+        if (!isConnected) {
+          localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
+          setLocalConnectionType("");
+        }
+        
         connect({
           connector: coinbaseWallet({
             appName: "XMTP Mini App",
             preference: { options: "smartWalletOnly" },
           }),
         });
-        // The connection will be handled by the useEffect that watches isConnected
       } catch (error) {
         console.error("Error connecting to Coinbase Wallet:", error);
         localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
         setLocalConnectionType("");
       }
     } else {
-      // If already connected with Coinbase wallet, manually trigger XMTP initialization
+      // If already connected with Coinbase wallet, set connection type and initialize
+      setLocalConnectionType("Coinbase Smart Wallet");
+      localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "Coinbase Smart Wallet");
+      
       const signer = getSigner();
       if (signer) {
         console.log("Initializing XMTP with existing SCW signer");
-        initializeXmtp(signer, "scw");
+        initializeXmtp(signer, "scw").catch((error) => {
+          console.error("Error initializing XMTP:", error);
+          localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
+          setLocalConnectionType("");
+        });
       }
     }
   }, [connect, initializing, localInitializing, isConnected, connector, getSigner, initializeXmtp]);
-
-  // Add effect to handle post-connection initialization
-  useEffect(() => {
-    if (isConnected && connector?.id === "coinbaseWalletSDK" && localConnectionType === "Coinbase Smart Wallet") {
-      console.log("Coinbase Wallet connected, initializing XMTP...");
-      const signer = getSigner();
-      if (signer) {
-        console.log("Initializing XMTP with SCW signer");
-        initializeXmtp(signer, "scw");
-      }
-    }
-  }, [isConnected, connector, localConnectionType, getSigner, initializeXmtp]);
 
   // Cleanup on unmount
   useEffect(() => {
