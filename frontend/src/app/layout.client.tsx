@@ -40,79 +40,127 @@ export default function ClientLayout({
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              // Enhanced polyfill for navigator.wallets (required by Solana wallet adapters)
+              // Persistent enhanced polyfill for navigator.wallets (required by Solana wallet adapters)
               if (typeof window !== 'undefined' && window.navigator) {
                 try {
-                  // Multiple strategies to ensure navigator.wallets is always an array
-                  var strategies = [
-                    // Strategy 1: Force delete and recreate
-                    function() {
-                      try {
-                        delete window.navigator.wallets;
-                        window.navigator.wallets = [];
-                        return true;
-                      } catch (e) { return false; }
-                    },
-                    
-                    // Strategy 2: defineProperty with writable
-                    function() {
-                      try {
-                        Object.defineProperty(window.navigator, 'wallets', {
-                          value: [],
-                          writable: true,
-                          configurable: true,
-                          enumerable: true
-                        });
-                        return true;
-                      } catch (e) { return false; }
-                    },
-                    
-                    // Strategy 3: Getter/Setter approach
-                    function() {
-                      try {
-                        var _wallets = [];
-                        Object.defineProperty(window.navigator, 'wallets', {
-                          get: function() { return _wallets; },
-                          set: function(value) { _wallets = Array.isArray(value) ? value : []; },
-                          configurable: true,
-                          enumerable: true
-                        });
-                        return true;
-                      } catch (e) { return false; }
-                    },
-                    
-                    // Strategy 4: Direct assignment fallback
-                    function() {
-                      try {
-                        window.navigator.wallets = [];
-                        return true;
-                      } catch (e) { return false; }
+                  // Create a persistent polyfill function
+                  window._applyNavigatorWalletsPolyfill = function() {
+                    try {
+                      // Check if polyfill is needed
+                      if (Array.isArray(window.navigator.wallets)) {
+                        return true; // Already working
+                      }
+                      
+                      console.log('🔧 Applying navigator.wallets polyfill...');
+                      
+                      // Multiple strategies to ensure navigator.wallets is always an array
+                      var strategies = [
+                        // Strategy 1: Force delete and recreate
+                        function() {
+                          try {
+                            delete window.navigator.wallets;
+                            window.navigator.wallets = [];
+                            return Array.isArray(window.navigator.wallets);
+                          } catch (e) { return false; }
+                        },
+                        
+                        // Strategy 2: defineProperty with writable
+                        function() {
+                          try {
+                            Object.defineProperty(window.navigator, 'wallets', {
+                              value: [],
+                              writable: true,
+                              configurable: true,
+                              enumerable: true
+                            });
+                            return Array.isArray(window.navigator.wallets);
+                          } catch (e) { return false; }
+                        },
+                        
+                        // Strategy 3: Getter/Setter approach with persistent backing array
+                        function() {
+                          try {
+                            if (!window._persistentWallets) {
+                              window._persistentWallets = [];
+                            }
+                            Object.defineProperty(window.navigator, 'wallets', {
+                              get: function() { 
+                                return window._persistentWallets || []; 
+                              },
+                              set: function(value) { 
+                                window._persistentWallets = Array.isArray(value) ? value : []; 
+                              },
+                              configurable: true,
+                              enumerable: true
+                            });
+                            return Array.isArray(window.navigator.wallets);
+                          } catch (e) { return false; }
+                        },
+                        
+                        // Strategy 4: Direct assignment fallback
+                        function() {
+                          try {
+                            window.navigator.wallets = [];
+                            return Array.isArray(window.navigator.wallets);
+                          } catch (e) { return false; }
+                        }
+                      ];
+                      
+                      // Try each strategy until one works
+                      for (var i = 0; i < strategies.length; i++) {
+                        if (strategies[i]()) {
+                          console.log('✅ Navigator.wallets polyfill successful with strategy', i + 1);
+                          return true;
+                        }
+                      }
+                      
+                      console.warn('❌ All navigator.wallets polyfill strategies failed');
+                      return false;
+                      
+                    } catch (e) {
+                      console.warn('Navigator wallets polyfill error:', e);
+                      return false;
                     }
-                  ];
+                  };
                   
-                  // Try each strategy until one works
-                  var success = false;
-                  for (var i = 0; i < strategies.length && !success; i++) {
-                    success = strategies[i]();
-                    if (success) {
-                      console.log('Navigator.wallets polyfill successful with strategy', i + 1);
+                  // Apply polyfill immediately
+                  window._applyNavigatorWalletsPolyfill();
+                  
+                  // Set up persistent monitoring
+                  window._walletsPolyfillInterval = setInterval(function() {
+                    if (!Array.isArray(window.navigator.wallets)) {
+                      console.log('🚨 navigator.wallets was reset, reapplying polyfill...');
+                      window._applyNavigatorWalletsPolyfill();
                     }
-                  }
+                  }, 1000); // Check every second
                   
-                  // Verify the result
-                  if (!Array.isArray(window.navigator.wallets)) {
-                    console.warn('All navigator.wallets polyfill strategies failed');
-                    // Create global fallback
-                    window._walletsFallback = [];
-                  }
+                  // Also reapply on various events that might reset the property
+                  var events = ['DOMContentLoaded', 'load', 'pageshow', 'focus'];
+                  events.forEach(function(event) {
+                    window.addEventListener(event, function() {
+                      setTimeout(function() {
+                        if (!Array.isArray(window.navigator.wallets)) {
+                          console.log('🔄 Reapplying navigator.wallets polyfill after', event);
+                          window._applyNavigatorWalletsPolyfill();
+                        }
+                      }, 100);
+                    });
+                  });
+                  
+                  // Cleanup function for page unload
+                  window.addEventListener('beforeunload', function() {
+                    if (window._walletsPolyfillInterval) {
+                      clearInterval(window._walletsPolyfillInterval);
+                    }
+                  });
+                  
+                  console.log('✅ Persistent navigator.wallets polyfill initialized');
                   
                 } catch (e) {
                   console.warn('Navigator wallets polyfill critical error:', e);
                   // Ultimate fallback
                   window._walletsFallback = [];
                 }
-                
-                console.log('✅ Browser polyfills loaded, navigator.wallets is array:', Array.isArray(window.navigator.wallets));
               }
             `,
           }}

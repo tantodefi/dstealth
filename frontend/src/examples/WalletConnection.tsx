@@ -47,7 +47,8 @@ export default function WalletConnection() {
     error, 
     connectionType: xmtpConnectionType,
     isInFarcasterContext,
-    farcasterUser
+    farcasterUser,
+    clearErrorAndRetry
   } = useXMTP();
   const { data: walletData } = useWalletClient();
   const { connect, connectors } = useConnect();
@@ -87,7 +88,7 @@ export default function WalletConnection() {
   const getSigner = useCallback(() => {
     if (!localConnectionType) return null;
 
-    if (localConnectionType === "ephemeral" || localConnectionType === "Ephemeral Wallet") {
+    if (localConnectionType === "ephemeral") {
       const savedPrivateKey = localStorage.getItem(XMTP_EPHEMERAL_KEY);
       if (savedPrivateKey) {
         const formattedKey = savedPrivateKey.startsWith("0x")
@@ -100,7 +101,7 @@ export default function WalletConnection() {
 
     if (!isConnected || !walletData) return null;
 
-    if (localConnectionType === "EOA Wallet" || localConnectionType === "eoa") {
+    if (localConnectionType === "eoa") {
       return createEOASigner(walletData.account.address, async ({ message }) => {
         return await signMessageAsync({ 
           message, 
@@ -109,10 +110,7 @@ export default function WalletConnection() {
       });
     }
 
-    if (
-      (localConnectionType === "Coinbase Smart Wallet" || localConnectionType === "scw") &&
-      connector?.id === "coinbaseWalletSDK"
-    ) {
+    if (localConnectionType === "scw" && connector?.id === "coinbaseWalletSDK") {
       return createSCWSigner(
         walletData.account.address,
         async ({ message }) => {
@@ -136,56 +134,51 @@ export default function WalletConnection() {
       setLocalInitializing(true);
       connectionAttemptRef.current = connectionTypeOverride || localConnectionType;
 
-      // Set timeout for initialization
+      // Set timeout for initialization - reduced from 30s to 20s
       initializationTimeoutRef.current = setTimeout(() => {
-        console.log("XMTP initialization timeout");
+        console.log("⏰ XMTP initialization timeout after 20 seconds");
         setLocalInitializing(false);
         connectionAttemptRef.current = "";
-      }, 30000); // 30 second timeout
+      }, 20000);
 
       try {
-        console.log("Initializing XMTP with signer for connection type:", connectionTypeOverride || localConnectionType);
+        console.log(`🚀 Initializing XMTP with signer for connection type: ${connectionTypeOverride || localConnectionType}`);
         
         const result = await initialize({
           dbEncryptionKey: env.NEXT_PUBLIC_ENCRYPTION_KEY ? hexToUint8Array(env.NEXT_PUBLIC_ENCRYPTION_KEY) : undefined,
           env: env.NEXT_PUBLIC_XMTP_ENV,
           loggingLevel: "off",
           signer,
-          connectionType: connectionTypeOverride || (localConnectionType === "Ephemeral Wallet" ? "ephemeral" : 
-                          localConnectionType === "Coinbase Smart Wallet" ? "scw" : "eoa"),
+          connectionType: connectionTypeOverride || localConnectionType,
         });
         
         if (result) {
-          console.log("XMTP initialization successful for", connectionTypeOverride || localConnectionType);
+          console.log(`✅ XMTP initialization successful for ${connectionTypeOverride || localConnectionType}`);
         }
       } catch (error) {
-        console.error("Error initializing XMTP:", error);
+        console.error("❌ Error initializing XMTP:", error);
 
         // Enhanced error handling for specific error types
         const errorMessage = error && (error as any).message;
+        
         if (errorMessage?.includes("rejected due to a change in selected network") ||
             errorMessage?.includes("User rejected") ||
             errorMessage?.includes("User denied") ||
             errorMessage?.includes("user rejected")) {
-          console.log("User-related error, clearing connection type to allow retry");
+          console.log("👤 User-related error, clearing connection type to allow retry");
           localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
           setLocalConnectionType("");
         } else if (errorMessage?.includes("Signature") || errorMessage?.includes("sign")) {
-          console.log("Signature error detected, checking if we need to switch signer type");
-          // For Coinbase wallets, try switching between EOA and SCW modes
-          if (connector?.id === "coinbaseWalletSDK") {
-            const currentType = connectionTypeOverride || localConnectionType;
-            if (currentType === "scw") {
-              console.log("SCW signing failed, trying EOA mode");
-              setLocalConnectionType("EOA Wallet");
-              localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "EOA Wallet");
-            }
-          }
+          console.log("🔏 Signature error detected, checking if we need to switch signer type");
+          console.error("Signature error", errorMessage);
+          
+          // For Coinbase wallets, the calling code should handle SCW->EOA fallback
+          // Just pass the error up
         } else if (errorMessage?.includes("createSyncAccessHandle") || 
                    errorMessage?.includes("NoModificationAllowedError")) {
-          console.log("Database access conflict, will retry automatically later");
+          console.log("🗃️ Database access conflict, will retry automatically later");
         } else {
-          console.log("Other error type, keeping connection type for potential retry");
+          console.log("❓ Other error type, keeping connection type for potential retry");
         }
         
         // Re-throw to let caller handle
@@ -210,7 +203,7 @@ export default function WalletConnection() {
     }
 
     // Set ephemeral address if needed for display
-    if (savedConnectionType === "ephemeral" || savedConnectionType === "Ephemeral Wallet") {
+    if (savedConnectionType === "ephemeral") {
       const savedPrivateKey = localStorage.getItem(XMTP_EPHEMERAL_KEY);
       if (savedPrivateKey) {
         const formattedKey = savedPrivateKey.startsWith("0x")
@@ -260,13 +253,50 @@ export default function WalletConnection() {
     }
   }, [isConnected, address, isInFarcasterContext, context, connect, connectors]);
 
+  // Auto-initialize XMTP when wallet connects after user chose connection type
+  useEffect(() => {
+    // Only proceed if:
+    // 1. Wallet is connected
+    // 2. User has chosen a connection type (but it's not Coinbase wallet - that has its own handler)
+    // 3. XMTP is not already connected or initializing
+    // 4. We have a valid signer
+    if (
+      isConnected && 
+      localConnectionType && 
+      localConnectionType !== "ephemeral" &&
+      connector?.id !== "coinbaseWalletSDK" && 
+      !client && 
+      !initializing && 
+      !localInitializing && 
+      !error
+    ) {
+      const signer = getSigner();
+      if (signer) {
+        console.log(`🚀 Wallet connected! Auto-initializing XMTP for ${localConnectionType}...`);
+        initializeXmtp(signer, localConnectionType).catch((error) => {
+          console.error("Auto-initialization failed:", error);
+        });
+      }
+    }
+  }, [
+    isConnected, 
+    localConnectionType, 
+    connector?.id, 
+    client, 
+    initializing, 
+    localInitializing, 
+    error,
+    getSigner,
+    initializeXmtp
+  ]);
+
   // Connect with EOA wallet
   const connectWithEOA = useCallback(() => {
     if (initializing || localInitializing) return;
 
     console.log("Connecting with EOA wallet...");
-    setLocalConnectionType("EOA Wallet");
-    localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "EOA Wallet");
+    setLocalConnectionType("eoa");
+    localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "eoa");
 
     if (!isConnected) {
       console.log("Wallet not connected, attempting to connect...");
@@ -288,6 +318,7 @@ export default function WalletConnection() {
             connect({ connector: injected() });
           }
         }
+        // Note: XMTP initialization will be handled by the auto-initialization effect above
       } catch (connectError) {
         console.error("Error connecting wallet:", connectError);
         // Clear connection type if wallet connection fails
@@ -318,14 +349,14 @@ export default function WalletConnection() {
     if (initializing || localInitializing) return;
 
     console.log("Connecting with Ephemeral wallet...");
-    setLocalConnectionType("Ephemeral Wallet");
+    setLocalConnectionType("ephemeral");
 
     const privateKey = generatePrivateKey();
     const account = privateKeyToAccount(privateKey);
     setEphemeralAddress(account.address);
 
     localStorage.setItem(XMTP_EPHEMERAL_KEY, privateKey);
-    localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "Ephemeral Wallet");
+    localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "ephemeral");
 
     console.log("Created ephemeral address:", account.address);
     initializeXmtp(createEphemeralSigner(privateKey), "ephemeral");
@@ -341,37 +372,52 @@ export default function WalletConnection() {
         return;
       }
 
-      const signer = getSigner();
-      if (signer) {
-        console.log("Attempting XMTP initialization with Coinbase Smart Wallet");
-        try {
-          await initializeXmtp(signer, "scw");
-        } catch (error) {
-          console.error("SCW initialization failed, will retry with EOA:", error);
-          // Auto-retry with EOA mode after SCW failure
+      // For Coinbase Wallet, try SCW first, then fallback to EOA
+      console.log("Attempting XMTP initialization with Coinbase Wallet");
+      
+      // First try SCW mode
+      try {
+        setLocalConnectionType("scw");
+        localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "scw");
+        
+        const scwSigner = getSigner();
+        if (scwSigner) {
+          console.log("🔹 Trying SCW mode first");
+          await initializeXmtp(scwSigner, "scw");
+        }
+      } catch (scwError) {
+        console.error("❌ SCW mode failed:", scwError);
+        
+        // If SCW fails due to signature issues, try EOA mode
+        const errorMessage = scwError && (scwError as any).message;
+        if (errorMessage?.includes("Signature") || 
+            errorMessage?.includes("sign") || 
+            errorMessage?.includes("rejected") ||
+            errorMessage?.includes("denied")) {
+          
+          console.log("🔄 SCW failed, trying EOA mode as fallback");
+          
           retryTimeout = setTimeout(async () => {
             try {
-              const eoaSigner = createEOASigner(walletData?.account.address as `0x${string}`, async ({ message }) => {
-                return await signMessageAsync({ 
-                  message, 
-                  account: walletData?.account.address as `0x${string}` 
-                });
-              });
-              await initializeXmtp(eoaSigner, "eoa");
+              setLocalConnectionType("eoa");
+              localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "eoa");
+              
+              const eoaSigner = getSigner();
+              if (eoaSigner) {
+                console.log("🔹 Trying EOA mode as fallback");
+                await initializeXmtp(eoaSigner, "eoa");
+              }
             } catch (eoaError) {
-              console.error("EOA fallback also failed:", eoaError);
+              console.error("❌ EOA fallback also failed:", eoaError);
+              // Both modes failed - this is a real error
             }
-          }, 2000);
+          }, 1000); // 1 second delay for fallback
         }
       }
     };
     
-    if (isConnected && connector?.id === "coinbaseWalletSDK" && !localConnectionType) {
-      console.log("Coinbase Wallet connected, preparing XMTP initialization...");
-      
-      // Set connection type immediately when wallet connects
-      setLocalConnectionType("Coinbase Smart Wallet");
-      localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "Coinbase Smart Wallet");
+    if (isConnected && connector?.id === "coinbaseWalletSDK" && !localConnectionType && !error) {
+      console.log("🔗 Coinbase Wallet connected, preparing XMTP initialization...");
       
       // Add a delay for mobile to ensure wallet is fully ready
       initTimeout = setTimeout(attemptInitialization, 1500);
@@ -385,17 +431,41 @@ export default function WalletConnection() {
         clearTimeout(retryTimeout);
       }
     };
-  }, [isConnected, connector, localConnectionType, getSigner, initializeXmtp, walletData, signMessageAsync, initializing, localInitializing]);
+  }, [isConnected, connector, localConnectionType, getSigner, initializeXmtp, initializing, localInitializing, error]);
 
-  // Add effect to handle connection state changes
+  // Disabled: Cleanup effect was interfering with connection process
+  // The main disconnect scenarios (page refresh, explicit disconnect) reset state anyway
+  /*
   useEffect(() => {
-    if (!isConnected && localConnectionType === "Coinbase Smart Wallet") {
-      console.log("Wallet disconnected, cleaning up...");
-      localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
-      setLocalConnectionType("");
-      setLocalInitializing(false);
+    // Only clean up if:
+    // 1. Wallet is actually disconnected (not just during connection process)
+    // 2. We had a connection type set for non-ephemeral wallets  
+    // 3. We're not in the middle of initialization
+    // 4. The user hasn't just clicked a connection button recently
+    if (
+      !isConnected && 
+      (localConnectionType === "scw" || localConnectionType === "eoa") &&
+      !localInitializing &&
+      !initializing
+    ) {
+      // Much longer delay and additional checks to prevent cleanup during connection
+      const cleanupTimeout = setTimeout(() => {
+        // Triple-check we're still disconnected and not in any initialization state
+        if (!isConnected && !localInitializing && !initializing) {
+          console.log("Wallet truly disconnected after delay, cleaning up...");
+          localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
+          setLocalConnectionType("");
+        } else {
+          console.log("Connection state changed during cleanup delay, skipping cleanup");
+        }
+      }, 5000); // 5 second delay to prevent cleanup during connection process
+
+      return () => {
+        clearTimeout(cleanupTimeout);
+      };
     }
-  }, [isConnected, localConnectionType]);
+  }, [isConnected, localConnectionType, localInitializing, initializing]);
+  */
 
   const connectWithCoinbaseSmartWallet = useCallback(() => {
     if (initializing || localInitializing) return;
@@ -404,16 +474,12 @@ export default function WalletConnection() {
     
     if (!isConnected || connector?.id !== "coinbaseWalletSDK") {
       console.log("Connecting to Coinbase Wallet...");
+      
+      // Set connection type first (will be handled by Coinbase-specific auto-initialization)
+      setLocalConnectionType("scw");
+      localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "scw");
+      
       try {
-        // Only clear state if we're not already connected
-        if (!isConnected) {
-          localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
-          setLocalConnectionType("");
-        }
-        
-        // Force a clean state before connecting
-        setLocalInitializing(true);
-        
         // Find the Coinbase connector
         const coinbaseConnector = connectors.find(c => 
           c.id === 'coinbaseWalletSDK' || 
@@ -431,6 +497,7 @@ export default function WalletConnection() {
             }),
           });
         }
+        // Note: XMTP initialization will be handled by the Coinbase-specific effect
       } catch (error) {
         console.error("Error connecting to Coinbase Wallet:", error);
         setLocalInitializing(false);
@@ -438,7 +505,7 @@ export default function WalletConnection() {
         setLocalConnectionType("");
       }
     } else {
-      // If already connected with Coinbase wallet, set connection type and initialize
+      // If already connected with Coinbase wallet, manually trigger XMTP initialization
       setLocalConnectionType("scw");
       localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "scw");
       
@@ -465,11 +532,22 @@ export default function WalletConnection() {
 
   // Retry connection function
   const retryConnection = useCallback(() => {
-    localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
+    console.log("🔄 Retry connection clicked - clearing error state");
+    
+    // Use the new clearErrorAndRetry function from XMTP context
+    clearErrorAndRetry();
+    
+    // Reset local state
     setLocalConnectionType("");
     setLocalInitializing(false);
-    window.location.reload(); // Force fresh start
-  }, []);
+    setEphemeralAddress("");
+    
+    // Clear local storage items that might be causing issues
+    localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
+    localStorage.removeItem(XMTP_EPHEMERAL_KEY);
+    
+    console.log("✅ Error state cleared, ready for fresh connection attempt");
+  }, [clearErrorAndRetry]);
 
   // Show WelcomeMessage if user is fully connected
   if (isFullyConnected) {
@@ -557,6 +635,11 @@ export default function WalletConnection() {
             <div className="text-red-400 mt-2">
               <div className="font-bold">Error:</div>
               <div>{error.message}</div>
+              {error.message.includes("Signature validation failed") && (
+                <div className="text-yellow-400 mt-1 text-xs">
+                  💡 This usually happens with Coinbase Smart Wallets. Try the "Clear Error & Retry" button below.
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -565,12 +648,23 @@ export default function WalletConnection() {
       <div className="w-full flex flex-col gap-3 mt-2">
         {/* Show retry button if there's an error */}
         {error && (
-          <Button
-            className="w-full bg-red-600 text-white hover:bg-red-700"
-            size="lg"
-            onClick={retryConnection}>
-            Clear Error & Retry
-          </Button>
+          <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-3 mb-2">
+            <div className="text-red-400 font-medium mb-2">
+              ⚠️ Connection Error
+            </div>
+            <div className="text-red-300 text-sm mb-3">
+              {error.message.includes("Signature validation failed") 
+                ? "Coinbase Smart Wallet signature issue detected. This can happen due to cached connection state."
+                : "Connection failed. Please try again."
+              }
+            </div>
+            <Button
+              className="w-full bg-red-600 hover:bg-red-700 text-white font-medium"
+              size="lg"
+              onClick={retryConnection}>
+              🔄 Clear Error & Retry Connection
+            </Button>
+          </div>
         )}
 
         <Button
@@ -578,8 +672,7 @@ export default function WalletConnection() {
           size="lg"
           onClick={connectWithEOA}
           disabled={initializing || localInitializing}>
-          {(initializing || localInitializing) &&
-          (localConnectionType === "EOA Wallet" || localConnectionType === "eoa")
+          {(initializing || localInitializing) && localConnectionType === "eoa"
             ? "Connecting EOA Wallet..."
             : "Connect with EOA Wallet"}
         </Button>
@@ -589,8 +682,7 @@ export default function WalletConnection() {
           size="lg"
           onClick={connectWithEphemeral}
           disabled={initializing || localInitializing}>
-          {(initializing || localInitializing) &&
-          (localConnectionType === "Ephemeral Wallet" || localConnectionType === "ephemeral")
+          {(initializing || localInitializing) && localConnectionType === "ephemeral"
             ? "Connecting Ephemeral Wallet..."
             : "Connect with Ephemeral Wallet"}
         </Button>
@@ -600,9 +692,8 @@ export default function WalletConnection() {
           size="lg"
           onClick={connectWithCoinbaseSmartWallet}
           disabled={initializing || localInitializing}>
-          {(initializing || localInitializing) &&
-          (localConnectionType === "Coinbase Smart Wallet" || localConnectionType === "scw")
-            ? "Connecting Coinbase Smart Wallet..."
+          {(initializing || localInitializing) && (localConnectionType === "scw" || localConnectionType === "eoa")
+            ? `Connecting ${localConnectionType.toUpperCase()} Wallet...`
             : "Connect with Coinbase Smart Wallet"}
         </Button>
       </div>

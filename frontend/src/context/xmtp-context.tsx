@@ -43,6 +43,7 @@ export type XMTPContextValue = {
   connectionType: string;
   isInFarcasterContext: boolean;
   farcasterUser: any;
+  clearErrorAndRetry: () => void;
 };
 
 export type XMTPProviderProps = React.PropsWithChildren & {
@@ -74,6 +75,7 @@ export const XMTPContext = createContext<XMTPContextValue>({
   connectionType: "",
   isInFarcasterContext: false,
   farcasterUser: null,
+  clearErrorAndRetry: () => {},
 });
 
 // Logger utility for consistent logging
@@ -308,10 +310,10 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
               logger.log("Using Coinbase Wallet signer");
               // Check if it's a smart wallet
               const isSmartWallet = connector?.id === "coinbaseWalletSDK" && 
-                (requestedConnectionType === "scw" || requestedConnectionType === "Coinbase Smart Wallet");
+                (requestedConnectionType === "scw");
               
               if (isSmartWallet) {
-                logger.log("Creating Smart Contract Wallet signer");
+                logger.log("Creating Smart Contract Wallet signer for Coinbase");
                 xmtpSigner = createSCWSigner(
                   address as `0x${string}`,
                   async ({ message }) => {
@@ -338,7 +340,7 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
                   });
                 });
               }
-            } else if (forceSCW || connector?.id === "safe") {
+            } else if (forceSCW || connector?.id === "safe" || requestedConnectionType === "scw") {
               logger.log("Using Smart Contract Wallet signer");
               xmtpSigner = createSCWSigner(
                 address as `0x${string}`,
@@ -475,6 +477,32 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
     }
   }, [client]);
 
+  /**
+   * Clear error state and allow retry
+   */
+  const clearErrorAndRetry = useCallback(() => {
+    logger.log("Clearing error state and allowing retry");
+    
+    // Clear error state
+    setError(null);
+    
+    // Clear initialization block
+    storage.remove(STORAGE_KEYS.INITIALIZATION_BLOCKED);
+    
+    // Reset global state
+    globalInitializing = false;
+    globalInitializationPromise = null;
+    
+    // Reset initialization attempted flag
+    initializationAttempted.current = false;
+    
+    // Clear connection type to force fresh detection
+    storage.remove(STORAGE_KEYS.CONNECTION_TYPE);
+    setConnectionType("");
+    
+    logger.log("Error state cleared, ready for retry");
+  }, []);
+
   // Restore connection on mount - improved logic with better loop prevention
   useEffect(() => {
     // Prevent multiple restoration attempts
@@ -569,7 +597,7 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
       
       // Auto-initialize for previously connected wallets
       initialize({ 
-        connectionType: savedConnectionType === "Coinbase Smart Wallet" ? "scw" : "eoa",
+        connectionType: savedConnectionType, // Use the saved connection type directly
         env: envConfig.NEXT_PUBLIC_XMTP_ENV
       }).catch((e) => {
         logger.log("Error restoring wallet connection:", e);
@@ -601,6 +629,7 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
       connectionType,
       isInFarcasterContext,
       farcasterUser,
+      clearErrorAndRetry,
     }),
     [
       client,
@@ -613,6 +642,7 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
       connectionType,
       isInFarcasterContext,
       farcasterUser,
+      clearErrorAndRetry,
     ],
   );
 
