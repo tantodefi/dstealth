@@ -16,9 +16,10 @@ interface ConvosChatProps {
     avatar: string;
     address: string;
   };
+  defaultMessage?: string;
 }
 
-export default function ConvosChat({ xmtpId, username, url, profile }: ConvosChatProps) {
+export default function ConvosChat({ xmtpId, username, url, profile, defaultMessage }: ConvosChatProps) {
   const { client } = useXMTP();
   const [conversation, setConversation] = useState<Conversation<any> | null>(null);
   const [messages, setMessages] = useState<DecodedMessage<any>[]>([]);
@@ -28,6 +29,13 @@ export default function ConvosChat({ xmtpId, username, url, profile }: ConvosCha
   const [streamActive, setStreamActive] = useState(false);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const streamStartedRef = useRef(false);
+
+  // Set default message when component loads
+  useEffect(() => {
+    if (defaultMessage) {
+      setNewMessage(defaultMessage);
+    }
+  }, [defaultMessage]);
 
   // Add debug logging function
   const addDebugLog = (message: string, data?: any) => {

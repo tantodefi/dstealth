@@ -23,6 +23,8 @@ export const env = createEnv({
     NEXT_PUBLIC_FARCASTER_SIGNATURE: z.string().min(1).optional(),
     // OnchainKit API Key
     NEXT_PUBLIC_ONCHAINKIT_API_KEY: z.string().min(1).optional(),
+    // Daimo Pay Configuration
+    NEXT_PUBLIC_DAIMO_APP_ID: z.string().default("pay-demo"),
     // Backend URL
     NEXT_PUBLIC_BACKEND_URL: z.string().url().default('https://xmtp-mini-app-examples.onrender.com'),
     // Add defaults to prevent crashes during development
@@ -44,6 +46,7 @@ export const env = createEnv({
     NEXT_PUBLIC_FARCASTER_PAYLOAD: process.env.NEXT_PUBLIC_FARCASTER_PAYLOAD,
     NEXT_PUBLIC_FARCASTER_SIGNATURE: process.env.NEXT_PUBLIC_FARCASTER_SIGNATURE,
     NEXT_PUBLIC_ONCHAINKIT_API_KEY: process.env.NEXT_PUBLIC_ONCHAINKIT_API_KEY,
+    NEXT_PUBLIC_DAIMO_APP_ID: process.env.NEXT_PUBLIC_DAIMO_APP_ID,
     NEXT_PUBLIC_BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL,
     NEXT_PUBLIC_ETHERSCAN_API_KEY: process.env.NEXT_PUBLIC_ETHERSCAN_API_KEY,
     NEXT_PUBLIC_FARCASTER_APP_FID: process.env.NEXT_PUBLIC_FARCASTER_APP_FID,

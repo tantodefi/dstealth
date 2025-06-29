@@ -50,7 +50,7 @@ export default function WalletConnection() {
     farcasterUser
   } = useXMTP();
   const { data: walletData } = useWalletClient();
-  const { connect } = useConnect();
+  const { connect, connectors } = useConnect();
   const { isConnected, connector, address } = useAccount();
   const { signMessageAsync } = useSignMessage();
   const [localConnectionType, setLocalConnectionType] = useState<string>("");
@@ -67,6 +67,14 @@ export default function WalletConnection() {
   const hasEphemeralConnection = isEphemeralConnection && ephemeralAddress;
   const isFullyConnected = !!client && (hasWalletConnection || hasEphemeralConnection);
   const isCoinbaseWallet = connector?.id === "coinbaseWalletSDK";
+
+  // Detect wallet environment for better UX
+  const walletEnvironment = {
+    isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
+    isInApp: /FBAN|FBAV|Instagram|Twitter|WeChat|Line/i.test(navigator.userAgent),
+    isFarcaster: isInFarcasterContext,
+    isCoinbaseApp: /CoinbaseWallet/i.test(navigator.userAgent),
+  };
 
   // Sync local connection type with XMTP context
   useEffect(() => {
@@ -113,41 +121,24 @@ export default function WalletConnection() {
             account: walletData.account.address 
           });
         },
-        BigInt(mainnet.id),
+        BigInt(8453), // Use Base chain ID for smart wallets
+        true // Force SCW mode
       );
     }
 
     return null;
   }, [localConnectionType, isConnected, walletData, connector, signMessageAsync]);
 
-  // Initialize XMTP client with wallet signer
   const initializeXmtp = useCallback(
     async (signer: any, connectionTypeOverride?: string) => {
-      const connectionKey = `${connectionTypeOverride || localConnectionType}-${address || 'ephemeral'}`;
-      
-      // Prevent duplicate initialization attempts for the same connection
-      if (connectionAttemptRef.current === connectionKey) {
-        console.log("Duplicate initialization attempt prevented for:", connectionKey);
-        return;
-      }
+      if (initializing || localInitializing || !signer) return;
 
-      // Prevent duplicate initialization
-      if (initializing || localInitializing || client) {
-        console.log("XMTP initialization already in progress or client exists");
-        return;
-      }
-
-      connectionAttemptRef.current = connectionKey;
       setLocalInitializing(true);
+      connectionAttemptRef.current = connectionTypeOverride || localConnectionType;
 
-      // Clear any existing timeout
-      if (initializationTimeoutRef.current) {
-        clearTimeout(initializationTimeoutRef.current);
-      }
-
-      // Set a timeout to reset the initialization state if it gets stuck
+      // Set timeout for initialization
       initializationTimeoutRef.current = setTimeout(() => {
-        console.log("Initialization timeout reached, resetting state");
+        console.log("XMTP initialization timeout");
         setLocalInitializing(false);
         connectionAttemptRef.current = "";
       }, 30000); // 30 second timeout
@@ -170,7 +161,7 @@ export default function WalletConnection() {
       } catch (error) {
         console.error("Error initializing XMTP:", error);
 
-        // Handle specific error types
+        // Enhanced error handling for specific error types
         const errorMessage = error && (error as any).message;
         if (errorMessage?.includes("rejected due to a change in selected network") ||
             errorMessage?.includes("User rejected") ||
@@ -179,10 +170,17 @@ export default function WalletConnection() {
           console.log("User-related error, clearing connection type to allow retry");
           localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
           setLocalConnectionType("");
-        } else if (errorMessage?.includes("Signature")) {
-          console.log("Signature error detected, clearing connection type to prevent loops");
-          localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
-          setLocalConnectionType("");
+        } else if (errorMessage?.includes("Signature") || errorMessage?.includes("sign")) {
+          console.log("Signature error detected, checking if we need to switch signer type");
+          // For Coinbase wallets, try switching between EOA and SCW modes
+          if (connector?.id === "coinbaseWalletSDK") {
+            const currentType = connectionTypeOverride || localConnectionType;
+            if (currentType === "scw") {
+              console.log("SCW signing failed, trying EOA mode");
+              setLocalConnectionType("EOA Wallet");
+              localStorage.setItem(XMTP_CONNECTION_TYPE_KEY, "EOA Wallet");
+            }
+          }
         } else if (errorMessage?.includes("createSyncAccessHandle") || 
                    errorMessage?.includes("NoModificationAllowedError")) {
           console.log("Database access conflict, will retry automatically later");
@@ -248,14 +246,19 @@ export default function WalletConnection() {
     error,
   ]);
 
-  // Farcaster auto-connection is now handled by XMTP context
-  // Just ensure wagmi connection happens
+  // Enhanced Farcaster auto-connection
   useEffect(() => {
     if (!isConnected && isInFarcasterContext && context && !address) {
       console.log("Connecting to Farcaster frame connector");
-      connect({ connector: farcasterFrame() });
+      const farcasterConnector = connectors.find(c => c.id === 'farcasterFrame');
+      if (farcasterConnector) {
+        connect({ connector: farcasterConnector });
+      } else {
+        // Fallback to creating the connector
+        connect({ connector: farcasterFrame() });
+      }
     }
-  }, [isConnected, address, isInFarcasterContext, context, connect]);
+  }, [isConnected, address, isInFarcasterContext, context, connect, connectors]);
 
   // Connect with EOA wallet
   const connectWithEOA = useCallback(() => {
@@ -268,12 +271,22 @@ export default function WalletConnection() {
     if (!isConnected) {
       console.log("Wallet not connected, attempting to connect...");
       try {
-        if (context && isInMiniApp) {
+        if (walletEnvironment.isFarcaster && context) {
           console.log("Connecting with Farcaster frame");
-          connect({ connector: farcasterFrame() });
+          const farcasterConnector = connectors.find(c => c.id === 'farcasterFrame');
+          if (farcasterConnector) {
+            connect({ connector: farcasterConnector });
+          } else {
+            connect({ connector: farcasterFrame() });
+          }
         } else {
           console.log("Connecting with injected wallet");
-          connect({ connector: injected() });
+          const injectedConnector = connectors.find(c => c.id === 'injected' || c.type === 'injected');
+          if (injectedConnector) {
+            connect({ connector: injectedConnector });
+          } else {
+            connect({ connector: injected() });
+          }
         }
       } catch (connectError) {
         console.error("Error connecting wallet:", connectError);
@@ -294,7 +307,8 @@ export default function WalletConnection() {
     initializing,
     localInitializing,
     context,
-    isInMiniApp,
+    connectors,
+    walletEnvironment.isFarcaster,
     getSigner,
     initializeXmtp,
   ]);
@@ -317,68 +331,37 @@ export default function WalletConnection() {
     initializeXmtp(createEphemeralSigner(privateKey), "ephemeral");
   }, [initializeXmtp, initializing, localInitializing]);
 
-  // Manual retry function to clear errors and reset state
-  const retryConnection = useCallback(() => {
-    console.log("Manual retry triggered - clearing all state");
-    
-    // Clear all localStorage items
-    localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
-    localStorage.removeItem(XMTP_EPHEMERAL_KEY);
-    
-    // Reset local state
-    setLocalConnectionType("");
-    setEphemeralAddress("");
-    setLocalInitializing(false);
-    connectionAttemptRef.current = "";
-    
-    // Clear timeout
-    if (initializationTimeoutRef.current) {
-      clearTimeout(initializationTimeoutRef.current);
-    }
-    
-    console.log("State cleared - ready for fresh connection attempt");
-  }, []);
-
-  // Add effect to handle post-connection initialization
+  // Enhanced Coinbase Smart Wallet connection with better error handling
   useEffect(() => {
     let initTimeout: NodeJS.Timeout;
     let retryTimeout: NodeJS.Timeout;
-    let retryCount = 0;
-    const MAX_RETRIES = 3;
-    
+
     const attemptInitialization = async () => {
-      console.log("Attempting XMTP initialization, attempt:", retryCount + 1);
+      if (localInitializing || initializing || !isConnected || connector?.id !== "coinbaseWalletSDK") {
+        return;
+      }
+
       const signer = getSigner();
       if (signer) {
+        console.log("Attempting XMTP initialization with Coinbase Smart Wallet");
         try {
-          console.log("Initializing XMTP with SCW signer");
           await initializeXmtp(signer, "scw");
-          console.log("XMTP initialization successful");
-          setLocalInitializing(false);
         } catch (error) {
-          console.error("Error initializing XMTP:", error);
-          if (retryCount < MAX_RETRIES) {
-            retryCount++;
-            console.log(`Retrying initialization (${retryCount}/${MAX_RETRIES})...`);
-            retryTimeout = setTimeout(attemptInitialization, 2000);
-          } else {
-            console.error("Max retries reached, clearing connection state");
-            localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
-            setLocalConnectionType("");
-            setLocalInitializing(false);
-          }
-        }
-      } else {
-        console.error("Failed to get signer");
-        if (retryCount < MAX_RETRIES) {
-          retryCount++;
-          console.log(`Retrying signer creation (${retryCount}/${MAX_RETRIES})...`);
-          retryTimeout = setTimeout(attemptInitialization, 2000);
-        } else {
-          console.error("Max retries reached, clearing connection state");
-          localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
-          setLocalConnectionType("");
-          setLocalInitializing(false);
+          console.error("SCW initialization failed, will retry with EOA:", error);
+          // Auto-retry with EOA mode after SCW failure
+          retryTimeout = setTimeout(async () => {
+            try {
+              const eoaSigner = createEOASigner(walletData?.account.address as `0x${string}`, async ({ message }) => {
+                return await signMessageAsync({ 
+                  message, 
+                  account: walletData?.account.address as `0x${string}` 
+                });
+              });
+              await initializeXmtp(eoaSigner, "eoa");
+            } catch (eoaError) {
+              console.error("EOA fallback also failed:", eoaError);
+            }
+          }, 2000);
         }
       }
     };
@@ -402,7 +385,7 @@ export default function WalletConnection() {
         clearTimeout(retryTimeout);
       }
     };
-  }, [isConnected, connector, localConnectionType, getSigner, initializeXmtp]);
+  }, [isConnected, connector, localConnectionType, getSigner, initializeXmtp, walletData, signMessageAsync, initializing, localInitializing]);
 
   // Add effect to handle connection state changes
   useEffect(() => {
@@ -431,12 +414,23 @@ export default function WalletConnection() {
         // Force a clean state before connecting
         setLocalInitializing(true);
         
-        connect({
-          connector: coinbaseWallet({
-            appName: "XMTP Mini App",
-            preference: { options: "smartWalletOnly" },
-          }),
-        });
+        // Find the Coinbase connector
+        const coinbaseConnector = connectors.find(c => 
+          c.id === 'coinbaseWalletSDK' || 
+          c.name?.includes('Coinbase')
+        );
+        
+        if (coinbaseConnector) {
+          connect({ connector: coinbaseConnector });
+        } else {
+          // Fallback to creating new connector
+          connect({
+            connector: coinbaseWallet({
+              appName: "XMTP Mini App",
+              preference: "smartWalletOnly",
+            }),
+          });
+        }
       } catch (error) {
         console.error("Error connecting to Coinbase Wallet:", error);
         setLocalInitializing(false);
@@ -458,7 +452,7 @@ export default function WalletConnection() {
         });
       }
     }
-  }, [connect, initializing, localInitializing, isConnected, connector, getSigner, initializeXmtp]);
+  }, [connect, initializing, localInitializing, isConnected, connector, connectors, getSigner, initializeXmtp]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -469,9 +463,17 @@ export default function WalletConnection() {
     };
   }, []);
 
+  // Retry connection function
+  const retryConnection = useCallback(() => {
+    localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
+    setLocalConnectionType("");
+    setLocalInitializing(false);
+    window.location.reload(); // Force fresh start
+  }, []);
+
   // Show WelcomeMessage if user is fully connected
   if (isFullyConnected) {
-    // For Coinbase wallet, show OnchainKit components
+    // Enhanced Coinbase wallet display with OnchainKit components
     if (isCoinbaseWallet && isConnected) {
       return (
         <div className="w-full">
@@ -503,7 +505,7 @@ export default function WalletConnection() {
     return <WelcomeMessage />;
   }
 
-  // Show different UI if we're in Farcaster context and already connected
+  // Enhanced UI for Farcaster context
   if (isInFarcasterContext && client) {
     return (
       <div className="w-full flex flex-col gap-4 text-center py-8">
@@ -525,6 +527,13 @@ export default function WalletConnection() {
   // Show connection buttons only if not fully connected
   return (
     <div className="w-full flex flex-col gap-4">
+      {/* Environment indicator */}
+      {walletEnvironment.isMobile && (
+        <div className="bg-blue-900/20 border border-blue-600/30 rounded-lg p-3 text-xs text-blue-200">
+          📱 Mobile detected - optimized connection flow active
+        </div>
+      )}
+
       {/* Debug Information - only show in development or if there are issues */}
       {(env.NEXT_PUBLIC_APP_ENV === "development" || error) && (
         <div className="bg-gray-800 p-3 rounded text-xs text-gray-300">
@@ -543,6 +552,7 @@ export default function WalletConnection() {
           <div>In Farcaster Context: {isInFarcasterContext ? "Yes" : "No"}</div>
           <div>Connection Attempt: {connectionAttemptRef.current || "None"}</div>
           <div>Fully Connected: {isFullyConnected ? "Yes" : "No"}</div>
+          <div>Available Connectors: {connectors.map(c => c.id).join(", ")}</div>
           {error && (
             <div className="text-red-400 mt-2">
               <div className="font-bold">Error:</div>

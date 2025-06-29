@@ -3,14 +3,14 @@
 import { useState, useEffect } from "react";
 import { useWallet } from "@/hooks/useWallet";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
-import SendButton from "./SendButton";
 import { SpinnerIcon } from "./icons/SpinnerIcon";
 import { CheckIcon } from "./icons/CheckIcon";
 import { XIcon } from "./icons/XIcon";
 import { Copy } from 'lucide-react';
 import ConvosChat from "./ConvosChat";
 import { verifyProof } from '@reclaimprotocol/js-sdk';
-import type { PaymentMethod } from "./SendButton";
+import DaimoPayButton from "./DaimoPayButton";
+import { useAccount } from "wagmi";
 
 interface StealthPayment {
   timestamp: number;
@@ -21,6 +21,7 @@ interface StealthPayment {
   txUrl: string;
   zkProofUrl: string;
   fkeyId: string;
+  proof?: any;
 }
 
 interface ActivityStats {
@@ -163,13 +164,27 @@ function CopyButton({ text, className = "", title = "Copy to clipboard" }: { tex
 export function FkeySearch() {
   // Wallet connection state
   const { isConnected } = useWallet();
+  const { address } = useAccount();
+  
+  // Enhanced ephemeral wallet detection
+  const isEphemeralWallet = address?.toLowerCase().startsWith('0x0') || false;
+  const isWalletConnected = isConnected || !!address;
+  
+  // Debug logging for ephemeral wallet issues
+  console.log('🔍 Enhanced Wallet Debug:', {
+    isConnected,
+    address,
+    isEphemeralWallet,
+    isWalletConnected,
+    addressLength: address?.length,
+    hasValidAddress: !!address && address.length > 10
+  });
   
   // Local storage for stealth payments
   const [stealthPayments, setStealthPayments] = useLocalStorage<StealthPayment[]>('stealthPayments', []);
   
   // Search and UI state
   const [username, setUsername] = useState("");
-  const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<FkeyProfile | null>(null);
   const [convosData, setConvosData] = useState<ConvosProfile | null>(null);
@@ -179,9 +194,6 @@ export function FkeySearch() {
   const [zkSuccess, setZkSuccess] = useState(false);
   const [showZkModal, setShowZkModal] = useState(false);
   const [selectedProofType, setSelectedProofType] = useState<'fkey' | 'convos'>('fkey');
-  
-  // Payment method state
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("daimo");
 
   // ZK fetching state
   const [zkFetching, setZkFetching] = useState(false);
@@ -193,6 +205,8 @@ export function FkeySearch() {
     totalZkProofs: 0,
     uniqueRecipients: 0,
   });
+
+
 
   // Clear results when username changes (immediate clearing on input change)
   useEffect(() => {
@@ -234,11 +248,14 @@ export function FkeySearch() {
       ]);
 
       const proofs: {fkey?: any, convos?: any} = {};
+      let fkeyUserExists = false;
+      let convosUserExists = false;
       
       // Handle profile data and extract zkProof
       if (profileResponse.status === 'fulfilled' && profileResponse.value.ok) {
         const data = await profileResponse.value.json();
         if (data.address) {
+          fkeyUserExists = true;
           setProfile(data);
           // Extract the real ZK proof from backend response
           if (data.proof) {
@@ -257,14 +274,13 @@ export function FkeySearch() {
             console.log('⚠️ No ZK proof received from backend for fkey - Reclaim zkFetch may have failed');
           }
         }
-      } else {
-        setError("User not found");
       }
 
       // Handle convos data and extract zkProof
       if (convosResponse.status === 'fulfilled' && convosResponse.value.ok) {
         const convosData = await convosResponse.value.json();
         if (convosData.success && convosData.xmtpId) {
+          convosUserExists = true;
           setConvosData(convosData);
           // Extract the real ZK proof from backend response
           if (convosData.proof) {
@@ -285,21 +301,36 @@ export function FkeySearch() {
         }
       }
 
-      // Only set proofs if we actually have some
+      // Handle different scenarios based on what was found
+      if (!fkeyUserExists && !convosUserExists) {
+        // Neither fkey nor convos user exists - show generic invite
+        setError(`${username}.fkey.id does not exist`);
+      } else if (!fkeyUserExists && convosUserExists) {
+        // Convos user found but no fkey - show special message for messaging
+        setError(`${username}.fkey.id not found, but convos user found`);
+      } else {
+        // fkey user exists (with or without convos) - clear any error
+        setError("");
+      }
+
+      // Only set proofs and show success if we have valid data
       if (proofs.fkey || proofs.convos) {
         setZkProofs(proofs);
         // Start background verification with real proofs
         verifyProofsInBackground(proofs);
+        
+        // Clear the message timer and complete the zkfetching process
+        clearTimeout(messageTimer);
+        setTimeout(() => {
+          setZkFetching(false);
+          setZkSuccess(true);
+        }, 2000);
       } else {
-        console.log('⚠️ No ZK proofs received from backend - this means Reclaim zkFetch failed');
-      }
-
-      // Clear the message timer and complete the zkfetching process
-      clearTimeout(messageTimer);
-      setTimeout(() => {
+        // No proofs means no valid users were found or zkFetch failed
+        clearTimeout(messageTimer);
         setZkFetching(false);
-        setZkSuccess(true);
-      }, 2000);
+        console.log('⚠️ No ZK proofs received from backend - this means Reclaim zkFetch failed or users do not exist');
+      }
 
     } catch (error) {
       clearTimeout(messageTimer);
@@ -355,27 +386,116 @@ export function FkeySearch() {
   const handlePaymentCompleted = (event: any) => {
     if (!profile) return;
     
+    console.log('🎯 Processing payment completion event:', event);
+    
+    // Extract transaction details from Daimo SDK event
+    const transactionHash = event.transactionHash || event.hash || event.txHash || `fallback_${Date.now()}`;
+    const paymentAmount = event.amount || event.value || "unknown";
+    const chainId = event.chainId || event.chain || 8453; // Default to Base (8453)
+    const tokenAddress = event.token || event.tokenAddress;
+    
+    // Generate appropriate block explorer URL based on chain
+    const getBlockExplorerUrl = (chainId: number, txHash: string) => {
+      const explorers = {
+        1: `https://etherscan.io/tx/${txHash}`, // Ethereum
+        8453: `https://basescan.org/tx/${txHash}`, // Base
+        10: `https://optimistic.etherscan.io/tx/${txHash}`, // Optimism
+        137: `https://polygonscan.com/tx/${txHash}`, // Polygon
+        42161: `https://arbiscan.io/tx/${txHash}`, // Arbitrum
+        480: `https://worldscan.org/tx/${txHash}`, // World Chain
+      };
+      return explorers[chainId] || `https://basescan.org/tx/${txHash}`; // Default to Base
+    };
+    
+    // Determine token symbol based on address or default
+    const getTokenSymbol = (tokenAddress: string, chainId: number) => {
+      if (!tokenAddress) return "USDC";
+      
+      // Common USDC addresses
+      const usdcAddresses = {
+        "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913": "USDC", // Base USDC
+        "0xA0b86a33E6417Ddcf45e8DaF88C6D8AC22f7e1C": "USDC", // Ethereum USDC
+        "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85": "USDC", // Optimism USDC
+      };
+      
+      return usdcAddresses[tokenAddress] || "USDC";
+    };
+    
+    // Combine all available ZK proofs (both fkey and convos if available)
+    const combinedProof = {
+      fkey: zkProofs.fkey || null,
+      convos: zkProofs.convos || null,
+      verificationResults: {
+        fkey: zkVerification.fkey || null,
+        convos: zkVerification.convos || null,
+      },
+      // Include metadata about which proofs are verified
+      verified: {
+        fkey: zkVerification.fkey?.isValid || false,
+        convos: zkVerification.convos?.isValid || false,
+      }
+    };
+    
+    // Create enhanced payment record with complete transaction and ZK proof data
     const payment: StealthPayment = {
       timestamp: Date.now(),
-      amount: amount,
-      token: "USDC",
+      amount: paymentAmount.toString(),
+      token: getTokenSymbol(tokenAddress, chainId),
       recipientAddress: profile.address,
-      txHash: event.transactionHash || "unknown",
-      txUrl: `https://basescan.org/tx/${event.transactionHash}`,
-      zkProofUrl: "https://zkfetch.com/proof", // Placeholder
+      txHash: transactionHash,
+      txUrl: getBlockExplorerUrl(chainId, transactionHash),
+      zkProofUrl: `https://zkfetch.com/proof/${transactionHash}`,
       fkeyId: `${username}.fkey.id`,
+      // Enhanced proof data with verification results
+      proof: combinedProof.fkey || combinedProof.convos ? {
+        ...((combinedProof.fkey || combinedProof.convos)),
+        // Add metadata about this specific payment
+        paymentMetadata: {
+          chainId,
+          tokenAddress,
+          daimoPayment: true,
+          timestamp: Date.now(),
+          verifiedProofs: Object.keys(combinedProof.verified).filter(key => combinedProof.verified[key])
+        }
+      } : undefined,
     };
 
+    // Add to localStorage (this automatically updates the ZK Receipts tab)
     const newPayments = [...stealthPayments, payment];
     setStealthPayments(newPayments);
 
-    // Update stats
+    // Update activity stats
     const uniqueRecipients = new Set(newPayments.map(p => p.recipientAddress)).size;
+    const hasValidZkProof = combinedProof.verified.fkey || combinedProof.verified.convos;
+    
     setActivityStats({
       totalPayments: newPayments.length,
-      totalZkProofs: newPayments.length,
+      totalZkProofs: hasValidZkProof ? activityStats.totalZkProofs + 1 : activityStats.totalZkProofs,
       uniqueRecipients,
     });
+
+    // Comprehensive logging for debugging and tracking
+    console.log('💰 Payment completed and saved to ZK receipts:', {
+      transactionHash,
+      amount: paymentAmount,
+      token: getTokenSymbol(tokenAddress, chainId),
+      recipient: payment.recipientAddress,
+      chainId,
+      blockExplorerUrl: payment.txUrl,
+      hasZkProof: !!payment.proof,
+      zkProofDetails: {
+        fkeyAvailable: !!combinedProof.fkey,
+        convosAvailable: !!combinedProof.convos,
+        fkeyVerified: combinedProof.verified.fkey,
+        convosVerified: combinedProof.verified.convos,
+        totalVerifiedProofs: Object.values(combinedProof.verified).filter(Boolean).length
+      },
+      savedToLocalStorage: true,
+      paymentCount: newPayments.length
+    });
+    
+    // Optional: Show success notification to user
+    console.log(`✅ Transaction ${transactionHash.slice(0, 6)}...${transactionHash.slice(-4)} saved to ZK Receipts tab!`);
   };
 
   return (
@@ -423,11 +543,61 @@ export function FkeySearch() {
         </div>
       )}
 
-            {error && (
-        <div className="text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg p-3 mobile-scroll hide-scrollbar">
-                {error}
+      {error && (
+        <div className="mobile-scroll hide-scrollbar">
+          {error === `${username}.fkey.id does not exist` ? (
+            // User doesn't exist on FluidKey - show invite option
+            <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-4 space-y-3">
+              <div className="text-orange-200">
+                <p className="font-medium">⚠️ {username}.fkey.id does not exist</p>
+                <p className="text-sm mt-1">This user hasn&apos;t joined FluidKey yet.</p>
               </div>
-            )}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      const referralUrl = "https://app.fluidkey.com/?ref=62YNSG";
+                      try {
+                        await navigator.clipboard.writeText(referralUrl);
+                        console.log('✅ Referral link copied to clipboard');
+                      } catch (err) {
+                        console.error('Failed to copy referral link:', err);
+                      }
+                    }}
+                    className="flex-1 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-lg font-medium transition-colors"
+                  >
+                    📧 Invite them to FluidKey
+                  </button>
+                  <CopyButton 
+                    text="https://app.fluidkey.com/?ref=62YNSG" 
+                    title="Copy invite link"
+                    className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg"
+                  />
+                </div>
+                <div className="text-xs text-orange-300">
+                  Invite link: https://app.fluidkey.com/?ref=62YNSG
+                </div>
+              </div>
+            </div>
+          ) : error === `${username}.fkey.id not found, but convos user found` ? (
+            // Convos user found but no fkey - show special message
+            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 space-y-3">
+              <div className="text-yellow-200">
+                <p className="font-medium">💬 {username}.fkey.id not found</p>
+                <p className="text-sm mt-1">But {username} exists on convos! Send them a FluidKey invite.</p>
+              </div>
+              <div className="text-xs text-yellow-300">
+                💡 Use the message box below to invite them to join FluidKey
+              </div>
+            </div>
+          ) : (
+            // Generic error
+            <div className="text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+              {error}
+            </div>
+          )}
+        </div>
+      )}
 
       {profile && (
         <div className="space-y-4 p-4 bg-gray-800 rounded-lg mobile-scroll hide-scrollbar">
@@ -454,40 +624,95 @@ export function FkeySearch() {
                 </div>
                 </div>
 
-                <div className="mobile-scroll hide-scrollbar">
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-              Amount (USDC)
-                  </label>
-            <div className="relative">
-                  <input
-                    type="number"
-                    value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                    placeholder="0.00"
-                className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg p-2.5 pr-20"
-                min="0"
-                    step="any"
-              />
-              <div className="absolute inset-y-0 right-0 flex items-center pr-3">
-                <div className="flex items-center gap-2 text-gray-400">
-                  <div className="w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs font-bold">
-                    $
-            </div>
-                  <span className="text-sm font-medium">USDC</span>
+                          {/* Simplified Daimo Pay SDK Implementation */}
+          <div className="mobile-scroll hide-scrollbar">
+            {isWalletConnected ? (
+              <div className="space-y-4">
+                {/* Enhanced Daimo Pay Header */}
+                <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                      <span className="text-white text-xs font-bold">D</span>
+                    </div>
+                    <span className="text-green-100 font-medium">Daimo Pay</span>
+                    <span className="text-green-300 text-xs">• {isEphemeralWallet ? 'Ephemeral' : 'Connected'} Wallet</span>
+                  </div>
+                  
+                  <div className="flex items-center justify-between text-sm">
+                    <div>
+                      <div className="text-white font-semibold">ZK Stealth Payment</div>
+                      <div className="text-green-200">to {username}.fkey.id</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-green-100">Multi-Chain Support</div>
+                      <div className="text-white text-xs font-mono">
+                        {profile.address.slice(0, 6)}...{profile.address.slice(-4)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Daimo Pay Button with Built-in Amount Input */}
+                <DaimoPayButton
+                  toAddress={profile.address as `0x${string}`}
+                  memo={`ZK Stealth Payment to ${username}.fkey.id`}
+                  metadata={{
+                    fkeyId: `${username}.fkey.id`,
+                    zkProofAvailable: String(!!(zkProofs.fkey || zkProofs.convos)),
+                    zkProofProvider: String(zkProofs.fkey?.claimData?.provider || zkProofs.convos?.claimData?.provider || ''),
+                    isEphemeral: String(address?.startsWith('0x0')),
+                    timestamp: Date.now().toString(),
+                    username: username,
+                  }}
+                  // Pass ZK proof data for payment link generation
+                  zkProofs={zkProofs}
+                  zkVerification={zkVerification}
+                  username={username}
+                  onLinkGenerated={(linkData) => {
+                    console.log('🔗 Payment link generated:', linkData);
+                  }}
+                  onPaymentStarted={(event) => {
+                    console.log('🚀 ZK Stealth Payment started:', event);
+                  }}
+                  onPaymentCompleted={(event) => {
+                    console.log('✅ ZK Stealth Payment completed:', event);
+                    handlePaymentCompleted({
+                      method: "daimo-sdk",
+                      hash: event.transactionHash || `daimo_sdk_${Date.now()}`,
+                      amount: event.amount || "unknown", // SDK provides amount
+                      network: 'base',
+                      currency: 'USDC',
+                      ...event
+                    });
+                  }}
+                  onPaymentBounced={(event) => {
+                    console.error('❌ ZK Stealth Payment bounced:', event);
+                  }}
+                  disabled={!isWalletConnected}
+                />
+
+                {/* ZK Proof Integration Footer */}
+                <div className="bg-purple-900/20 border border-purple-600/30 rounded-lg p-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-purple-200">
+                      🔐 {zkProofs.fkey || zkProofs.convos ? 'ZK Verified Payment' : 'Standard Payment'}
+                    </span>
+                    <span className="text-purple-300">
+                      {isEphemeralWallet ? 'Ephemeral Burner • ' : ''}Any Chain • Any Token
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
-
-          <div className="mobile-scroll hide-scrollbar">
-            <SendButton
-              recipientAddress={profile.address}
-              amount={amount}
-              onPaymentCompleted={handlePaymentCompleted}
-              disabled={!isConnected || !amount || parseFloat(amount) <= 0}
-              paymentMethod={paymentMethod}
-              onPaymentMethodChange={setPaymentMethod}
-            />
+            ) : (
+              <div className="text-center py-4">
+                <div className="text-gray-400 text-sm mb-2">
+                  Connect wallet to continue
+                </div>
+                <div className="w-full px-4 py-2 bg-gray-600 text-white rounded-lg opacity-50 cursor-not-allowed">
+                  Pay with Daimo
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -495,21 +720,13 @@ export function FkeySearch() {
       {/* Render ConvosChat if we have convos data */}
       {convosData && (
         <div className="mobile-scroll hide-scrollbar">
-          {!profile?.address && (
-            <div className="w-full max-w-md mx-auto px-4 mb-2">
-              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 text-sm text-yellow-200 mobile-scroll hide-scrollbar">
-                <p>💡 Click the message input below to send an invite to {convosData.profile.name || convosData.username}</p>
-              </div>
-            </div>
-          )}
-          <div className="mobile-scroll hide-scrollbar">
-            <ConvosChat
-              xmtpId={convosData.xmtpId}
-              username={convosData.username}
-              url={convosData.url}
-              profile={convosData.profile}
-            />
-          </div>
+          <ConvosChat
+            xmtpId={convosData.xmtpId}
+            username={convosData.username}
+            url={convosData.url}
+            profile={convosData.profile}
+            defaultMessage={!profile?.address ? `hey you should join fluidkey here: https://app.fluidkey.com/?ref=62YNSG` : undefined}
+          />
         </div>
       )}
 

@@ -1,39 +1,41 @@
 "use client";
 
-// Simple navigator.wallets polyfill
-if (typeof window !== 'undefined') {
-  try {
-    if (!window.navigator.wallets) {
-      (window.navigator as any).wallets = [];
-    }
-  } catch {
-    // Silent fail - not critical for app functionality
-  }
-}
-
-// import { DaimoPayProvider, getDefaultConfig } from "@daimo/pay";
-import { farcasterFrame as miniAppConnector } from "@farcaster/frame-wagmi-connector";
+import React, { useEffect, useState, type ReactNode } from "react";
+import { DaimoPayProvider } from "@daimo/pay";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   cookieStorage,
   cookieToInitialState,
-  createConfig,
-  createStorage,
-  http,
   WagmiProvider,
   type Config,
 } from "wagmi";
-import { useEffect, useState, type ReactNode } from "react";
 // OnchainKit imports
 import { OnchainKitProvider } from '@coinbase/onchainkit';
 import { MiniKitProvider } from '@coinbase/onchainkit/minikit';
 import { base } from 'wagmi/chains';
 import { env } from "@/lib/env";
+// Use our reliable wagmi config
+import { wagmiConfig } from "@/lib/wagmi";
 
-// Extend Navigator type to include wallets
-declare global {
-  interface Navigator {
-    wallets?: any[];
+// Function to clear wagmi cookies
+export function clearWagmiCookies() {
+  try {
+    // Clear wagmi-related cookies
+    document.cookie = "wagmi.cache=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    document.cookie = "wagmi.store=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    document.cookie = "wagmi.connected=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    document.cookie = "wagmi.wallet=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    
+    // Clear any cookies that start with "wagmi"
+    document.cookie.split(";").forEach(cookie => {
+      const eqPos = cookie.indexOf("=");
+      const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+      if (name.startsWith("wagmi")) {
+        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+      }
+    });
+  } catch (error) {
+    console.warn("Failed to clear wagmi cookies:", error);
   }
 }
 
@@ -47,30 +49,6 @@ const queryClient = new QueryClient({
   },
 });
 
-// Import our enhanced wagmi config
-import { wagmiConfig } from "@/lib/wagmi";
-
-// Simple DaimoPay Provider wrapper - just render children for now
-function SafeDaimoPayProvider({ children }: { children: ReactNode }) {
-  return <>{children}</>;
-}
-
-// Function to clear wagmi cookies
-export const clearWagmiCookies = () => {
-  // wagmi uses these cookie keys
-  const wagmiCookieKeys = [
-    "wagmi.connected",
-    "wagmi.wallet",
-    "wagmi.store",
-    "wagmi.network",
-  ];
-
-  // Clear each wagmi cookie by setting expiration to past date
-  wagmiCookieKeys.forEach((key) => {
-    document.cookie = `${key}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
-  });
-};
-
 export default function MiniAppWalletProvider({
   children,
   cookies,
@@ -78,7 +56,8 @@ export default function MiniAppWalletProvider({
   children: React.ReactNode;
   cookies: string | null;
 }) {
-  const initialState = cookieToInitialState(wagmiConfig as Config, cookies);
+  const initialState = cookieToInitialState(wagmiConfig, cookies);
+  
   return (
     <WagmiProvider config={wagmiConfig} initialState={initialState}>
       <QueryClientProvider client={queryClient}>
@@ -96,10 +75,13 @@ export default function MiniAppWalletProvider({
             apiKey={env.NEXT_PUBLIC_ONCHAINKIT_API_KEY || ""}
             chain={base}
           >
-            <SafeDaimoPayProvider>{children}</SafeDaimoPayProvider>
+            <DaimoPayProvider>
+              {children}
+            </DaimoPayProvider>
           </MiniKitProvider>
         </OnchainKitProvider>
       </QueryClientProvider>
     </WagmiProvider>
   );
 }
+
