@@ -206,15 +206,19 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
       
       console.log("🔄 Starting disconnect from WelcomeMessage...");
       
-      // 1. Disconnect services first
-      if (isEphemeralConnection) {
-        disconnectXMTP();
-      } else {
-        disconnectWallet();
-        disconnectXMTP();
-      }
-
-      // 2. Clear ALL relevant localStorage comprehensively
+      // 1. Clear component state FIRST to prevent UI persistence
+      setEthName(null);
+      setEphemeralAddress("");
+      setShowDropdown(false);
+      
+      // 2. Disconnect services - ALWAYS disconnect both
+      console.log("🔌 Disconnecting XMTP client...");
+      disconnectXMTP();
+      
+      console.log("🔌 Disconnecting wallet...");
+      disconnectWallet();
+      
+      // 3. Clear ALL relevant localStorage comprehensively
       console.log("🧹 Clearing localStorage comprehensively...");
       const keysToRemove = [];
       for (let i = 0; i < localStorage.length; i++) {
@@ -233,7 +237,10 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
           key.includes('address') ||
           key.includes('signer') ||
           key.includes('session') ||
-          key.includes('name')
+          key.includes('name') ||
+          key.includes('avatar') ||
+          key.includes('cache') ||
+          key.includes('user')
         )) {
           keysToRemove.push(key);
         }
@@ -253,7 +260,11 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
         'WALLETCONNECT_DEEPLINK_CHOICE',
         'recentWalletChoice',
         'connector',
-        'isConnected'
+        'isConnected',
+        'tantodefi.eth', // Clear any cached ENS names
+        'cached_name',
+        'user_cache',
+        'profile_cache'
       ];
       
       specificKeys.forEach(key => {
@@ -267,27 +278,58 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
         console.log(`🗑️ Removed: ${key}`);
       });
 
-      // 3. Clear component state
-      setEphemeralAddress("");
-      setEthName(null);
-      setShowDropdown(false);
-
       // 4. Clear session storage
       try {
         sessionStorage.clear();
+        console.log("🧹 Cleared sessionStorage");
       } catch (e) {
         console.warn("Could not clear sessionStorage:", e);
       }
 
+      // 5. Clear wagmi cookies aggressively
+      try {
+        // Clear wagmi cookies from document.cookie
+        const cookies = document.cookie.split(";");
+        for (let cookie of cookies) {
+          const eqPos = cookie.indexOf("=");
+          const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+          if (name.includes('wagmi') || name.includes('wallet') || name.includes('connect')) {
+            // Clear cookie by setting expiration to past date
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=${window.location.hostname}`;
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+            console.log(`🍪 Cleared cookie: ${name}`);
+          }
+        }
+      } catch (e) {
+        console.warn("Could not clear cookies:", e);
+      }
+
+      // 6. Clear any cached DNS/ENS entries (browser level)
+      try {
+        if ('caches' in window) {
+          const cacheNames = await caches.keys();
+          await Promise.all(
+            cacheNames.map(cacheName => caches.delete(cacheName))
+          );
+          console.log("🧹 Cleared browser caches");
+        }
+      } catch (e) {
+        console.warn("Could not clear browser caches:", e);
+      }
+
       console.log("✅ Disconnect completed successfully");
       
-      // 5. Force page reload immediately (no delay needed since we have loader)
-      window.location.href = window.location.origin + window.location.pathname;
+      // 7. Force page reload to ensure clean state
+      setTimeout(() => {
+        window.location.href = window.location.origin + window.location.pathname;
+      }, 500); // Small delay to ensure all cleanup completes
       
     } catch (error) {
       console.error("❌ Error during disconnect:", error);
       // Force reload even if there's an error
-      window.location.reload();
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
     }
   };
 
