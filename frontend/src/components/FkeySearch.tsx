@@ -318,13 +318,13 @@ export function FkeySearch() {
         setZkProofs(proofs);
         // Start background verification with real proofs
         verifyProofsInBackground(proofs);
-        
-        // Clear the message timer and complete the zkfetching process
-        clearTimeout(messageTimer);
-        setTimeout(() => {
-          setZkFetching(false);
-          setZkSuccess(true);
-        }, 2000);
+
+      // Clear the message timer and complete the zkfetching process
+      clearTimeout(messageTimer);
+      setTimeout(() => {
+        setZkFetching(false);
+        setZkSuccess(true);
+      }, 2000);
       } else {
         // No proofs means no valid users were found or zkFetch failed
         clearTimeout(messageTimer);
@@ -543,7 +543,7 @@ export function FkeySearch() {
         </div>
       )}
 
-      {error && (
+            {error && (
         <div className="mobile-scroll hide-scrollbar">
           {error === `${username}.fkey.id does not exist` ? (
             // User doesn't exist on FluidKey - show invite option
@@ -593,11 +593,11 @@ export function FkeySearch() {
           ) : (
             // Generic error
             <div className="text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
-              {error}
+                {error}
             </div>
           )}
-        </div>
-      )}
+              </div>
+            )}
 
       {profile && (
         <div className="space-y-4 p-4 bg-gray-800 rounded-lg mobile-scroll hide-scrollbar">
@@ -625,7 +625,7 @@ export function FkeySearch() {
                 </div>
 
                           {/* Simplified Daimo Pay SDK Implementation */}
-          <div className="mobile-scroll hide-scrollbar">
+                <div className="mobile-scroll hide-scrollbar">
             {isWalletConnected ? (
               <div className="space-y-4">
                 {/* Enhanced Daimo Pay Header */}
@@ -642,15 +642,15 @@ export function FkeySearch() {
                     <div>
                       <div className="text-white font-semibold">ZK Stealth Payment</div>
                       <div className="text-green-200">to {username}.fkey.id</div>
-                    </div>
+            </div>
                     <div className="text-right">
                       <div className="text-green-100">Multi-Chain Support</div>
                       <div className="text-white text-xs font-mono">
                         {profile.address.slice(0, 6)}...{profile.address.slice(-4)}
-                      </div>
-                    </div>
-                  </div>
                 </div>
+              </div>
+            </div>
+          </div>
 
                 {/* Daimo Pay Button with Built-in Amount Input */}
                 <DaimoPayButton
@@ -719,14 +719,14 @@ export function FkeySearch() {
 
       {/* Render ConvosChat if we have convos data */}
       {convosData && (
-        <div className="mobile-scroll hide-scrollbar">
-          <ConvosChat
-            xmtpId={convosData.xmtpId}
-            username={convosData.username}
-            url={convosData.url}
-            profile={convosData.profile}
+          <div className="mobile-scroll hide-scrollbar">
+            <ConvosChat
+              xmtpId={convosData.xmtpId}
+              username={convosData.username}
+              url={convosData.url}
+              profile={convosData.profile}
             defaultMessage={!profile?.address ? `hey you should join fluidkey here: https://app.fluidkey.com/?ref=62YNSG` : undefined}
-          />
+            />
         </div>
       )}
 

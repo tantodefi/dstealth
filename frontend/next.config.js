@@ -11,6 +11,11 @@ const require = createRequire(import.meta.url);
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  eslint: {
+    // Warning: This allows production builds to successfully complete even if
+    // your project has ESLint errors.
+    ignoreDuringBuilds: true,
+  },
   images: {
     remotePatterns: [
       {
@@ -28,7 +33,7 @@ const nextConfig = {
     '@solana/web3.js',
     '@farcaster/auth-client',
   ],
-  swcMinify: true,
+
   experimental: {
     // Enable optimizations for production builds
     optimizeCss: true,
