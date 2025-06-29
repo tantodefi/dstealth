@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useXMTP } from "@/context/xmtp-context";
-import { useAccount } from "wagmi";
-import { ChevronDown, ChevronUp, Copy } from "lucide-react";
+import { useAccount, useDisconnect } from "wagmi";
+import { ChevronDown, ChevronUp, Copy, Power } from "lucide-react";
 import { privateKeyToAccount } from "viem/accounts";
+import { clearWagmiCookies } from "@/providers/miniapp-wallet-provider";
 
 interface ConnectionStatusProps {
   onConnectionChange?: (isConnected: boolean) => void;
@@ -13,13 +14,15 @@ interface ConnectionStatusProps {
 export function CollapsibleConnectionInfo({
   onConnectionChange,
 }: ConnectionStatusProps) {
-  const { client, connectionType: xmtpConnectionType } = useXMTP();
-  const { address, isConnected: isWalletConnected } = useAccount();
+  const { client, connectionType: xmtpConnectionType, disconnect: disconnectXMTP } = useXMTP();
+  const { address, isConnected: isWalletConnected, connector } = useAccount();
+  const { disconnect: disconnectWallet } = useDisconnect();
   const [isActuallyConnected, setIsActuallyConnected] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [connectionDetails, setConnectionDetails] = useState<any>({});
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   const [ephemeralAddress, setEphemeralAddress] = useState<string>("");
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
 
   // Check backend connection status
   const checkBackendStatus = async () => {
@@ -120,6 +123,109 @@ export function CollapsibleConnectionInfo({
       await navigator.clipboard.writeText(text);
     } catch (error) {
       console.error('Failed to copy:', error);
+    }
+  };
+
+  // Complete disconnect/reset function
+  const handleCompleteDisconnect = async () => {
+    try {
+      // Show loading immediately for better UX
+      setIsDisconnecting(true);
+      
+      console.log("🔄 Starting complete disconnect...");
+      
+      // 1. Disconnect XMTP client first
+      if (disconnectXMTP) {
+        console.log("🔌 Disconnecting XMTP...");
+        disconnectXMTP();
+      }
+
+      // 2. Disconnect wallet
+      if (disconnectWallet) {
+        console.log("🔌 Disconnecting wallet...");
+        disconnectWallet();
+      }
+
+      // 3. Clear ALL relevant localStorage items (more comprehensive)
+      console.log("🧹 Clearing localStorage comprehensively...");
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (
+          key.startsWith('xmtp:') || 
+          key.startsWith('xmtp.') ||
+          key.startsWith('wagmi') || 
+          key.startsWith('WCM_') ||
+          key.startsWith('wc@') ||
+          key.includes('wallet') ||
+          key.includes('connect') ||
+          key.includes('ens') ||
+          key.includes('eth') ||
+          key.includes('address') ||
+          key.includes('signer') ||
+          key.includes('session')
+        )) {
+          keysToRemove.push(key);
+        }
+      }
+      
+      // Also remove specific keys that might not match patterns
+      const specificKeys = [
+        'connectionType',
+        'lastConnectedAddress', 
+        'ensName',
+        'ensCache',
+        'userProfile',
+        'walletconnect',
+        'WALLETCONNECT_DEEPLINK_CHOICE',
+        'recentWalletChoice',
+        'connector',
+        'isConnected'
+      ];
+      
+      specificKeys.forEach(key => {
+        if (localStorage.getItem(key)) {
+          keysToRemove.push(key);
+        }
+      });
+
+      keysToRemove.forEach(key => {
+        localStorage.removeItem(key);
+        console.log(`🗑️ Removed: ${key}`);
+      });
+
+      // 4. Clear wagmi cookies
+      console.log("🍪 Clearing wagmi cookies...");
+      clearWagmiCookies();
+
+      // 5. Clear session storage as well
+      console.log("🧹 Clearing sessionStorage...");
+      try {
+        sessionStorage.clear();
+      } catch (e) {
+        console.warn("Could not clear sessionStorage:", e);
+      }
+
+      // 6. Clear any cached fetch requests
+      console.log("🔄 Clearing cache...");
+      try {
+        if ('caches' in window) {
+          const cacheNames = await caches.keys();
+          await Promise.all(cacheNames.map(name => caches.delete(name)));
+        }
+      } catch (e) {
+        console.warn("Could not clear caches:", e);
+      }
+
+      console.log("✅ Complete disconnect finished, reloading page...");
+      
+      // 7. Force immediate page reload to completely reset state
+      window.location.href = window.location.origin + window.location.pathname;
+      
+    } catch (error) {
+      console.error("❌ Error during complete disconnect:", error);
+      // Force reload even if there's an error
+      window.location.reload();
     }
   };
 
@@ -275,6 +381,29 @@ export function CollapsibleConnectionInfo({
             </div>
           )}
 
+          {/* Disconnect Button - Only show when connected or in error states */}
+          {(isActuallyConnected || client || isWalletConnected || connectionDetails.connectionType !== "Not set") && (
+            <div className="mt-3 p-2 bg-red-500/10 border border-red-500/20 rounded">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <p className="text-red-400 text-xs font-medium">Connection Issues?</p>
+                  <p className="text-red-300 text-xs">Reset all connections and start fresh</p>
+                </div>
+                <Power className="h-4 w-4 text-red-400" />
+              </div>
+              <button
+                onClick={handleCompleteDisconnect}
+                className="w-full px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-medium rounded transition-colors"
+                disabled={isDisconnecting}
+              >
+                {isDisconnecting ? "🔄 Resetting..." : "🔄 Complete Reset"}
+              </button>
+              <p className="text-red-300 text-xs mt-1 text-center">
+                This will disconnect everything and reload the page
+              </p>
+            </div>
+          )}
+
           {/* Close button */}
           <button
             onClick={() => setIsExpanded(false)}
@@ -282,6 +411,24 @@ export function CollapsibleConnectionInfo({
           >
             Close
           </button>
+        </div>
+      )}
+      
+      {/* Full-screen disconnect loader overlay */}
+      {isDisconnecting && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[9999] flex items-center justify-center">
+          <div className="bg-gray-900 border border-gray-700 rounded-lg p-8 flex flex-col items-center gap-4 max-w-sm mx-4">
+            <div className="relative">
+              <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+              <div className="absolute inset-0 w-8 h-8 border-2 border-blue-400/20 rounded-full animate-pulse" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-white font-medium text-lg mb-2">Resetting...</h3>
+              <p className="text-gray-400 text-sm">
+                Clearing all connections and reloading
+              </p>
+            </div>
+          </div>
         </div>
       )}
     </div>

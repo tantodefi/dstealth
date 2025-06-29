@@ -411,6 +411,15 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
               error.message?.includes('User denied')) {
             logger.log("User-related error, not setting permanent error state");
             // Don't set permanent error state for user rejections
+          } else if (error.message?.includes('Signature validation failed') ||
+                     error.message?.includes('signature validation') ||
+                     error.message?.includes('invalid signature')) {
+            logger.log("Signature validation failed - likely SCW cache issue, blocking retries");
+            // Block retries for signature validation failures to prevent loops
+            storage.set(STORAGE_KEYS.INITIALIZATION_BLOCKED, Date.now().toString());
+            if (mountedRef.current) {
+              setError(new Error("Signature validation failed. Please use the disconnect button to reset your connection."));
+            }
           } else {
             if (mountedRef.current) {
               setError(error);

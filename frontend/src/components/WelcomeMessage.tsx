@@ -48,6 +48,7 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
   const [ethName, setEthName] = useState<string | null>(null);
   const [isLoadingEthName, setIsLoadingEthName] = useState(false);
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -198,24 +199,96 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
   };
 
   // Handle disconnect
-  const handleDisconnect = () => {
-    if (isEphemeralConnection) {
-      disconnectXMTP();
-      localStorage.removeItem(XMTP_CONNECTION_TYPE_KEY);
-      localStorage.removeItem(XMTP_EPHEMERAL_KEY);
+  const handleDisconnect = async () => {
+    try {
+      // Show loading immediately for better UX
+      setIsDisconnecting(true);
+      
+      console.log("🔄 Starting disconnect from WelcomeMessage...");
+      
+      // 1. Disconnect services first
+      if (isEphemeralConnection) {
+        disconnectXMTP();
+      } else {
+        disconnectWallet();
+        disconnectXMTP();
+      }
+
+      // 2. Clear ALL relevant localStorage comprehensively
+      console.log("🧹 Clearing localStorage comprehensively...");
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (
+          key.startsWith('xmtp:') || 
+          key.startsWith('xmtp.') ||
+          key.startsWith('wagmi') || 
+          key.startsWith('WCM_') ||
+          key.startsWith('wc@') ||
+          key.startsWith('fkey:') ||
+          key.includes('wallet') ||
+          key.includes('connect') ||
+          key.includes('ens') ||
+          key.includes('eth') ||
+          key.includes('address') ||
+          key.includes('signer') ||
+          key.includes('session') ||
+          key.includes('name')
+        )) {
+          keysToRemove.push(key);
+        }
+      }
+      
+      // Also remove specific keys that might not match patterns
+      const specificKeys = [
+        XMTP_CONNECTION_TYPE_KEY,
+        XMTP_EPHEMERAL_KEY,
+        'connectionType',
+        'lastConnectedAddress', 
+        'ensName',
+        'ensCache',
+        'ethName',
+        'userProfile',
+        'walletconnect',
+        'WALLETCONNECT_DEEPLINK_CHOICE',
+        'recentWalletChoice',
+        'connector',
+        'isConnected'
+      ];
+      
+      specificKeys.forEach(key => {
+        if (localStorage.getItem(key)) {
+          keysToRemove.push(key);
+        }
+      });
+
+      keysToRemove.forEach(key => {
+        localStorage.removeItem(key);
+        console.log(`🗑️ Removed: ${key}`);
+      });
+
+      // 3. Clear component state
       setEphemeralAddress("");
-    } else {
-      disconnectWallet();
-      disconnectXMTP();
+      setEthName(null);
+      setShowDropdown(false);
+
+      // 4. Clear session storage
+      try {
+        sessionStorage.clear();
+      } catch (e) {
+        console.warn("Could not clear sessionStorage:", e);
+      }
+
+      console.log("✅ Disconnect completed successfully");
+      
+      // 5. Force page reload immediately (no delay needed since we have loader)
+      window.location.href = window.location.origin + window.location.pathname;
+      
+    } catch (error) {
+      console.error("❌ Error during disconnect:", error);
+      // Force reload even if there's an error
+      window.location.reload();
     }
-    
-    // Clear all other connection-related localStorage items
-    localStorage.removeItem('fkey:jwt');
-    
-    setShowDropdown(false);
-    
-    // Navigate to home page to show login view
-    router.push('/');
   };
 
   // Don't render until mounted to prevent hydration issues
@@ -383,9 +456,10 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
                       <button
                         onClick={handleDisconnect}
                         className="w-full px-3 py-2 text-left text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-2 transition-colors text-sm"
+                        disabled={isDisconnecting}
                       >
                         <Settings className="w-4 h-4" />
-                        Disconnect
+                        {isDisconnecting ? "Disconnecting..." : "Disconnect"}
                       </button>
                     </div>
                   )}
@@ -395,6 +469,24 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
             </div>
         </div>
       </div>
+      
+      {/* Full-screen disconnect loader overlay */}
+      {isDisconnecting && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[9999] flex items-center justify-center">
+          <div className="bg-gray-900 border border-gray-700 rounded-lg p-8 flex flex-col items-center gap-4 max-w-sm mx-4">
+            <div className="relative">
+              <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />
+              <div className="absolute inset-0 w-8 h-8 border-2 border-blue-400/20 rounded-full animate-pulse" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-white font-medium text-lg mb-2">Disconnecting...</h3>
+              <p className="text-gray-400 text-sm">
+                Clearing connections and resetting state
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 } 
