@@ -61,13 +61,13 @@ export class StealthMonitorService {
   private processedEvents: Set<string> = new Set();
   private scanningPromises: Map<string, Promise<void>> = new Map();
   
-  // Optimized settings for maximum efficiency
+  // Optimized settings for hourly scanning to reduce log spam
   private readonly MAX_NOTIFICATIONS_PER_HOUR = 10;
   private readonly MIN_NOTIFICATION_INTERVAL = 5 * 60 * 1000; // 5 minutes
-  private readonly BASE_SCAN_INTERVAL = 30000; // 30 seconds base interval - reduced from 5 seconds  
-  private readonly MAX_SCAN_INTERVAL = 300000; // 5 minutes max interval - reduced from 1 minute
-  private readonly USER_REFRESH_INTERVAL = 30 * 60 * 1000; // 30 minutes - reduced from 2 minutes
-  private readonly MAX_BLOCK_RANGE = 3; // Conservative range for getLogs
+  private readonly BASE_SCAN_INTERVAL = 60 * 60 * 1000; // 1 HOUR base interval - reduced log spam
+  private readonly MAX_SCAN_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours max interval
+  private readonly USER_REFRESH_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours - reduced frequency
+  private readonly MAX_BLOCK_RANGE = 50; // Larger range since we scan less frequently
   private readonly PROCESSED_EVENTS_LIMIT = 10000; // Prevent memory leaks
   private readonly MAX_FAILURE_COUNT = 5;
 
@@ -95,8 +95,8 @@ export class StealthMonitorService {
           'https://rpc.ankr.com/eth',
           'https://eth.drpc.org'
         ],
-        scanInterval: this.BASE_SCAN_INTERVAL,
-        maxBlockRange: 2 // Conservative for mainnet
+        scanInterval: this.BASE_SCAN_INTERVAL, // 1 hour
+        maxBlockRange: this.MAX_BLOCK_RANGE // Larger range for hourly scans
       },
       {
         name: 'base',
@@ -106,30 +106,31 @@ export class StealthMonitorService {
           'https://mainnet.base.org',
           'https://base.drpc.org'
         ],
-        scanInterval: this.BASE_SCAN_INTERVAL,
+        scanInterval: this.BASE_SCAN_INTERVAL, // 1 hour
         maxBlockRange: this.MAX_BLOCK_RANGE
-      },
-      {
-        name: 'sepolia',
-        chain: sepolia,
-        rpcUrls: [
-          'https://ethereum-sepolia-rpc.publicnode.com',
-          'https://rpc.sepolia.org',
-          'https://sepolia.drpc.org'
-        ],
-        scanInterval: this.BASE_SCAN_INTERVAL * 2,
-        maxBlockRange: 5 // Testnets can handle more
-      },
-      {
-        name: 'baseSepolia',
-        chain: baseSepolia,
-        rpcUrls: [
-          'https://sepolia.base.org',
-          'https://base-sepolia-rpc.publicnode.com'
-        ],
-        scanInterval: this.BASE_SCAN_INTERVAL * 2,
-        maxBlockRange: 5
       }
+      // Disable testnets in production to reduce log spam
+      // {
+      //   name: 'sepolia',
+      //   chain: sepolia,
+      //   rpcUrls: [
+      //     'https://ethereum-sepolia-rpc.publicnode.com',
+      //     'https://rpc.sepolia.org',
+      //     'https://sepolia.drpc.org'
+      //   ],
+      //   scanInterval: this.BASE_SCAN_INTERVAL * 2, // 2 hours for testnets
+      //   maxBlockRange: 10
+      // },
+      // {
+      //   name: 'baseSepolia',
+      //   chain: baseSepolia,
+      //   rpcUrls: [
+      //     'https://sepolia.base.org',
+      //     'https://base-sepolia-rpc.publicnode.com'
+      //   ],
+      //   scanInterval: this.BASE_SCAN_INTERVAL * 2, // 2 hours for testnets
+      //   maxBlockRange: 10
+      // }
     ];
 
     for (const config of chainConfigs) {
@@ -464,9 +465,9 @@ export class StealthMonitorService {
     if (event.type === 'announcement') {
       const isRelevant = 
         event.address.toLowerCase() === user.address.toLowerCase() || // User sent stealth payment
-        (user.scanKeys && await this.isStealthAddressForUser(event.stealthAddress!, user.scanKeys)); // User received stealth payment
+        (user.scanKeys && event.stealthAddress && await this.isStealthAddressForUser(event.stealthAddress, user.scanKeys)); // User received stealth payment
       
-      return isRelevant;
+      return !!isRelevant;
     }
 
     // For registrations, check if it's the user's registration
@@ -556,9 +557,9 @@ export class StealthMonitorService {
           address: user.address,
           userId: user.userId,
           enabledNotifications: {
-            stealthPayments: Boolean(user.notificationPrefs?.stealthPayments ?? true),
-            stealthRegistrations: Boolean(user.notificationPrefs?.stealthRegistrations ?? true),
-            stealthAnnouncements: Boolean(user.notificationPrefs?.stealthAnnouncements ?? true),
+            stealthPayments: !!(user.notificationPrefs?.stealthPayments ?? true),
+            stealthRegistrations: !!(user.notificationPrefs?.stealthRegistrations ?? true),
+            stealthAnnouncements: !!(user.notificationPrefs?.stealthAnnouncements ?? true),
           },
           lastNotified: user.lastStealthNotification || 0,
           scanKeys: user.stealthScanKeys || []
