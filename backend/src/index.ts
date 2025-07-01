@@ -15,6 +15,7 @@ import {
   defaultInboxes,
   getDbPath,
   getEncryptionKeyFromHex,
+  resetXmtpDatabase,
   validateEnvironment,
 } from "./helper.js";
 import { env } from './config/env.js';
@@ -43,15 +44,15 @@ let dStealthAgent: DStealthAgent;
 // Track XMTP initialization errors for better error reporting
 let xmtpInitError: Error | null = null;
 
-// Initialize XMTP client
-const initializeXmtpClient = async () => {
+// Initialize XMTP client with retry logic
+const initializeXmtpClient = async (retryCount = 0, maxRetries = 3) => {
   try {
     // Create wallet signer and encryption key
     const signer = createSigner(WALLET_KEY);
     const dbEncryptionKey = getEncryptionKeyFromHex(ENCRYPTION_KEY);
     const dbPath = getDbPath(XMTP_ENV);
     
-    console.log("🔄 Initializing XMTP client...");
+    console.log(`🔄 Initializing XMTP client... (attempt ${retryCount + 1}/${maxRetries + 1})`);
     console.log("📁 Database path:", dbPath);
     console.log("🌍 Environment:", XMTP_ENV);
     
@@ -125,21 +126,48 @@ const initializeXmtpClient = async () => {
     // The client is initialized, even if group setup failed
     return;
   } catch (error) {
-    console.error("Failed to initialize XMTP client:", error);
+    console.error(`❌ Failed to initialize XMTP client (attempt ${retryCount + 1}):`, error);
     xmtpInitError = error instanceof Error ? error : new Error(String(error));
     
-    // In Vercel, we might want to continue without XMTP for API routes that don't need it
-    // Vercel has VERCEL=1, Render has RENDER environment variable  
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isInboxLogFull = errorMessage.includes("inbox log is full");
+    
+    // Platform detection
     const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true' || process.env.VERCEL_ENV;
     const isRender = process.env.RENDER === 'true' || process.env.RENDER_SERVICE_ID;
     
     console.log(`🔧 Platform: ${isVercel ? 'Vercel' : isRender ? 'Render' : 'Local'}`);
-    console.log(`🔧 Is Vercel: ${isVercel}`);
-    console.log(`🔧 Is Render: ${isRender}`);
+    
+    // Retry logic for "inbox log is full" error
+    if (isInboxLogFull && retryCount < maxRetries) {
+      const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 30000); // Exponential backoff, max 30s
+      console.log(`🔄 "Inbox log is full" error detected. Retrying in ${retryDelay}ms...`);
+      
+      // On final retry, reset the database to clear corruption
+      if (retryCount === maxRetries - 1) {
+        console.log(`🗑️ Final retry - attempting database reset to clear corruption...`);
+        const resetSuccess = resetXmtpDatabase(XMTP_ENV);
+        if (resetSuccess) {
+          console.log(`✅ Database reset successful, proceeding with final retry`);
+        } else {
+          console.log(`❌ Database reset failed, proceeding with final retry anyway`);
+        }
+      }
+      
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
+      
+      // Recursive retry
+      return initializeXmtpClient(retryCount + 1, maxRetries);
+    }
     
     if (isVercel) {
       console.warn("⚠️ XMTP client initialization failed in Vercel - API will work but XMTP features will be disabled");
       xmtpClient = null as any; // Set to null so we can check for it in routes
+      return; // Don't throw, let the server start
+    } else if (isRender) {
+      console.warn("⚠️ XMTP initialization failed, but server continues:", errorMessage);
+      xmtpClient = null as any; // Allow server to start without XMTP
       return; // Don't throw, let the server start
     }
     

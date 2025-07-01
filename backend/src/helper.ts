@@ -53,55 +53,68 @@ export const createSigner = (key: string): Signer => {
 };
 
 export const getDbPath = (env: string) => {
-  // Use /tmp for Vercel deployments, .data/xmtp for local development
-  const isVercel = process.env.VERCEL || process.env.NODE_ENV === 'production';
+  // Properly detect different deployment platforms
+  const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true' || process.env.VERCEL_ENV;
+  const isRender = process.env.RENDER === 'true' || process.env.RENDER_SERVICE_ID;
+  const isRailway = process.env.RAILWAY_ENVIRONMENT_NAME;
+  
+  console.log(`🔧 Platform Detection: Vercel=${isVercel}, Render=${isRender}, Railway=${isRailway}`);
   
   let volumePath: string;
+  
   if (isVercel) {
-    // Vercel allows writes to /tmp
+    // Vercel: Use ephemeral /tmp (no persistent storage available)
     volumePath = "/tmp/xmtp";
-    
-    // Create database directory if it doesn't exist (and we have permission)
-    try {
-      if (!fs.existsSync(volumePath)) {
-        fs.mkdirSync(volumePath, { recursive: true });
-      }
-    } catch (error) {
-      console.warn(`Could not create directory ${volumePath}:`, error);
-      // Use a direct file path in /tmp if directory creation fails
-      const dbPath = `/tmp/${env}-xmtp.db3`;
-      console.log(`Using fallback database path: ${dbPath}`);
-      return dbPath;
-    }
+    console.log("🚀 Using Vercel ephemeral storage");
+  } else if (isRender) {
+    // Render: Use persistent disk mounted at /data
+    volumePath = "/data/xmtp";
+    console.log("🔴 Using Render persistent storage");
+  } else if (isRailway) {
+    // Railway: Use volume mount path
+    volumePath = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/data/xmtp";
+    console.log("🚄 Using Railway persistent storage");
   } else {
-    // Local development - use Railway path or local .data
-    volumePath = process.env.RAILWAY_VOLUME_MOUNT_PATH ?? ".data/xmtp";
+    // Local development
+    volumePath = ".data/xmtp";
+    console.log("💻 Using local development storage");
+  }
+  
+  // Create database directory if it doesn't exist
+  try {
+    if (!fs.existsSync(volumePath)) {
+      fs.mkdirSync(volumePath, { recursive: true });
+      console.log(`✅ Created database directory: ${volumePath}`);
+    }
+  } catch (error) {
+    console.warn(`⚠️ Could not create directory ${volumePath}:`, error);
     
-    // Create database directory if it doesn't exist (and we have permission)
-    try {
-      if (!fs.existsSync(volumePath)) {
-        fs.mkdirSync(volumePath, { recursive: true });
-      }
-    } catch (error) {
-      console.warn(`Could not create directory ${volumePath}:`, error);
-      // Fallback to /tmp if directory creation fails
+    // Fallback logic based on platform
+    if (isVercel) {
+      // For Vercel, fallback to direct /tmp file
+      const dbPath = `/tmp/${env}-xmtp.db3`;
+      console.log(`🚀 Using Vercel fallback database path: ${dbPath}`);
+      return dbPath;
+    } else {
+      // For other platforms, try /tmp as last resort
       volumePath = "/tmp/xmtp";
       try {
-  if (!fs.existsSync(volumePath)) {
-    fs.mkdirSync(volumePath, { recursive: true });
-  }
+        if (!fs.existsSync(volumePath)) {
+          fs.mkdirSync(volumePath, { recursive: true });
+        }
+        console.log(`⚠️ Using fallback directory: ${volumePath}`);
       } catch (fallbackError) {
-        console.error("Failed to create fallback directory:", fallbackError);
+        console.error("❌ Failed to create fallback directory:", fallbackError);
         // Last resort - use current directory
         const dbPath = `./${env}-xmtp.db3`;
-        console.log(`Using current directory database path: ${dbPath}`);
+        console.log(`💾 Using current directory database path: ${dbPath}`);
         return dbPath;
       }
     }
   }
   
   const dbPath = `${volumePath}/${env}-xmtp.db3`;
-  console.log(`Using database path: ${dbPath}`);
+  console.log(`📁 Using database path: ${dbPath}`);
   return dbPath;
 };
 
@@ -112,6 +125,28 @@ export const generateEncryptionKeyHex = () => {
 
 export const getEncryptionKeyFromHex = (hex: string) => {
   return fromString(hex, "hex");
+};
+
+/**
+ * Reset XMTP database - use when database is corrupted
+ */
+export const resetXmtpDatabase = (env: string) => {
+  const dbPath = getDbPath(env);
+  console.log(`🗑️ Attempting to reset XMTP database at: ${dbPath}`);
+  
+  try {
+    if (fs.existsSync(dbPath)) {
+      fs.unlinkSync(dbPath);
+      console.log(`✅ Successfully deleted corrupted database: ${dbPath}`);
+      return true;
+    } else {
+      console.log(`ℹ️ Database file does not exist: ${dbPath}`);
+      return true;
+    }
+  } catch (error) {
+    console.error(`❌ Failed to delete database file ${dbPath}:`, error);
+    return false;
+  }
 };
 
 /**
