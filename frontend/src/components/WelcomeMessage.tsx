@@ -23,9 +23,10 @@ const XMTP_EPHEMERAL_KEY = "xmtp:ephemeralKey";
 
 interface WelcomeMessageProps {
   onShowEarningsChart?: () => void;
+  onBackendStatusChange?: (status: 'connected' | 'disconnected' | 'checking') => void;
 }
 
-export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
+export function WelcomeMessage({ onShowEarningsChart, onBackendStatusChange }: WelcomeMessageProps) {
   const { context } = useFrame();
   const { address, isConnected: isWalletConnected } = useAccount();
   const { disconnect: disconnectWallet } = useDisconnect();
@@ -89,7 +90,7 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
   
   const displayAddress = address || ephemeralAddress;
 
-  // Check backend status periodically
+  // Check backend status periodically - REDUCED frequency to prevent spam
   useEffect(() => {
     const checkBackendStatus = async () => {
       try {
@@ -100,22 +101,21 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
           },
         });
         
-        if (response.ok) {
-          setBackendStatus('connected');
-        } else {
-          setBackendStatus('disconnected');
-        }
+        const newStatus = response.ok ? 'connected' : 'disconnected';
+        setBackendStatus(newStatus);
+        onBackendStatusChange?.(newStatus);
       } catch (error) {
         setBackendStatus('disconnected');
+        onBackendStatusChange?.('disconnected');
       }
     };
 
-    // Check immediately and then every 5 minutes - reduced from 30 seconds
+    // Check immediately and then every 10 minutes - REDUCED from 5 to prevent spam
     checkBackendStatus();
-    const interval = setInterval(checkBackendStatus, 5 * 60 * 1000);
+    const interval = setInterval(checkBackendStatus, 10 * 60 * 1000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [onBackendStatusChange]);
 
   // Resolve ENS name
   useEffect(() => {

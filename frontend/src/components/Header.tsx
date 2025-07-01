@@ -29,7 +29,7 @@ export function Header({ onLogout, isConnected, onShowEarningsChart }: HeaderPro
   const { address, isConnected: walletConnected } = useAccount();
   const { disconnect: disconnectWallet } = useDisconnect();
   
-  // Modal states
+  // Modal states and backend status managed internally
   const [showSettings, setShowSettings] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
@@ -41,34 +41,10 @@ export function Header({ onLogout, isConnected, onShowEarningsChart }: HeaderPro
     setMounted(true);
   }, []);
 
-  // Check backend status periodically
-  useEffect(() => {
-    const checkBackendStatus = async () => {
-      try {
-        const response = await fetch('/api/agent/info', {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-        
-        if (response.ok) {
-          setBackendStatus('connected');
-        } else {
-          setBackendStatus('disconnected');
-        }
-      } catch (error) {
-        setBackendStatus('disconnected');
-      }
-    };
-
-    // Check immediately and then every 30 seconds
-    checkBackendStatus();
-    // Check every 5 minutes - reduced from 30 seconds to prevent Redis spam
-    const interval = setInterval(checkBackendStatus, 5 * 60 * 1000);
-
-    return () => clearInterval(interval);
-  }, []);
+  // Handle backend status changes from WelcomeMessage
+  const handleBackendStatusChange = (status: 'connected' | 'disconnected' | 'checking') => {
+    setBackendStatus(status);
+  };
 
   return (
     <>
@@ -104,7 +80,10 @@ export function Header({ onLogout, isConnected, onShowEarningsChart }: HeaderPro
         </div>
       </header>
 
-      <WelcomeMessage onShowEarningsChart={onShowEarningsChart} />
+      <WelcomeMessage 
+        onShowEarningsChart={onShowEarningsChart} 
+        onBackendStatusChange={handleBackendStatusChange}
+      />
 
       {/* Settings Modal */}
       <SettingsModal 

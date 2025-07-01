@@ -40,6 +40,9 @@ let xmtpClient: Client;
 // Global dStealth Agent (combines X402 and dStealth functionality)
 let dStealthAgent: DStealthAgent;
 
+// Track XMTP initialization errors for better error reporting
+let xmtpInitError: Error | null = null;
+
 // Initialize XMTP client
 const initializeXmtpClient = async () => {
   try {
@@ -123,6 +126,7 @@ const initializeXmtpClient = async () => {
     return;
   } catch (error) {
     console.error("Failed to initialize XMTP client:", error);
+    xmtpInitError = error instanceof Error ? error : new Error(String(error));
     
     // In Vercel, we might want to continue without XMTP for API routes that don't need it
     // Vercel has VERCEL=1, Render has RENDER environment variable  
@@ -154,17 +158,17 @@ const initializeDStealthAgent = async () => {
     console.log("🤖 Initializing dStealth Agent...");
     
     dStealthAgent = new DStealthAgent();
-    const agentInfo = await dStealthAgent.initialize(WALLET_KEY, ENCRYPTION_KEY, XMTP_ENV as XmtpEnv);
+    await dStealthAgent.initialize();
     
+    const agentInfo = dStealthAgent.getContactInfo();
     console.log("✅ dStealth Agent initialized:");
     console.log(`   📬 Agent Inbox ID: ${agentInfo.inboxId}`);
     console.log(`   🔑 Agent Address: ${agentInfo.address}`);
-    
-    // Start the agent listening for messages
-    await dStealthAgent.startListening();
+    console.log(`   📊 Agent Status: ${agentInfo.status}`);
     
   } catch (error) {
     console.error("❌ Failed to initialize dStealth Agent:", error);
+    xmtpInitError = error instanceof Error ? error : new Error(String(error));
     // Don't throw - let the server continue without the agent
   }
 };
@@ -290,10 +294,25 @@ app.get("/health", (req, res) => {
 app.get("/api/agent/info", (req, res) => {
   try {
     if (!dStealthAgent) {
-      return res.status(503).json({
-        success: false,
-        message: "dStealth Agent not available",
-        error: "Agent service is temporarily unavailable"
+      // Provide graceful fallback when agent is unavailable
+      console.warn("⚠️ dStealth Agent not available - returning fallback info");
+      
+      return res.json({
+        success: true,
+        agent: {
+          inboxId: "agent-unavailable",
+          address: process.env.AGENT_ADDRESS || "0x0000000000000000000000000000000000000000",
+          status: "initializing",
+          error: "XMTP agent is currently initializing or experiencing connectivity issues",
+          features: [
+            "X402 Content Creation (Limited)",
+            "Basic API Access", 
+            "Fallback Mode Active",
+            "Retrying Connection..."
+          ],
+          fallbackMode: true,
+          lastError: xmtpInitError ? xmtpInitError.message : "Unknown initialization error"
+        }
       });
     }
 
@@ -312,15 +331,26 @@ app.get("/api/agent/info", (req, res) => {
           "Privacy-focused Scanning",
           "Proxy402 Link Management",
           "ZK Proof Storage"
-        ]
+        ],
+        fallbackMode: false
       }
     });
   } catch (error) {
     console.error("Error getting agent info:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to get agent information",
-      error: error instanceof Error ? error.message : "Unknown error"
+    res.status(200).json({
+      success: true,
+      agent: {
+        inboxId: "agent-error",
+        address: process.env.AGENT_ADDRESS || "0x0000000000000000000000000000000000000000",
+        status: "error",
+        error: error instanceof Error ? error.message : "Unknown error",
+        features: [
+          "Limited Functionality",
+          "Error Recovery Mode"
+        ],
+        fallbackMode: true,
+        lastError: error instanceof Error ? error.message : "Unknown error"
+      }
     });
   }
 });

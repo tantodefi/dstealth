@@ -40,7 +40,7 @@ export interface NotificationPreferences {
 }
 
 export interface NotificationPayload {
-  type: 'milestone' | 'payment' | 'social' | 'fks_reward';
+  type: 'milestone' | 'payment' | 'social' | 'fks_reward' | 'stealth';
   title: string;
   body: string;
   targetUrl?: string;
@@ -125,7 +125,7 @@ export class NotificationClient {
       // Rate limiting - prevent spam
       const rateLimitKey = `notifications:ratelimit:${payload.userId}:${payload.type}`;
       const recentCount = await redis?.get(rateLimitKey);
-      if (recentCount && parseInt(recentCount) > 5) { // Max 5 per hour
+      if (recentCount && parseInt(String(recentCount)) > 5) { // Max 5 per hour
         return false;
       }
 
@@ -209,7 +209,7 @@ export class NotificationClient {
   // Get user notifications
   async getUserNotifications(userId: string, limit = 20): Promise<any[]> {
     const notifications = await redis?.lrange(`notifications:queue:${userId}`, 0, limit - 1);
-    return notifications.map(n => JSON.parse(n));
+    return notifications?.map(n => JSON.parse(String(n))) || [];
   }
 
   // Mark notification as read
@@ -239,6 +239,8 @@ export class NotificationClient {
         return preferences.enableSocial;
       case 'fks_reward':
         return preferences.enableFKSRewards;
+      case 'stealth':
+        return preferences.stealth;
       default:
         return true;
     }
@@ -268,7 +270,7 @@ export class NotificationClient {
   async getCachedMilestoneProgress(userId: string): Promise<Record<string, number> | null> {
     const key = `milestones:progress:${userId}`;
     const data = await redis?.get(key);
-    return data ? JSON.parse(data) : null;
+    return data ? JSON.parse(String(data)) : null;
   }
 
   // Store user activity stats for faster loading
@@ -280,7 +282,7 @@ export class NotificationClient {
   async getCachedUserStats(userId: string): Promise<any | null> {
     const key = `user:stats:${userId}`;
     const data = await redis?.get(key);
-    return data ? JSON.parse(data) : null;
+    return data ? JSON.parse(String(data)) : null;
   }
 
   // Send stealth payment received notification

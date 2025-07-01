@@ -30,12 +30,13 @@ interface StealthMetaData {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { address: string } }
+  { params }: { params: Promise<{ address: string }> }
 ) {
   try {
-    console.log('🔍 Stealth scan API called for address:', params.address);
+    const resolvedParams = await params;
+    console.log('🔍 Stealth scan API called for address:', resolvedParams.address);
     
-    const address = params.address;
+    const address = resolvedParams.address;
     if (!address || address.length < 10) {
       return Response.json({
         success: false,
@@ -219,14 +220,15 @@ function getEmptyMetadata(): StealthMetaData {
 // POST endpoint for announcing new stealth payments
 export async function POST(
   request: NextRequest,
-  { params }: { params: { address: string } }
+  { params }: { params: Promise<{ address: string }> }
 ) {
   try {
+    const resolvedParams = await params;
     const body = await request.json();
     const { stealthAddress, amount, currency, txHash, ephemeralPubKey, metadata } = body;
     
     console.log('📢 New stealth payment announcement:', {
-      from: params.address,
+      from: resolvedParams.address,
       to: stealthAddress,
       amount,
       currency
@@ -234,7 +236,7 @@ export async function POST(
     
     // Use our stealth notification manager to announce the payment
     await stealthNotificationManager.announceStealthPayment(
-      params.address,
+      resolvedParams.address,
       stealthAddress,
       amount,
       currency,
