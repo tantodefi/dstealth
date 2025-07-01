@@ -297,6 +297,8 @@ app.use(helmet());
 const allowedOrigins = process.env.NODE_ENV === 'production' 
   ? [
       env.FRONTEND_URL,
+      'https://dstealth.xyz',
+      'https://dstealth.vercel.app',
       'https://xmtp-mini-app-examples.vercel.app',
       'https://xmtp-mini-app-examples-git-main-tantodefi.vercel.app',
       'https://xmtp-mini-app-examples-tantodefi.vercel.app'

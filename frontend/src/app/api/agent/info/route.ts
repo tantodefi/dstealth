@@ -5,8 +5,8 @@ export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
   try {
-    // Get backend URL - adjust to correct port from logs
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:5001';
+    // Get backend URL - use the correct environment variable
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || process.env.BACKEND_URL || 'https://xmtp-mini-app-examples.onrender.com';
     
     console.log(`🔍 Proxying agent info request to: ${backendUrl}/api/agent/info`);
     
