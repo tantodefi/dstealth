@@ -280,11 +280,17 @@ export class StealthMonitorService {
     // Process blocks in small batches to avoid RPC limits
     let fromBlock = lastProcessed + 1n;
     const maxRange = BigInt(chainConfig.maxBlockRange);
+    let totalBlocks = 0;
+    let totalEvents = 0;
     
     while (fromBlock <= currentBlock && this.isRunning) {
       const toBlock = fromBlock + maxRange - 1n > currentBlock ? currentBlock : fromBlock + maxRange - 1n;
       
-      console.log(`🔍 Scanning ${chainName} blocks ${fromBlock} to ${toBlock}`);
+      // Only log scanning if there are many blocks to catch up
+      const blocksToScan = Number(currentBlock - lastProcessed);
+      if (blocksToScan > 100) {
+        console.log(`🔍 Scanning ${chainName} blocks ${fromBlock} to ${toBlock} (${blocksToScan} total blocks behind)`);
+      }
 
       try {
         // Parallel event scanning for both contracts
@@ -301,8 +307,10 @@ export class StealthMonitorService {
 
         await Promise.allSettled(eventPromises);
 
+        // Only log when events are found
         if (announcementLogs.length > 0 || registrationLogs.length > 0) {
           console.log(`📊 ${chainName}: ${announcementLogs.length} announcements, ${registrationLogs.length} registrations`);
+          totalEvents += announcementLogs.length + registrationLogs.length;
         }
 
       } catch (error) {
@@ -311,11 +319,17 @@ export class StealthMonitorService {
       }
 
       fromBlock = toBlock + 1n;
+      totalBlocks += Number(toBlock - fromBlock + 1n);
     }
 
     // Update last processed block
     chainConfig.lastProcessed = Number(currentBlock);
     await this.saveChainState(chainName, chainConfig.lastProcessed);
+    
+    // Log summary only if significant activity
+    if (totalBlocks > 50 || totalEvents > 0) {
+      console.log(`✅ ${chainName}: scanned ${totalBlocks} blocks, found ${totalEvents} stealth events`);
+    }
   }
 
   /**

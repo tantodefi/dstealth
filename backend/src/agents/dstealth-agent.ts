@@ -873,7 +873,7 @@ export class DStealthAgent {
 
 **If YES**: Just tell me your username (e.g. "tantodefi" for tantodefi.fkey.id)
 
-**If NO**: Say "no" and I'll send you a referral link to create one and start earning privacy rewards immediately!
+**If NO**: Say "no" and I'll send you an invite link to create one and start earning privacy rewards immediately!
 
 **After setup, I can help you with:**
 🔒 Generate anonymous payment links
@@ -926,7 +926,7 @@ export class DStealthAgent {
 
 This fkey.id doesn't exist yet. You can:
 
-1️⃣ **Create it yourself**: ${this.getFluidKeyReferralLink()}
+1️⃣ **Create it yourself**: ${this.getFluidKeyInviteLink()}
 2️⃣ **Try a different username**: Type another username
 3️⃣ **Get help**: Type /help for more options
 
@@ -983,7 +983,7 @@ ${this.getDStealthMiniAppLink()}
     return `🎁 **Perfect! Let's get you started with privacy rewards!**
 
 **Step 1: Create your FREE fkey.id**
-${this.getFluidKeyReferralLink()}
+${this.getFluidKeyInviteLink()}
 
 **🌟 Why You Need FluidKey/fkey.id:**
 - **FREE stealth address** for anonymous payments  
@@ -1009,7 +1009,7 @@ ${this.getFluidKeyReferralLink()}
 **Questions?** Type /help anytime!`;
   }
 
-  private getFluidKeyReferralLink(): string {
+  private getFluidKeyInviteLink(): string {
     return `🎁 **Create your fkey.id here**: https://app.fluidkey.com/?ref=62YNSG`;
   }
 
@@ -1128,7 +1128,7 @@ To access this feature, please:
 To create payment links, I need your fkey.id first!
 
 Please tell me your fkey.id username, or if you don't have one:
-${this.getFluidKeyReferralLink()}`;
+${this.getFluidKeyInviteLink()}`;
       }
 
       // Generate Daimo payment link
@@ -1536,7 +1536,7 @@ RESPONSE STYLE:
 
 **🔑 Quick Question: Do you have a fkey.id?**
 - **YES**: Tell me your username (e.g. "tantodefi")
-- **NO**: Say "no" and I'll send you a referral link!
+- **NO**: Say "no" and I'll send you an invite link!
 
 Type /help for full commands or let's get you started earning privacy rewards!`;
     }
