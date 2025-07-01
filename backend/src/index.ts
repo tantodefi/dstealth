@@ -294,10 +294,23 @@ const app = express();
 app.use(helmet());
 
 // Configure CORS based on environment
+const allowedOrigins = process.env.NODE_ENV === 'production' 
+  ? [
+      env.FRONTEND_URL,
+      'https://xmtp-mini-app-examples.vercel.app',
+      'https://xmtp-mini-app-examples-git-main-tantodefi.vercel.app',
+      'https://xmtp-mini-app-examples-tantodefi.vercel.app'
+    ].filter(Boolean)
+  : '*';
+
+console.log('🌐 CORS Configuration:', { 
+  nodeEnv: process.env.NODE_ENV, 
+  allowedOrigins,
+  frontendUrl: env.FRONTEND_URL 
+});
+
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' 
-    ? env.FRONTEND_URL 
-    : '*', // Allow all origins in development
+  origin: allowedOrigins,
   credentials: true
 };
 app.use(cors(corsOptions));

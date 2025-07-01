@@ -5,7 +5,7 @@ dotenv.config();
 
 const envSchema = z.object({
   PORT: z.string().default('5001'),
-  FRONTEND_URL: z.string().url().default('http://localhost:3000'),
+  FRONTEND_URL: z.string().url().default('https://xmtp-mini-app-examples.vercel.app'),
   
   // XMTP Configuration
   WALLET_KEY: z.string(),

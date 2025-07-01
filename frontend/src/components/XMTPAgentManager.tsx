@@ -42,9 +42,13 @@ export default function XMTPAgentManager() {
       setError(null);
 
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
+      console.log('🔍 Fetching agent info from:', `${backendUrl}/api/agent/info`);
+      
+      // Note: /api/agent/info is a public endpoint and doesn't require API secret
       const response = await fetch(`${backendUrl}/api/agent/info`, {
+        method: 'GET',
         headers: {
-          'X-API-SECRET': process.env.NEXT_PUBLIC_API_SECRET_KEY || 'development-secret-key'
+          'Content-Type': 'application/json'
         }
       });
 
