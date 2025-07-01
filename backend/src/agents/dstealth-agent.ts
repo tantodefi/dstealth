@@ -607,7 +607,51 @@ export class DStealthAgent {
       await this.client.conversations.sync();
       let finalConversations = await this.client.conversations.list();
 
-      // Add VERY aggressive periodic conversation sync to catch new conversations  
+      // Add immediate sync check after 10 seconds, then periodic every 30 seconds
+      setTimeout(async () => {
+        try {
+          console.log('🔄 Initial 10-second sync check for new conversations...');
+          await this.client!.conversations.sync();
+          const quickCheckConversations = await this.client!.conversations.list();
+          if (quickCheckConversations.length > finalConversations.length) {
+            console.log(`🆕 Quick check found ${quickCheckConversations.length - finalConversations.length} new conversations!`);
+            // Process the new conversations immediately
+            for (let i = finalConversations.length; i < quickCheckConversations.length; i++) {
+              const newConversation = quickCheckConversations[i];
+              try {
+                await newConversation.sync();
+                const messages = await newConversation.messages();
+                console.log(`📬 QUICK CHECK Conversation ${newConversation.id}: ${messages.length} messages`);
+                
+                // Process latest user message
+                if (messages.length > 0) {
+                  let latestUserMessage = null;
+                  for (let j = messages.length - 1; j >= 0; j--) {
+                    const message = messages[j];
+                    if (message.senderInboxId !== this.client!.inboxId) {
+                      latestUserMessage = message;
+                      break;
+                    }
+                  }
+                  
+                  if (latestUserMessage && !this.processedMessages.has(latestUserMessage.id)) {
+                    console.log(`🔄 Processing quick check message: "${latestUserMessage.content}"`);
+                    await this.processIncomingMessage(latestUserMessage);
+                    this.processedMessages.add(latestUserMessage.id);
+                  }
+                }
+              } catch (error) {
+                console.warn(`⚠️ Failed to process quick check conversation ${newConversation.id}:`, error);
+              }
+            }
+            finalConversations = quickCheckConversations;
+          }
+        } catch (error) {
+          console.warn('⚠️ Quick sync check failed:', error);
+        }
+      }, 10000); // 10 seconds after startup
+
+      // Regular periodic conversation sync to catch new conversations  
       const syncInterval = setInterval(async () => {
         try {
           console.log('🔄 Periodic conversation sync...');
@@ -677,7 +721,7 @@ export class DStealthAgent {
         } catch (syncError) {
           console.warn('⚠️ Periodic sync failed:', syncError);
         }
-      }, 300000); // Much less aggressive: every 5 minutes to avoid rate limits
+      }, 30000); // Every 30 seconds for production responsiveness
 
       // Cleanup interval on shutdown
       const originalShutdown = this.shutdown.bind(this);
