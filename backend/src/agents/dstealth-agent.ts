@@ -452,6 +452,10 @@ export class DStealthAgent {
   private readonly adminAddress = '0x7c40611372d354799d138542e77243c284e460b2';
   private contacts: Map<string, AgentContactInfo> = new Map();
   private isShuttingDown = false;
+  
+  // 🔥 NEW: Message deduplication to prevent infinite loops
+  private processedMessages: Set<string> = new Set();
+  private readonly MAX_PROCESSED_MESSAGES = 1000; // Keep last 1000 message IDs
 
   // Enhanced trigger patterns with better categorization
   private readonly triggerPatterns = {
@@ -501,58 +505,51 @@ export class DStealthAgent {
   };
 
   constructor() {
-    this.apiClient = new UnifiedApiClient(env.FRONTEND_URL || 'http://localhost:3000');
     this.contextManager = new ConversationContextManager();
     this.workerPool = new WorkerPoolManager();
     this.messageQueue = new MessageQueueManager();
-
-    // Periodic cleanup of old contexts
-    setInterval(() => {
-      if (!this.isShuttingDown) {
-        this.contextManager.cleanupOldContexts();
-      }
-    }, 60 * 60 * 1000); // Every hour
+    
+    const frontendURL = env.FRONTEND_URL || process.env.NEXT_PUBLIC_URL || 'http://localhost:3000';
+    this.apiClient = new UnifiedApiClient(frontendURL);
+    
+    console.log('🚀 dStealth Agent initialized');
   }
 
   async initialize(retryCount = 0, maxRetries = 3): Promise<void> {
     try {
-      console.log(`🔥 Initializing Enhanced dStealth Agent... (attempt ${retryCount + 1}/${maxRetries + 1})`);
+      console.log(`🚀 Initializing dStealth Agent (attempt ${retryCount + 1}/${maxRetries + 1})...`);
       
+      // Create signer and client
       const signer = createSigner(WALLET_KEY);
-      const dbEncryptionKey = getEncryptionKeyFromHex(ENCRYPTION_KEY);
+      const encryptionKey = getEncryptionKeyFromHex(ENCRYPTION_KEY);
       
-      // Store agent address for logging (from signer)
-      const identifier = await signer.getIdentifier();
-      this.agentAddress = identifier.identifier;
-      
-      // Initialize XMTP client
+      console.log('📱 Creating XMTP client...');
       this.client = await Client.create(signer, {
-        dbEncryptionKey,
+        dbEncryptionKey: encryptionKey,
         env: XMTP_ENV as XmtpEnv,
       });
 
-      console.log(`✅ Enhanced dStealth Agent initialized successfully!`);
-      console.log(`🏠 Agent Address: ${this.agentAddress}`);
-      console.log(`📬 Agent Inbox ID: ${this.client.inboxId}`);
-      console.log(`🆔 Agent Installation ID: ${this.client.installationId}`);
-      console.log(`🔧 Worker threads: Ready`);
-      console.log(`📊 Context management: Active`);
-      console.log(`🚀 Message queuing: Initialized`);
-      
+      // Store agent info
+      const identifier = signer.getIdentifier();
+      this.agentAddress = typeof identifier === 'object' && 'identifier' in identifier 
+        ? identifier.identifier 
+        : (await identifier).identifier;
+      console.log(`✅ Agent initialized successfully`);
+      console.log(`📧 Agent Address: ${this.agentAddress}`);
+      console.log(`🆔 Agent Inbox ID: ${this.client.inboxId}`);
+      console.log(`🌍 Environment: ${XMTP_ENV}`);
+
+      // Start listening for messages
       await this.startListening();
+
     } catch (error) {
-      console.error(`❌ Failed to initialize Enhanced dStealth Agent (attempt ${retryCount + 1}):`, error);
+      console.error(`❌ Initialization failed (attempt ${retryCount + 1}):`, error);
       
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const isInboxLogFull = errorMessage.includes("inbox log is full");
-      
-      // Retry logic for "inbox log is full" error
-      if (isInboxLogFull && retryCount < maxRetries) {
-        const retryDelay = Math.min(2000 * Math.pow(2, retryCount), 60000); // Exponential backoff, max 60s
-        console.log(`🔄 Agent "inbox log is full" error detected. Retrying in ${retryDelay}ms...`);
+      if (retryCount < maxRetries) {
+        const delay = Math.pow(2, retryCount) * 2000; // Exponential backoff: 2s, 4s, 8s
+        console.log(`⏳ Retrying in ${delay/1000}s...`);
         
-        // Wait before retrying
-        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        await new Promise(resolve => setTimeout(resolve, delay));
         
         // Recursive retry
         return this.initialize(retryCount + 1, maxRetries);
@@ -567,37 +564,81 @@ export class DStealthAgent {
       throw new Error('Client not initialized');
     }
 
-    console.log('🎧 Starting enhanced message listener...');
-    await this.client.conversations.sync();
+    console.log('🎧 Starting XMTP message listener...');
+    console.log(`🔍 Agent inbox ID: ${this.client.inboxId}`);
+    console.log(`🌍 XMTP Environment: ${process.env.XMTP_ENV || 'production'}`);
     
-    const stream = await this.client.conversations.streamAllMessages();
-    
-    for await (const message of stream) {
-      if (this.isShuttingDown) break;
+    try {
+      // Initial sync to get existing conversations
+      console.log('🔄 Initial conversation sync...');
+      await this.client.conversations.sync();
       
-      console.log(`📬 Received message:`, {
-        senderInboxId: message?.senderInboxId,
-        contentType: message?.contentType?.typeId,
-        content: message?.content,
-        conversationId: message?.conversationId
-      });
+      // 🔥 FIXED: Simplified stream processing without aggressive sync loops
+      console.log('🌊 Starting message stream...');
+      const messageStream = await this.client.conversations.streamAllMessages();
+      console.log('✅ Message stream created, listening for messages...');
       
-      // Skip own messages
-      if (message?.senderInboxId.toLowerCase() === this.client.inboxId.toLowerCase()) {
-        console.log(`⏭️ Skipping own message from ${message.senderInboxId}`);
-        continue;
-      }
+      let messageCount = 0;
+      
+      // Process message stream with deduplication
+      for await (const message of messageStream) {
+        if (this.isShuttingDown) {
+          break;
+        }
+        
+        messageCount++;
+        console.log(`📬 Received message #${messageCount}:`, {
+          senderInboxId: message?.senderInboxId,
+          content: message?.content,
+          conversationId: message?.conversationId,
+          sentAt: message?.sentAt,
+          messageId: message?.id
+        });
 
-      // Skip non-text messages
-      if (message?.contentType?.typeId !== 'text') {
-        console.log(`⏭️ Skipping non-text message type: ${message?.contentType?.typeId}`);
-        continue;
-      }
+        // 🔥 NEW: Message deduplication - prevent infinite loops
+        if (message?.id && this.processedMessages.has(message.id)) {
+          console.log(`⏭️ Skipping already processed message: ${message.id}`);
+          continue;
+        }
 
-      console.log(`✅ Processing valid message from ${message.senderInboxId}`);
+        // Skip own messages
+        if (message?.senderInboxId.toLowerCase() === this.client.inboxId.toLowerCase()) {
+          console.log(`⏭️ Skipping own message`);
+          continue;
+        }
+
+        // Skip non-text messages
+        if (message?.contentType?.typeId !== 'text') {
+          console.log(`⏭️ Skipping non-text message`);
+          continue;
+        }
+
+        // 🔥 NEW: Mark message as processed before processing
+        if (message?.id) {
+          this.processedMessages.add(message.id);
+          
+          // Keep processed messages list manageable
+          if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
+            const messagesArray = Array.from(this.processedMessages);
+            const keepMessages = messagesArray.slice(-this.MAX_PROCESSED_MESSAGES / 2);
+            this.processedMessages = new Set(keepMessages);
+          }
+        }
+
+        console.log(`✅ Processing new message from ${message.senderInboxId}`);
+        
+        // Process the message
+        try {
+          await this.processMessageEnhanced(message);
+          console.log(`✅ Message processed successfully`);
+        } catch (error) {
+          console.error(`❌ Error processing message:`, error);
+        }
+      }
       
-      // Process message with enhanced context and performance features
-      await this.processMessageEnhanced(message);
+    } catch (error) {
+      console.error('❌ Message listener error:', error);
+      throw error;
     }
   }
 
@@ -610,13 +651,13 @@ export class DStealthAgent {
       console.log(`📨 Processing message from ${senderInboxId}: "${messageContent}"`);
       console.log(`🔍 Conversation ID: ${conversationId}`);
 
-      // Simplify processing - skip complex context for now and go straight to message processing
+      // Process message directly with optimized logic
       let response: string;
       
       try {
-        // Process message directly with simpler logic
+        console.log(`🔄 Calling processMessage function...`);
         response = await this.processMessage(messageContent, senderInboxId);
-        console.log(`✅ Generated response: "${response.substring(0, 100)}..."`);
+        console.log(`✅ Generated response (length: ${response.length}): "${response.substring(0, 100)}..."`);
       } catch (processError) {
         console.error('❌ Error in processMessage:', processError);
         response = '🤖 Sorry, I encountered an error processing your message. Please try again or type "help" for assistance.';
@@ -631,25 +672,29 @@ export class DStealthAgent {
         return;
       }
       
-      console.log(`✅ Found conversation, sending response...`);
+      console.log(`✅ Found conversation, sending response (length: ${response.length})...`);
       
-      if (response) {
+      if (response && response.trim()) {
         try {
+          console.log(`🚀 Attempting to send response...`);
           await conversation.send(response);
           console.log(`✅ Response sent successfully to ${senderInboxId}`);
         } catch (sendError) {
           console.error('❌ Failed to send response:', sendError);
+          console.error('❌ Send error details:', sendError instanceof Error ? sendError.message : String(sendError));
           throw sendError;
         }
       } else {
-        console.warn('⚠️ No response generated for message');
+        console.warn('⚠️ No response generated for message (empty or null)');
       }
 
     } catch (error) {
       console.error('❌ Error processing enhanced message:', error);
+      console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
       
       // Send error response
       try {
+        console.log(`🔄 Attempting to send error response...`);
         const conversation = await this.client!.conversations.getConversationById(message.conversationId);
         if (conversation) {
           await conversation.send('🤖 Sorry, I encountered an error processing your message. Please try again or type "help" for assistance.');
@@ -730,43 +775,83 @@ export class DStealthAgent {
 
   // Keep all existing message processing logic intact
   private async processMessage(messageContent: string, senderInboxId: string): Promise<string> {
-    const trimmed = messageContent.trim();
-    
-    console.log(`🔍 Processing message: "${trimmed}"`);
-    
-    // Handle commands first
-    if (trimmed.startsWith('/')) {
-      console.log(`⚙️ Processing command: ${trimmed}`);
-      const response = await this.processCommand(trimmed, senderInboxId);
-      if (response) {
-        console.log(`✅ Command response generated`);
-        return response;
+    try {
+      const trimmed = messageContent.trim();
+      
+      console.log(`🔍 Processing message: "${trimmed}"`);
+      
+      // Handle commands first
+      if (trimmed.startsWith('/')) {
+        console.log(`⚙️ Processing command: ${trimmed}`);
+        const response = await this.processCommand(trimmed, senderInboxId);
+        if (response && response.trim()) {
+          console.log(`✅ Command response generated`);
+          return response;
+        }
       }
-    }
 
-    // Check for payment requests
-    const paymentMatch = this.extractPaymentAmount(trimmed);
-    if (paymentMatch) {
-      console.log(`💰 Payment request detected: $${paymentMatch.amount}`);
-      return await this.handlePaymentLinkRequest(paymentMatch.amount, senderInboxId);
-    }
+      // Check for payment requests
+      const paymentMatch = this.extractPaymentAmount(trimmed);
+      if (paymentMatch) {
+        console.log(`💰 Payment request detected: $${paymentMatch.amount}`);
+        const response = await this.handlePaymentLinkRequest(paymentMatch.amount, senderInboxId);
+        if (response && response.trim()) {
+          return response;
+        }
+      }
 
-    // Check if this looks like a fkey.id
-    if (this.isFkeyIdPattern(trimmed)) {
-      console.log(`🔑 fkey.id pattern detected`);
-      return await this.handleFkeyIdSubmission(trimmed, senderInboxId);
-    }
+      // Check if this looks like a fkey.id
+      if (this.isFkeyIdPattern(trimmed)) {
+        console.log(`🔑 fkey.id pattern detected`);
+        const response = await this.handleFkeyIdSubmission(trimmed, senderInboxId);
+        if (response && response.trim()) {
+          return response;
+        }
+      }
 
-    // Check for basic keywords
-    const basicResponse = this.processBasicKeywords(trimmed, senderInboxId);
-    if (basicResponse) {
-      console.log(`📝 Basic keyword response generated`);
-      return basicResponse;
-    }
+      // Check for basic keywords
+      const basicResponse = this.processBasicKeywords(trimmed, senderInboxId);
+      if (basicResponse && basicResponse.trim()) {
+        console.log(`📝 Basic keyword response generated`);
+        return basicResponse;
+      }
 
-    // For first-time users - simplified logic
-    console.log(`👋 Treating as first-time user`);
-    return await this.handleFirstTimeUser(senderInboxId);
+      // For first-time users - simplified logic
+      console.log(`👋 Treating as first-time user`);
+      const firstTimeResponse = await this.handleFirstTimeUser(senderInboxId);
+      if (firstTimeResponse && firstTimeResponse.trim()) {
+        return firstTimeResponse;
+      }
+
+      // GUARANTEED FALLBACK - this should never be reached but provides ultimate safety
+      console.warn(`⚠️ All processing failed, using guaranteed fallback for: "${trimmed}"`);
+      return this.getGuaranteedFallbackResponse();
+      
+    } catch (error) {
+      console.error(`❌ Error in processMessage for "${messageContent}":`, error);
+      // Even if everything fails, provide a helpful response
+      return this.getGuaranteedFallbackResponse();
+    }
+  }
+
+  // Guaranteed response that will always work - no async calls, no external dependencies
+  private getGuaranteedFallbackResponse(): string {
+    return `👋 **Hello! I'm the dStealth Agent**
+
+🤖 I help with privacy-focused Web3 tools and rewards!
+
+**🔧 Available Commands:**
+• **/help** - Full command list
+• **/scan <address>** - Check address privacy
+• **"tantodefi"** - Set your fkey.id username
+• **"no"** - If you don't have a fkey.id yet
+
+**💡 Quick Start:**
+1. Tell me your fkey.id username (like "tantodefi")
+2. Or say "no" if you need to create one
+3. Type **/help** for all available commands
+
+**Need help?** Just type **/help** and I'll show you everything I can do!`;
   }
 
   private async handleFirstTimeUser(senderInboxId: string): Promise<string> {
@@ -776,26 +861,28 @@ export class DStealthAgent {
 
       return `👋 **Welcome to dStealth!**
 
-🥷 **I'm your privacy-focused Web3 agent that helps you earn rewards for increasing your privacy!**
+🥷 **I'm your privacy-focused Web3 agent that helps you earn rewards for using stealth addresses and privacy tools!**
 
-**💰 Privacy = Rewards**
-- Earn points for using stealth addresses
-- Get FluidKey Score rewards
-- Privacy-enhanced transactions boost your earnings
-- Complete privacy challenges for bonus rewards
+**💰 How Privacy = Rewards**
+- Earn points for every stealth transaction
+- Build your FluidKey Score for better rewards
+- Complete privacy challenges for bonus earnings
+- Anonymous payments that protect your identity
 
-**📧 First, do you have a fkey.id?**
-- ✅ **Yes**: Tell me your username (e.g. "tantodefi" for tantodefi.fkey.id)
-- ❌ **No**: I'll send you an invite link to create one and start earning!
+**🔑 Quick Question: Do you have a fkey.id already?**
 
-**🔒 What I help with (after setup):**
-🔑 Stealth address lookup & management
-🕵️ Privacy scanning & scoring  
-💰 Anonymous payment links
-📡 Proxy402 content monetization
-🏆 Privacy rewards tracking
+**If YES**: Just tell me your username (e.g. "tantodefi" for tantodefi.fkey.id)
 
-**Type your fkey.id username or say "no" if you don't have one yet!**`;
+**If NO**: Say "no" and I'll send you a referral link to create one and start earning privacy rewards immediately!
+
+**After setup, I can help you with:**
+🔒 Generate anonymous payment links
+🕵️ Scan addresses for privacy scores  
+📊 Track your privacy earnings
+💰 Create monetized content links
+🏆 Complete privacy challenges
+
+**Ready to start earning? Tell me your fkey.id username or say "no" to get started!**`;
 
     } catch (error) {
       return '👋 Welcome to dStealth! I help with stealth addresses, privacy rewards, and Web3 anonymity. Type `/help` to see what I can do!';
@@ -829,11 +916,6 @@ export class DStealthAgent {
 
       if (!username) {
         return '❌ **Invalid username format**\nPlease provide a valid fkey.id username (3-20 characters, letters and numbers only)';
-      }
-
-      // Check if "no" response for no fkey.id
-      if (content.toLowerCase().includes('no') || content.toLowerCase().includes("don't have")) {
-        return this.handleNoFkeyId();
       }
 
       // Lookup the fkey.id to verify it exists
@@ -898,28 +980,31 @@ ${this.getDStealthMiniAppLink()}
   }
 
   private handleNoFkeyId(): string {
-    return `🔗 **Perfect! Let's get you earning privacy rewards!**
+    return `🎁 **Perfect! Let's get you started with privacy rewards!**
 
-**Step 1: Create your fkey.id**
+**Step 1: Create your FREE fkey.id**
 ${this.getFluidKeyReferralLink()}
 
-**🎯 What is FluidKey/fkey.id?**
-- Your personal Web3 privacy identity  
-- Stealth address for anonymous payments
-- FluidKey Score system for privacy rewards
-- Works across all chains and protocols
-- No KYC, fully decentralized
+**🌟 Why You Need FluidKey/fkey.id:**
+- **FREE stealth address** for anonymous payments  
+- **Privacy Score system** - earn rewards for being private
+- **Works on all chains** - Ethereum, Base, Polygon, etc.
+- **No KYC required** - fully decentralized and private
+- **Instant setup** - ready in under 2 minutes
 
-**💰 Privacy Rewards Benefits:**
-- Earn points for every stealth transaction
-- Higher FluidKey Scores = better rewards  
-- Privacy challenges and bonus opportunities
-- Anonymous payment processing fees
+**💰 Start Earning Immediately:**
+✅ Get points for every stealth transaction
+✅ Build your FluidKey Score for bigger rewards  
+✅ Complete privacy challenges for bonus earnings
+✅ Earn fees from anonymous payment processing
 
-**After creating your fkey.id:**
-1. Come back and tell me your username
-2. I'll help you access the dStealth mini app
-3. Complete setup and start earning privacy rewards!
+**🚀 Quick Setup Process:**
+1. **Click the link above** to create your fkey.id
+2. **Pick a username** (like "yourname" for yourname.fkey.id)
+3. **Come back here** and tell me your username
+4. **I'll unlock all features** and you start earning!
+
+**Ready to earn privacy rewards? Click the link and come back with your username!**
 
 **Questions?** Type /help anytime!`;
   }
@@ -1351,12 +1436,26 @@ ${linksList}
   }
 
   private shouldUseAI(content: string, context: ConversationContext): boolean {
+    const lowerContent = content.toLowerCase();
     const aiTriggers = ['what', 'how', 'why', 'explain', 'help me', 'can you', 'stealth', 'x402'];
-    return aiTriggers.some(trigger => content.includes(trigger));
+    const shouldUse = aiTriggers.some(trigger => lowerContent.includes(trigger));
+    
+    console.log(`🤖 AI Decision for "${content}":`, {
+      shouldUseAI: shouldUse,
+      triggers: aiTriggers.filter(trigger => lowerContent.includes(trigger)),
+      contentLength: content.length
+    });
+    
+    return shouldUse;
   }
 
   private async generateAIResponse(content: string, senderInboxId: string, context: ConversationContext): Promise<string | null> {
-    if (!this.openai) return null;
+    console.log(`🧠 Generating AI response for: "${content}"`);
+    
+    if (!this.openai) {
+      console.log(`❌ OpenAI client not initialized`);
+      return null;
+    }
 
     try {
       // Get user's stored data for personalized responses
@@ -1389,6 +1488,8 @@ RESPONSE STYLE:
 - Focus on privacy and Web3 best practices
 - Be helpful and educational about stealth addresses and crypto privacy`;
 
+      console.log(`📤 Making OpenAI request for: "${content.substring(0, 50)}..."`);
+      
       const completion = await this.openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages: [
@@ -1399,7 +1500,10 @@ RESPONSE STYLE:
         temperature: 0.7,
       });
 
-      return completion.choices[0]?.message?.content?.trim() || null;
+      const response = completion.choices[0]?.message?.content?.trim() || null;
+      console.log(`📥 OpenAI response: "${response?.substring(0, 100)}..."`);
+      
+      return response;
 
     } catch (error) {
       console.error('OpenAI API error:', error);
@@ -1408,17 +1512,40 @@ RESPONSE STYLE:
   }
 
   private processBasicKeywords(content: string, senderInboxId: string): string | null {
-    const lowerContent = content.toLowerCase();
+    const trimmed = content.toLowerCase().trim();
     
-    if (lowerContent.includes('hello') || lowerContent.includes('hi') || lowerContent.includes('hey')) {
-      return '👋 Hello! I\'m your dStealth privacy agent. Type /help to see what I can do or tell me your fkey.id username to get started!';
+    // Handle "no" response for users without fkey.id - multiple variations
+    if (trimmed === 'no' || 
+        trimmed === 'nope' || 
+        trimmed === 'no i don\'t' ||
+        trimmed === 'i don\'t have one' ||
+        trimmed === 'don\'t have fkey' ||
+        trimmed === 'no fkey' ||
+        trimmed.includes("don't have") ||
+        trimmed.includes("no fkey") ||
+        trimmed.includes("don't have fkey") ||
+        trimmed.includes("need to create")) {
+      return this.handleNoFkeyId();
+    }
+
+    // Handle greetings with better onboarding
+    if (trimmed.includes('hello') || trimmed.includes('hi') || trimmed.includes('hey')) {
+      return `👋 **Hello! I'm your dStealth privacy agent.**
+
+🥷 I help you earn rewards for using stealth addresses and privacy tools!
+
+**🔑 Quick Question: Do you have a fkey.id?**
+- **YES**: Tell me your username (e.g. "tantodefi")
+- **NO**: Say "no" and I'll send you a referral link!
+
+Type /help for full commands or let's get you started earning privacy rewards!`;
     }
     
-    if (lowerContent.includes('help')) {
+    if (trimmed.includes('help')) {
       return this.getHelpMessage();
     }
     
-    if (lowerContent.includes('privacy') || lowerContent.includes('stealth')) {
+    if (trimmed.includes('privacy') || trimmed.includes('stealth')) {
       return '🔒 I help with stealth addresses and privacy-focused Web3 transactions. Type /help for more details!';
     }
     
@@ -1502,6 +1629,27 @@ RESPONSE STYLE:
 
   async startListeningPublic(): Promise<void> {
     return this.startListening();
+  }
+
+  private async testXMTPConnection(): Promise<void> {
+    try {
+      console.log('🧪 Testing XMTP connection...');
+      
+      // Test basic client functionality
+      console.log(`🔍 Client inbox ID: ${this.client?.inboxId}`);
+      console.log(`🔍 Client installation ID: ${this.client?.installationId}`);
+      
+      // Test conversation listing
+      await this.client!.conversations.sync();
+      const conversations = await this.client!.conversations.list();
+      console.log(`📋 Initial conversations: ${conversations.length}`);
+      
+      console.log('✅ XMTP connection test passed');
+      
+    } catch (error) {
+      console.error('❌ XMTP connection test failed:', error);
+      // Don't throw - let the agent continue
+    }
   }
 }
 

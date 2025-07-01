@@ -806,7 +806,16 @@ void (async () => {
     });
 
     // Initialize XMTP in parallel (don't block server startup)
-    initializeXmtpClient().catch((error) => {
+    initializeXmtpClient().then(async () => {
+      // Initialize the dStealth Agent after XMTP client is ready
+      console.log("🤖 XMTP client ready, now initializing dStealth Agent...");
+      try {
+        await initializeDStealthAgent();
+        console.log("✅ dStealth Agent initialization completed");
+      } catch (error) {
+        console.error("⚠️ dStealth Agent initialization failed, but server continues:", error);
+      }
+    }).catch((error) => {
       console.error("⚠️ XMTP initialization failed, but server continues:", error);
       // Server continues to run without XMTP for API routes that don't need it
     });
