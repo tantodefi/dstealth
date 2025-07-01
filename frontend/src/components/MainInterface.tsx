@@ -15,6 +15,7 @@ import {
   ChevronUp
 } from "lucide-react";
 import Link from "next/link";
+import { useAccount } from "wagmi";
 import UserProfile from "./UserProfile";
 import { FkeySearch } from "./FkeySearch";
 import ViewerComponent from "./ViewerComponent";
@@ -31,6 +32,7 @@ import GroupChat from "@/examples/GroupChat";
 import { Stats } from "./Stats";
 import { DebugJWT } from './DebugJWT';
 import { ConvosSearch } from './ConvosSearch';
+import ProfileMenu from "./ProfileMenu";
 
 type ViewType = "main" | "agent" | "chat" | "receipts" | "x402" | "earnings" | "rewards" | "privacy" | "profile" | "viewer";
 
@@ -42,11 +44,36 @@ interface MainInterfaceProps {
 export default function MainInterface({ showEarningsChart, onCloseEarningsChart }: MainInterfaceProps) {
   const [currentView, setCurrentView] = useState<ViewType>("main");
   const [showActivityStats, setShowActivityStats] = useState(true);
+  const { address } = useAccount();
+
+  // Get current user address (either wallet or ephemeral)
+  const getCurrentUserAddress = () => {
+    if (address) return address;
+    
+    // Check for ephemeral address
+    const savedPrivateKey = localStorage.getItem("xmtp:ephemeralKey");
+    if (savedPrivateKey) {
+      try {
+        const { privateKeyToAccount } = require('viem/accounts');
+        const formattedKey = savedPrivateKey.startsWith("0x")
+          ? savedPrivateKey as `0x${string}`
+          : `0x${savedPrivateKey}` as `0x${string}`;
+        const account = privateKeyToAccount(formattedKey);
+        return account.address;
+      } catch (error) {
+        console.error("Error getting ephemeral address:", error);
+      }
+    }
+    
+    return null;
+  };
+
+  const currentAddress = getCurrentUserAddress();
 
   const renderCurrentView = () => {
     if (showEarningsChart) {
       return (
-        <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+        <div className="h-full mobile-scroll hide-scrollbar overflow-y-auto">
           <EarningsChart onClose={onCloseEarningsChart || (() => {})} />
         </div>
       );
@@ -55,14 +82,14 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
     switch (currentView) {
       case "agent":
         return (
-          <div className="space-y-4 mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+          <div className="h-full space-y-4 mobile-scroll hide-scrollbar overflow-y-auto">
             <BotChat />
             <XMTPAgentManager />
           </div>
         );
       case "chat":
         return (
-          <div className="space-y-4 mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+          <div className="h-full space-y-4 mobile-scroll hide-scrollbar overflow-y-auto">
             <TantoConvosChat />
             <div className="bg-gradient-to-r from-orange-900/20 to-red-900/20 border border-orange-600/30 rounded-lg p-4">
               <div className="flex items-center gap-3 mb-3">
@@ -77,49 +104,50 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
         );
       case "receipts":
         return (
-          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+          <div className="h-full mobile-scroll hide-scrollbar overflow-y-auto">
             <ZkReceipts />
           </div>
         );
       case "x402":
         return (
-          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+          <div className="h-full mobile-scroll hide-scrollbar overflow-y-auto">
             <X402TestComponent />
           </div>
         );
       case "earnings":
         return (
-          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+          <div className="h-full mobile-scroll hide-scrollbar overflow-y-auto">
             <EarningsChart onClose={() => setCurrentView("main")} />
           </div>
         );
       case "rewards":
         return (
-          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+          <div className="h-full mobile-scroll hide-scrollbar overflow-y-auto">
             <NinjaRewards />
           </div>
         );
       case "privacy":
         return (
-          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+          <div className="h-full mobile-scroll hide-scrollbar overflow-y-auto">
             <StealthScanner />
           </div>
         );
       case "profile":
         return (
-          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
-            <UserProfile address="0x0000000000000000000000000000000000000000" />
+          <div className="h-full space-y-4 mobile-scroll hide-scrollbar overflow-y-auto">
+            <ProfileMenu />
+            <UserProfile address={currentAddress || undefined} viewOnly={false} />
           </div>
         );
       case "viewer":
         return (
-          <div className="mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+          <div className="h-full mobile-scroll hide-scrollbar overflow-y-auto">
             <ViewerComponent />
           </div>
         );
       default:
         return (
-          <div className="space-y-4 mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
+          <div className="h-full space-y-4 mobile-scroll hide-scrollbar overflow-y-auto">
             {/* Always show search component prominently */}
             <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 rounded-lg p-4">
               <div className="flex items-center gap-3 mb-3">
@@ -274,7 +302,7 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
       </div>
       
       {/* Current view content - flex-1 with height constraint for proper scrolling */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 relative">
         {renderCurrentView()}
       </div>
     </div>

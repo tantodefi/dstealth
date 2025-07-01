@@ -5,8 +5,25 @@ interface UserData {
   bio?: string;
   avatar?: string;
   convosUsername?: string;
+  xmtpId?: string;
   jwtToken?: string;
   createdAt: string;
+  updatedAt: string;
+}
+
+interface ProfilePrivacySettings {
+  userId: string;
+  showEarnings: boolean;
+  showX402Links: boolean;
+  showPrivacyScore: boolean;
+  showStealthActions: boolean;
+  showActivityStats: boolean;
+  showConnectedIdentities: boolean;
+  showJoinDate: boolean;
+  showTotalViews: boolean;
+  showPurchaseHistory: boolean;
+  profileVisibility: 'public' | 'friends' | 'private';
+  allowDirectContact: boolean;
   updatedAt: string;
 }
 
@@ -114,6 +131,7 @@ class DatabaseService {
       bio: userData.bio || existingUser?.bio,
       avatar: userData.avatar || existingUser?.avatar,
       convosUsername: userData.convosUsername || existingUser?.convosUsername,
+      xmtpId: userData.xmtpId || existingUser?.xmtpId,
       jwtToken: userData.jwtToken || existingUser?.jwtToken,
       createdAt: existingUser?.createdAt || now,
       updatedAt: now,
@@ -344,6 +362,7 @@ class DatabaseService {
           fkeyId: userDetails.fkeyId,
           bio: userDetails.bio,
           avatar: userDetails.avatar,
+          xmtpId: userDetails.xmtpId,
         });
       } catch (error) {
         console.error('Failed to import user details:', error);
@@ -418,6 +437,71 @@ class DatabaseService {
     this.remove(userLinksKey);
     this.remove(this.getKey('privacy_stats', userId.toLowerCase()));
     this.remove(this.getKey('earnings_stats', userId.toLowerCase()));
+    this.remove(this.getKey('privacy_settings', userId.toLowerCase()));
+  }
+
+  // Privacy settings management
+  async createOrUpdatePrivacySettings(userId: string, settings: Partial<Omit<ProfilePrivacySettings, 'userId' | 'updatedAt'>>): Promise<ProfilePrivacySettings> {
+    const now = new Date().toISOString();
+    const existing = this.getPrivacySettings(userId);
+    
+    const privacySettings: ProfilePrivacySettings = {
+      userId: userId.toLowerCase(),
+      showEarnings: settings.showEarnings ?? existing?.showEarnings ?? false,
+      showX402Links: settings.showX402Links ?? existing?.showX402Links ?? true,
+      showPrivacyScore: settings.showPrivacyScore ?? existing?.showPrivacyScore ?? true,
+      showStealthActions: settings.showStealthActions ?? existing?.showStealthActions ?? false,
+      showActivityStats: settings.showActivityStats ?? existing?.showActivityStats ?? false,
+      showConnectedIdentities: settings.showConnectedIdentities ?? existing?.showConnectedIdentities ?? true,
+      showJoinDate: settings.showJoinDate ?? existing?.showJoinDate ?? true,
+      showTotalViews: settings.showTotalViews ?? existing?.showTotalViews ?? false,
+      showPurchaseHistory: settings.showPurchaseHistory ?? existing?.showPurchaseHistory ?? false,
+      profileVisibility: settings.profileVisibility ?? existing?.profileVisibility ?? 'public',
+      allowDirectContact: settings.allowDirectContact ?? existing?.allowDirectContact ?? true,
+      updatedAt: now,
+    };
+    
+    this.store(this.getKey('privacy_settings', userId.toLowerCase()), privacySettings);
+    return privacySettings;
+  }
+  
+  getPrivacySettings(userId: string): ProfilePrivacySettings | null {
+    return this.retrieve<ProfilePrivacySettings>(this.getKey('privacy_settings', userId.toLowerCase()));
+  }
+  
+  // Get filtered user data based on privacy settings (for public profiles)
+  getPublicUserProfile(userId: string): any {
+    const user = this.getUser(userId);
+    const privacySettings = this.getPrivacySettings(userId);
+    const userStats = this.calculateUserStats(userId);
+    const userLinks = this.getUserX402Links(userId);
+    
+    if (!user || privacySettings?.profileVisibility === 'private') {
+      return null;
+    }
+    
+    // Apply privacy filters
+    const publicProfile = {
+      address: userId,
+      username: user.ensName || `${userId.slice(0, 6)}...${userId.slice(-4)}`,
+      bio: user.bio || "Web3 enthusiast",
+      avatar: user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`,
+      ensName: user.ensName,
+      stats: {
+        totalLinks: privacySettings?.showX402Links !== false ? userStats.totalLinks : 0,
+        totalEarnings: privacySettings?.showEarnings === true ? userStats.totalEarnings : 0,
+        totalViews: privacySettings?.showTotalViews === true ? userStats.totalViews : 0,
+        totalPurchases: privacySettings?.showPurchaseHistory === true ? userStats.totalPurchases : 0,
+        privacyScore: privacySettings?.showPrivacyScore !== false ? userStats.privacyScore : 0,
+        stealthActions: privacySettings?.showStealthActions === true ? userStats.stealthActions : 0,
+      },
+      x402Links: privacySettings?.showX402Links !== false ? userLinks : [],
+      joinedDate: privacySettings?.showJoinDate !== false ? user.createdAt : null,
+      showConnectedIdentities: privacySettings?.showConnectedIdentities !== false,
+      allowDirectContact: privacySettings?.allowDirectContact !== false,
+    };
+    
+    return publicProfile;
   }
 }
 
@@ -431,4 +515,5 @@ export type {
   PaymentRecord,
   PrivacyStats,
   EarningsStats,
+  ProfilePrivacySettings,
 }; 

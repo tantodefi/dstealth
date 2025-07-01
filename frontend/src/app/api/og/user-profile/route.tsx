@@ -12,21 +12,46 @@ export async function GET(request: NextRequest) {
       return new Response('Missing address parameter', { status: 400 });
     }
 
-    // Validate Ethereum address format
-    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    // Validate Ethereum address format or ENS name
+    const isEthAddress = /^0x[a-fA-F0-9]{40}$/.test(address);
+    if (!isEthAddress && !address.includes('.')) {
       return new Response('Invalid address format', { status: 400 });
     }
 
-    const truncatedAddress = `${address.slice(0, 8)}...${address.slice(-6)}`;
+    const truncatedAddress = isEthAddress 
+      ? `${address.slice(0, 8)}...${address.slice(-6)}`
+      : address;
     
-    // In a real app, you'd fetch user data from your database here
-    // For now, we'll use mock data
-    const userData = {
-      username: `user_${address.slice(2, 8)}`,
+    // Fetch real user data from our API
+    let userData = {
+      username: isEthAddress ? `user_${address.slice(2, 8)}` : address.split('.')[0],
       fkeyId: `${address.slice(2, 8)}.fkey.id`,
-      linkCount: Math.floor(Math.random() * 10) + 1,
-      totalEarnings: (Math.random() * 1000).toFixed(2),
+      linkCount: 0,
+      totalEarnings: '0.00',
+      bio: 'Web3 enthusiast and content creator',
+      avatar: null,
+      farcasterProfile: null,
     };
+
+    try {
+      const profileRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/user/profile/${address}`);
+      if (profileRes.ok) {
+        const profileData = await profileRes.json();
+        if (profileData.success && profileData.profile) {
+          userData = {
+            username: profileData.profile.username,
+            fkeyId: profileData.profile.fkeyId || userData.fkeyId,
+            linkCount: profileData.profile.stats.totalContent,
+            totalEarnings: profileData.profile.stats.totalEarnings,
+            bio: profileData.profile.bio,
+            avatar: profileData.profile.avatar,
+            farcasterProfile: profileData.profile.farcasterProfile,
+          };
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to fetch user data for OG image:', error);
+    }
 
     return new ImageResponse(
       (

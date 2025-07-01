@@ -93,9 +93,16 @@ export default function X402TestComponent() {
       
       // Handle different response types
       if (response.status === 402) {
-        // Payment Required
-        const x402Data = await response.json();
-        setPaymentRequired(x402Data);
+        // Payment Required - check content type first
+        const contentType = response.headers.get('content-type');
+        let x402Data;
+        if (contentType && contentType.includes('application/json')) {
+          x402Data = await response.json();
+          setPaymentRequired(x402Data);
+        } else {
+          console.error('402 response is not JSON:', contentType);
+          x402Data = { error: 'X402 response returned non-JSON content' };
+        }
         
         setResponse({
           status: response.status,
@@ -232,7 +239,7 @@ export default function X402TestComponent() {
   };
 
   return (
-    <div className="space-y-6 mobile-scroll hide-scrollbar overflow-y-auto">
+    <div className="space-y-6">
       {/* Header */}
       <div className="bg-gradient-to-r from-green-900/20 to-blue-900/20 border border-green-600/30 rounded-lg p-6">
         <div className="flex items-center gap-3 mb-4">
@@ -267,15 +274,15 @@ export default function X402TestComponent() {
         </button>
         
         {showLinkCreator && (
-          <div className="px-6 pb-6">
+          <div className="px-6 pb-6" style={{ touchAction: 'pan-y' }}>
             {!isConnected ? (
               <div className="bg-yellow-900/20 border border-yellow-600/30 rounded-lg p-4 text-center">
                 <p className="text-yellow-400 text-white">Connect your wallet to create X402 payment links</p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-4" style={{ touchAction: 'pan-y' }}>
                 {/* Link Details */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4" style={{ touchAction: 'pan-y' }}>
                   <div>
                     <label className="block text-white text-sm font-medium mb-2">Content Title</label>
                     <input
@@ -440,9 +447,9 @@ export default function X402TestComponent() {
         </button>
         
         {showTestRequest && (
-          <div className="px-6 pb-6">
+          <div className="px-6 pb-6" style={{ touchAction: 'pan-y' }}>
             {/* Method and URL */}
-            <div className="space-y-3">
+            <div className="space-y-3" style={{ touchAction: 'pan-y' }}>
               <div className="flex gap-2">
                 <select
                   value={method}
@@ -550,8 +557,8 @@ export default function X402TestComponent() {
                 {/* Body */}
                 <div>
                   <h5 className="text-white font-medium mb-2">Body:</h5>
-                  <div className="bg-gray-800 rounded p-3 text-sm font-mono text-white max-h-64 overflow-y-auto">
-                    <pre>{JSON.stringify(response.body, null, 2)}</pre>
+                  <div className="bg-gray-800 rounded p-3 text-sm font-mono text-white">
+                    <pre className="whitespace-pre-wrap break-words">{JSON.stringify(response.body, null, 2)}</pre>
                   </div>
                 </div>
 

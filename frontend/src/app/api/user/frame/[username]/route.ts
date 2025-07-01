@@ -9,37 +9,35 @@ interface UserProfile {
   avatar?: string;
 }
 
-// Mock user data - replace with actual database/API call
+// Fetch real user data from database
 const getUserProfile = async (username: string): Promise<UserProfile | null> => {
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 100));
-  
-  // Mock data - in production, fetch from your database
-  const profiles: Record<string, UserProfile> = {
-    'alice': {
-      username: 'alice',
-      bio: 'Blockchain developer sharing DeFi insights and tutorials',
-      totalContent: 12,
-      totalEarnings: '45.67',
-      contentCount: 12,
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=alice'
-    },
-    'bob': {
-      username: 'bob',
-      bio: 'Crypto trader providing market analysis and strategies',
-      totalContent: 8,
-      totalEarnings: '23.45',
-      contentCount: 8,
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=bob'
+  try {
+    // Try to fetch from our user profile API
+    const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/user/profile/${username}`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success && data.profile) {
+        return {
+          username: data.profile.username,
+          bio: data.profile.bio,
+          totalContent: data.profile.stats.totalContent,
+          totalEarnings: data.profile.stats.totalEarnings,
+          contentCount: data.profile.stats.totalContent,
+          avatar: data.profile.avatar,
+        };
+      }
     }
-  };
+  } catch (error) {
+    console.warn('Failed to fetch user profile from API:', error);
+  }
 
-  return profiles[username.toLowerCase()] || {
+  // Fallback to basic profile
+  return {
     username: username,
     bio: 'Creative content creator sharing premium insights through X402 protocol',
-    totalContent: Math.floor(Math.random() * 20) + 1,
-    totalEarnings: (Math.random() * 100).toFixed(2),
-    contentCount: Math.floor(Math.random() * 15) + 1,
+    totalContent: 0,
+    totalEarnings: '0.00',
+    contentCount: 0,
     avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`
   };
 };

@@ -110,9 +110,9 @@ export function WelcomeMessage({ onShowEarningsChart }: WelcomeMessageProps) {
       }
     };
 
-    // Check immediately and then every 30 seconds
+    // Check immediately and then every 5 minutes - reduced from 30 seconds
     checkBackendStatus();
-    const interval = setInterval(checkBackendStatus, 30000);
+    const interval = setInterval(checkBackendStatus, 5 * 60 * 1000);
 
     return () => clearInterval(interval);
   }, []);

@@ -1,0 +1,18 @@
+{
+  "accountAssociation": {
+    "header": "PLACEHOLDER_HEADER",
+    "payload": "PLACEHOLDER_PAYLOAD", 
+    "signature": "PLACEHOLDER_SIGNATURE"
+  },
+  "frame": {
+    "version": "1",
+    "name": "dstealth",
+    "iconUrl": "https://dstealth.app/images/icon.png",
+    "homeUrl": "https://dstealth.app",
+    "imageUrl": "https://dstealth.app/api/og/default",
+    "buttonTitle": "🥷 Launch dstealth",
+    "splashImageUrl": "https://dstealth.app/images/icon.png",
+    "splashBackgroundColor": "#000000",
+    "webhookUrl": "https://dstealth.app/api/webhook/farcaster"
+  }
+} 

@@ -2,10 +2,14 @@ import { env } from "@/lib/env";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "X402 Protocol Mini App",
-  description: "A decentralized content payment and viewing application supporting the X402 protocol with XMTP messaging",
+  title: "dstealth: Private Payments & Content Creation",
+  description: "Create monetized content, send private payments, and earn rewards with stealth addresses. Built on XMTP and Base.",
   manifest: "/manifest.json",
-  themeColor: "#8b5cf6",
+  keywords: ["XMTP", "Base", "stealth payments", "content creation", "X402", "DeFi", "privacy", "cryptocurrency", "Farcaster", "Mini App"],
+  authors: [{ name: "dstealth team" }],
+  creator: "dstealth",
+  publisher: "dstealth",
+  themeColor: "#000000",
   colorScheme: "dark",
   viewport: {
     width: "device-width",
@@ -16,25 +20,65 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "X402 Protocol",
+    title: "dstealth",
   },
   formatDetection: {
     telephone: false,
   },
   openGraph: {
-    title: "X402 Protocol Mini App",
-    description: "Decentralized content payments with XMTP messaging",
+    title: "dstealth: Private Payments & Content Creation",
+    description: "Create monetized content, send private payments, and earn rewards with stealth addresses. Built on XMTP and Base.",
     type: "website",
-    siteName: "X402 Protocol",
+    siteName: "dstealth",
+    locale: "en_US",
+    images: [
+      {
+        url: "/api/og/default",
+        width: 1200,
+        height: 630,
+        alt: "dstealth - Private Payments & Content Creation",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "X402 Protocol Mini App",
-    description: "Decentralized content payments with XMTP messaging",
+    title: "dstealth: Private Payments & Content Creation",
+    description: "Create monetized content, send private payments, and earn rewards with stealth addresses. Built on XMTP and Base.",
+    images: ["/api/og/default"],
+    creator: "@dstealth",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
+  },
+  alternates: {
+    canonical: env.NEXT_PUBLIC_URL || 'https://dstealth.app',
   },
   other: {
-    "msapplication-TileColor": "#8b5cf6",
+    "msapplication-TileColor": "#000000",
     "msapplication-config": "/browserconfig.xml",
+    // Farcaster Mini App embed (default for all pages)
+    "fc:frame": JSON.stringify({
+      version: "next",
+      imageUrl: `${env.NEXT_PUBLIC_URL || 'https://dstealth.app'}/api/og/default`,
+      button: {
+        title: "🥷 Launch dstealth",
+        action: {
+          type: "launch_frame",
+          name: "dstealth",
+          url: env.NEXT_PUBLIC_URL || 'https://dstealth.app',
+          splashImageUrl: `${env.NEXT_PUBLIC_URL || 'https://dstealth.app'}/images/icon.png`,
+          splashBackgroundColor: "#000000"
+        }
+      }
+    }),
   },
-  metadataBase: new URL(env.NEXT_PUBLIC_URL || 'https://localhost:3000'),
+  metadataBase: new URL(env.NEXT_PUBLIC_URL || 'https://dstealth.app'),
 }; 

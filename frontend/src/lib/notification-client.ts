@@ -1,7 +1,27 @@
-import Redis from 'ioredis';
+import { Redis } from '@upstash/redis';
 
-// Redis client setup
-const redis = new Redis(process.env.REDIS_URL || process.env.UPSTASH_REDIS_REST_URL!);
+// Redis client setup with proper fallbacks
+let redis: Redis | null = null;
+
+try {
+  // Use NEXT_PUBLIC_ prefixed variables for client-side access
+  const redisUrl = process.env.NEXT_PUBLIC_UPSTASH_REDIS_REST_URL || process.env.UPSTASH_REDIS_REST_URL;
+  const redisToken = process.env.NEXT_PUBLIC_UPSTASH_REDIS_REST_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+  
+  if (redisUrl && redisToken) {
+    redis = new Redis({
+      url: redisUrl,
+      token: redisToken,
+    });
+    console.log('✅ Redis client initialized successfully');
+  } else {
+    console.log('⚠️ Redis environment variables not set - running in fallback mode');
+    console.log('Expected: NEXT_PUBLIC_UPSTASH_REDIS_REST_URL and NEXT_PUBLIC_UPSTASH_REDIS_REST_TOKEN');
+  }
+} catch (error) {
+  console.error('❌ Failed to initialize Redis client:', error);
+  redis = null;
+}
 
 export interface NotificationPreferences {
   userId: string;
@@ -10,6 +30,13 @@ export interface NotificationPreferences {
   enableSocial: boolean;
   enableFKSRewards: boolean;
   lastNotificationTime?: string;
+  farcaster: boolean;
+  achievements: boolean;
+  fkey: boolean;
+  payments: boolean;
+  weekly: boolean;
+  tokens: boolean;
+  stealth: boolean;
 }
 
 export interface NotificationPayload {
@@ -19,6 +46,20 @@ export interface NotificationPayload {
   targetUrl?: string;
   userId: string;
   data?: Record<string, any>;
+}
+
+export interface StealthNotificationData {
+  stealthAddress?: string;
+  ephemeralPublicKey?: string;
+  scanKey?: string;
+  spendKey?: string;
+  announcementIndex?: number;
+  registryAddress?: string;
+  isStealthPayment?: boolean;
+  scanTimestamp?: number;
+  scanType?: string;
+  announcementId?: string;
+  stealthType?: 'stealth_payment_received' | 'stealth_payment_sent' | 'stealth_address_registered' | 'stealth_scan_complete';
 }
 
 export class NotificationClient {
@@ -34,27 +75,42 @@ export class NotificationClient {
   // Store user notification preferences
   async setUserPreferences(preferences: NotificationPreferences): Promise<void> {
     const key = `notifications:preferences:${preferences.userId}`;
-    await redis.setex(key, 86400 * 30, JSON.stringify(preferences)); // 30 days
+    await redis?.set(key, JSON.stringify(preferences), { ex: 86400 * 30 }); // 30 days
   }
 
   // Get user notification preferences
   async getUserPreferences(userId: string): Promise<NotificationPreferences | null> {
-    const key = `notifications:preferences:${userId}`;
-    const data = await redis.get(key);
-    return data ? JSON.parse(data) : null;
+    if (!redis) return null;
+    try {
+      const key = `notifications:preferences:${userId}`;
+      const data = await redis.get(key);
+      return data ? JSON.parse(data as string) : null;
+    } catch (error) {
+      console.error('Failed to get user preferences:', error);
+      return null;
+    }
   }
 
   // Add user to notification list
   async addUserToNotifications(userId: string, fcid?: string): Promise<void> {
-    const userData = {
-      userId,
-      fcid,
-      addedAt: new Date().toISOString(),
-      lastActive: new Date().toISOString()
-    };
+    if (!redis) {
+      console.log('⚠️ Redis not available - skipping user notification setup');
+      return;
+    }
     
-    await redis.sadd('notifications:users', userId);
-    await redis.setex(`notifications:user:${userId}`, 86400 * 30, JSON.stringify(userData));
+    try {
+      const userData = {
+        userId,
+        fcid,
+        addedAt: new Date().toISOString(),
+        lastActive: new Date().toISOString()
+      };
+      
+      await redis.sadd('notifications:users', userId);
+      await redis.set(`notifications:user:${userId}`, JSON.stringify(userData), { ex: 86400 * 30 });
+    } catch (error) {
+      console.error('Failed to add user to notifications:', error);
+    }
   }
 
   // Send notification to user
@@ -68,7 +124,7 @@ export class NotificationClient {
 
       // Rate limiting - prevent spam
       const rateLimitKey = `notifications:ratelimit:${payload.userId}:${payload.type}`;
-      const recentCount = await redis.get(rateLimitKey);
+      const recentCount = await redis?.get(rateLimitKey);
       if (recentCount && parseInt(recentCount) > 5) { // Max 5 per hour
         return false;
       }
@@ -82,12 +138,12 @@ export class NotificationClient {
         read: false
       };
 
-      await redis.lpush(`notifications:queue:${payload.userId}`, JSON.stringify(notification));
-      await redis.ltrim(`notifications:queue:${payload.userId}`, 0, 99); // Keep last 100
+      await redis?.lpush(`notifications:queue:${payload.userId}`, JSON.stringify(notification));
+      await redis?.ltrim(`notifications:queue:${payload.userId}`, 0, 99); // Keep last 100
 
       // Update rate limit
-      await redis.incr(rateLimitKey);
-      await redis.expire(rateLimitKey, 3600); // 1 hour
+      await redis?.incr(rateLimitKey);
+      await redis?.expire(rateLimitKey, 3600); // 1 hour
 
       // Send to webhook if configured
       if (process.env.NOTIFICATION_WEBHOOK_URL) {
@@ -152,7 +208,7 @@ export class NotificationClient {
 
   // Get user notifications
   async getUserNotifications(userId: string, limit = 20): Promise<any[]> {
-    const notifications = await redis.lrange(`notifications:queue:${userId}`, 0, limit - 1);
+    const notifications = await redis?.lrange(`notifications:queue:${userId}`, 0, limit - 1);
     return notifications.map(n => JSON.parse(n));
   }
 
@@ -164,9 +220,9 @@ export class NotificationClient {
     );
     
     // Clear and rebuild list
-    await redis.del(`notifications:queue:${userId}`);
+    await redis?.del(`notifications:queue:${userId}`);
     for (const notification of updatedNotifications.reverse()) {
-      await redis.lpush(`notifications:queue:${userId}`, JSON.stringify(notification));
+      await redis?.lpush(`notifications:queue:${userId}`, JSON.stringify(notification));
     }
   }
 
@@ -206,24 +262,75 @@ export class NotificationClient {
   // Cache milestone progress to reduce computation
   async cacheMilestoneProgress(userId: string, progress: Record<string, number>): Promise<void> {
     const key = `milestones:progress:${userId}`;
-    await redis.setex(key, 3600, JSON.stringify(progress)); // 1 hour cache
+    await redis?.setex(key, 3600, JSON.stringify(progress)); // 1 hour cache
   }
 
   async getCachedMilestoneProgress(userId: string): Promise<Record<string, number> | null> {
     const key = `milestones:progress:${userId}`;
-    const data = await redis.get(key);
+    const data = await redis?.get(key);
     return data ? JSON.parse(data) : null;
   }
 
   // Store user activity stats for faster loading
   async cacheUserStats(userId: string, stats: any): Promise<void> {
     const key = `user:stats:${userId}`;
-    await redis.setex(key, 1800, JSON.stringify(stats)); // 30 minutes cache
+    await redis?.setex(key, 1800, JSON.stringify(stats)); // 30 minutes cache
   }
 
   async getCachedUserStats(userId: string): Promise<any | null> {
     const key = `user:stats:${userId}`;
-    const data = await redis.get(key);
+    const data = await redis?.get(key);
     return data ? JSON.parse(data) : null;
+  }
+
+  // Send stealth payment received notification
+  async sendStealthPaymentNotification(userId: string, amount: string, currency: string, stealthAddress: string): Promise<void> {
+    await this.sendNotification({
+      type: 'payment',
+      title: '🥷💰 Stealth Payment Received!',
+      body: `${amount} ${currency} received via stealth address. Privacy protected!`,
+      targetUrl: `${process.env.NEXT_PUBLIC_URL}?tab=privacy`,
+      userId,
+      data: {
+        amount,
+        currency,
+        stealthAddress,
+        isStealthPayment: true,
+        timestamp: Date.now()
+      }
+    });
+  }
+
+  // Send stealth scan complete notification
+  async sendStealthScanNotification(userId: string, foundPayments: number, scannedBlocks: number): Promise<void> {
+    await this.sendNotification({
+      type: 'milestone',
+      title: '🔍🥷 Stealth Scan Complete',
+      body: `Scanned ${scannedBlocks} blocks, found ${foundPayments} stealth payments`,
+      targetUrl: `${process.env.NEXT_PUBLIC_URL}?tab=privacy`,
+      userId,
+      data: {
+        foundPayments,
+        scannedBlocks,
+        scanType: 'stealth_registry',
+        timestamp: Date.now()
+      }
+    });
+  }
+
+  // Send stealth address registered notification  
+  async sendStealthRegistrationNotification(userId: string, stealthMetaAddress: string): Promise<void> {
+    await this.sendNotification({
+      type: 'milestone',
+      title: '🔐🥷 Stealth Address Registered',
+      body: 'Your stealth meta-address has been registered onchain. Privacy enhanced!',
+      targetUrl: `${process.env.NEXT_PUBLIC_URL}?tab=privacy`,
+      userId,
+      data: {
+        stealthMetaAddress,
+        registrationType: 'stealth_registry',
+        timestamp: Date.now()
+      }
+    });
   }
 } 

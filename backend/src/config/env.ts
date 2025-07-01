@@ -25,7 +25,23 @@ const envSchema = z.object({
   }),
   RECLAIM_APP_SECRET: z.string({
     required_error: "RECLAIM_APP_SECRET is required. Get it from https://docs.reclaimprotocol.org/"
-  })
+  }),
+
+  // dStealth Agent Configuration
+  OPENAI_API_KEY: z.string().optional(),
+  
+  // AgentKit Configuration
+  CDP_API_KEY_NAME: z.string().optional(),
+  CDP_API_KEY_PRIVATE_KEY: z.string().optional(),
+  CDP_WALLET_DATA: z.string().optional(),
+  
+  // Proxy402 Configuration
+  PROXY402_JWT_SECRET: z.string().optional(),
+  
+  // Redis/Upstash Configuration
+  REDIS_URL: z.string().optional(),
+  UPSTASH_REDIS_REST_URL: z.string().optional(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
 });
 
 const env = envSchema.parse(process.env);

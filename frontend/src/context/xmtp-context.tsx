@@ -18,6 +18,7 @@ import { useAccount, useSignMessage } from "wagmi";
 import { createEOASigner, createSCWSigner, createEphemeralSigner } from "@/lib/xmtp";
 import { env as envConfig } from "@/lib/env";
 import { useFrame } from "./frame-context";
+import { NotificationClient } from "@/lib/notification-client";
 
 // Type definitions
 export type InitializeClientOptions = {
@@ -181,6 +182,9 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
     }
   });
 
+  // Initialize notification client
+  const notificationClient = useMemo(() => NotificationClient.getInstance(), []);
+
   // Load connection type from storage on mount
   useEffect(() => {
     const savedConnectionType = storage.get(STORAGE_KEYS.CONNECTION_TYPE);
@@ -228,6 +232,96 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
       setGroupConversation(null);
     }
   }, [client]);
+
+  // Helper function to create user record in Redis
+  const createUserRecord = useCallback(async (client: Client, userAddress?: string) => {
+    try {
+      const inboxId = client.inboxId;
+      const effectiveAddress = userAddress || address;
+      
+      if (!effectiveAddress || !inboxId) {
+        console.log("No address or inbox ID available for user record creation");
+        return;
+      }
+
+      console.log("Creating user record in Redis:", { inboxId, address: effectiveAddress });
+
+      // 🎯 CRITICAL FIX: Store user data in localStorage database first
+      try {
+        const { database } = await import('@/lib/database');
+        await database.createOrUpdateUser({
+          address: effectiveAddress,
+          xmtpId: inboxId,
+          createdAt: new Date().toISOString(),
+        });
+        console.log("✅ User data stored in localStorage database");
+      } catch (error) {
+        console.error("❌ Failed to store user data in localStorage:", error);
+      }
+
+      // Add user to notifications system with proper error handling
+      try {
+        await notificationClient.addUserToNotifications(inboxId, undefined);
+      } catch (error) {
+        console.warn("Failed to add user to notifications (Redis may not be configured):", error);
+      }
+
+      // Set default preferences with error handling
+      try {
+        await notificationClient.setUserPreferences({
+          userId: inboxId,
+          enableMilestones: true,
+          enablePayments: true,
+          enableSocial: true,
+          enableFKSRewards: true,
+          lastNotificationTime: new Date().toISOString(),
+          farcaster: false,
+          achievements: false,
+          fkey: false,
+          payments: false,
+          weekly: false,
+          tokens: false,
+          stealth: false,
+        });
+      } catch (error) {
+        console.warn("Failed to set user preferences (Redis may not be configured):", error);
+      }
+
+      // Store user activity stats for stats dashboard with error handling
+      try {
+        await notificationClient.cacheUserStats(inboxId, {
+          totalLinks: 0,
+          totalPurchases: 0,
+          totalRevenue: 0,
+          joinedAt: new Date().toISOString(),
+          lastActive: new Date().toISOString(),
+          xmtpAddress: effectiveAddress,
+          connectionType: connectionType || 'unknown'
+        });
+      } catch (error) {
+        console.warn("Failed to cache user stats (Redis may not be configured):", error);
+      }
+
+      // Store in localStorage for quick access
+      try {
+        localStorage.setItem('user:lastLogin', new Date().toISOString());
+        localStorage.setItem('user:inboxId', inboxId);
+        localStorage.setItem('user:address', effectiveAddress);
+        localStorage.setItem('user:connectionType', connectionType || 'unknown');
+        
+        // Update session tracking
+        localStorage.setItem('session:started', new Date().toISOString());
+      } catch (storageError) {
+        console.warn("Could not update localStorage:", storageError);
+      }
+
+      console.log("✅ User record created successfully");
+      
+    } catch (error) {
+      console.error("❌ Failed to create user record:", error);
+      // Don't throw - continue even if user record creation fails
+    }
+  }, [address, connectionType, notificationClient]);
 
   const initialize = useCallback(
     async ({
@@ -389,6 +483,9 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
             if (address) {
               lastAddressRef.current = address;
             }
+
+            // 🎯 NEW: Create user record in Redis
+            await createUserRecord(newClient, address || undefined);
             
             return newClient;
           } else {
@@ -441,7 +538,7 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
       globalInitializationPromise = initPromise;
       return initPromise;
     },
-    [address, connector?.id, client, signMessageAsync, forceSCW]
+    [address, connector?.id, client, signMessageAsync, forceSCW, createUserRecord]
   );
 
   /**

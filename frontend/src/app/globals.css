@@ -91,6 +91,27 @@ body::-webkit-scrollbar {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Ensure form elements don't interfere with smooth scrolling */
+input, textarea, select, button {
+  touch-action: manipulation;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent form elements from blocking parent scroll */
+input:focus, textarea:focus, select:focus {
+  touch-action: manipulation;
+}
+
+/* Ensure form containers allow vertical scrolling */
+form, .space-y-4, .grid, .flex {
+  touch-action: pan-y;
+}
+
+/* Allow scrolling on collapsible content */
+[class*="px-"][class*="pb-"] {
+  touch-action: pan-y;
+}
+
 @layer base {
   :root {
     --background: 204 12.2% 91.96%;

@@ -5,248 +5,162 @@ import {
   type Milestone 
 } from '@/lib/farcaster-miniapp';
 
+// Farcaster Mini App Events
+type FarcasterEvent = 
+  | 'frame_added'
+  | 'frame_removed' 
+  | 'notifications_enabled'
+  | 'notifications_disabled';
+
+interface FrameNotificationDetails {
+  url: string;
+  token: string;
+}
+
+interface FarcasterWebhookPayload {
+  header: string;
+  payload: string;
+  signature: string;
+}
+
+interface EventPayload {
+  event: FarcasterEvent;
+  notificationDetails?: FrameNotificationDetails;
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body: FarcasterWebhookPayload = await request.json();
     
-    console.log('Farcaster webhook received:', {
-      type: body.type,
-      timestamp: body.timestamp,
-      user: body.data?.user?.fid || 'unknown'
+    // Decode the payload
+    const decodedPayload = Buffer.from(body.payload, 'base64url').toString();
+    const eventData: EventPayload = JSON.parse(decodedPayload);
+    
+    // Decode the header to get user info
+    const decodedHeader = Buffer.from(body.header, 'base64url').toString();
+    const headerData = JSON.parse(decodedHeader);
+    
+    console.log('📧 Farcaster Event Received:', {
+      event: eventData.event,
+      fid: headerData.fid,
+      timestamp: new Date().toISOString()
     });
 
-    // Handle different webhook events
-    switch (body.type) {
-      case 'app_notification_request':
-        return handleNotificationRequest(body);
-      case 'user_install':
-        return handleUserInstall(body);
-      case 'user_uninstall':
-        return handleUserUninstall(body);
-      case 'frame_interaction':
-        return handleFrameInteraction(body);
+    // Handle different event types
+    switch (eventData.event) {
+      case 'frame_added':
+        await handleFrameAdded(headerData.fid, eventData.notificationDetails);
+        break;
+        
+      case 'frame_removed':
+        await handleFrameRemoved(headerData.fid);
+        break;
+        
+      case 'notifications_enabled':
+        await handleNotificationsEnabled(headerData.fid, eventData.notificationDetails);
+        break;
+        
+      case 'notifications_disabled':
+        await handleNotificationsDisabled(headerData.fid);
+        break;
+        
       default:
-        console.log('Unknown webhook type:', body.type);
-        return NextResponse.json({ success: true });
+        console.warn('Unknown event type:', eventData.event);
     }
 
+    return NextResponse.json({ 
+      success: true, 
+      message: `Event ${eventData.event} processed successfully` 
+    });
+
   } catch (error) {
-    console.error('Farcaster webhook error:', error);
+    console.error('Webhook error:', error);
     return NextResponse.json(
-      { error: 'Webhook processing failed' },
+      { success: false, error: 'Webhook processing failed' },
       { status: 500 }
     );
   }
 }
 
-async function handleNotificationRequest(body: any) {
-  try {
-    const { user, trigger, data } = body.data || {};
-    
-    if (!user?.fid) {
-      return NextResponse.json({ error: 'User FID required' }, { status: 400 });
-    }
-
-    // Check if we should send this notification
-    const userStats = data?.activityStats || {};
-    const lastNotificationTime = data?.lastNotificationTime;
-    
-    if (!shouldSendNotification(trigger, userStats, lastNotificationTime)) {
-      return NextResponse.json({ 
-        success: true, 
-        notification_sent: false,
-        reason: 'Rate limited or not qualified'
-      });
-    }
-
-    let notification;
-    
-    switch (trigger) {
-      case NOTIFICATION_TRIGGERS.MILESTONE_ACHIEVED:
-        notification = createMilestoneNotification(data.milestone);
-      break;
-      case NOTIFICATION_TRIGGERS.FIRST_PAYMENT_RECEIVED:
-        notification = createFirstPaymentNotification(data.amount);
-      break;
-      case NOTIFICATION_TRIGGERS.WEEKLY_SUMMARY:
-        notification = createWeeklySummaryNotification(userStats);
-      break;
-      case NOTIFICATION_TRIGGERS.STEVEN_TOKENS_AVAILABLE:
-        notification = createStevenTokensNotification(data.tokenCount);
-      break;
-      default:
-        return NextResponse.json({ error: 'Unknown trigger' }, { status: 400 });
-    }
-
-    // Send notification via Farcaster API
-    const notificationResponse = await sendFarcasterNotification(user.fid, notification);
-    
-    return NextResponse.json({
-      success: true,
-      notification_sent: true,
-      notification_id: notificationResponse?.id
-    });
-
-  } catch (error) {
-    console.error('Notification request error:', error);
-    return NextResponse.json({ error: 'Failed to process notification' }, { status: 500 });
-  }
-}
-
-async function handleUserInstall(body: any) {
-  try {
-    const { user } = body.data || {};
-    
-    if (!user?.fid) {
-      return NextResponse.json({ error: 'User FID required' }, { status: 400 });
-    }
-
-    console.log('User installed X402 Mini App:', user.fid);
-    
-    // Send welcome notification after a short delay
-    setTimeout(async () => {
-      const welcomeNotification = {
-        title: "🎉 Welcome to X402 Protocol!",
-        body: "Start monetizing your content with crypto payments. Create your first X402 link now!",
-        targetUrl: `${process.env.NEXT_PUBLIC_URL}?tab=settings`,
-        icon: `${process.env.NEXT_PUBLIC_URL}/images/icon.png`
-      };
-      
-      await sendFarcasterNotification(user.fid, welcomeNotification);
-    }, 5000); // 5 second delay
-    
-    return NextResponse.json({ success: true });
-
-  } catch (error) {
-    console.error('User install error:', error);
-    return NextResponse.json({ error: 'Failed to process install' }, { status: 500 });
-  }
-}
-
-async function handleUserUninstall(body: any) {
-  try {
-    const { user } = body.data || {};
-    
-    if (user?.fid) {
-      console.log('User uninstalled X402 Mini App:', user.fid);
-      // Could track this for analytics
-    }
-    
-    return NextResponse.json({ success: true });
-
-  } catch (error) {
-    console.error('User uninstall error:', error);
-    return NextResponse.json({ error: 'Failed to process uninstall' }, { status: 500 });
-  }
-}
-
-async function handleFrameInteraction(body: any) {
-  try {
-    const { user, frame_data } = body.data || {};
-    
-    if (!user?.fid) {
-      return NextResponse.json({ error: 'User FID required' }, { status: 400 });
-    }
-
-    console.log('Frame interaction:', {
-      fid: user.fid,
-      button: frame_data?.button_index,
-      frame_url: frame_data?.frame_url?.substring(0, 100) + '...'
-    });
-    
-    // Track frame interactions for analytics
-    // Could trigger milestone checks here
-    
-    return NextResponse.json({ success: true });
-
-  } catch (error) {
-    console.error('Frame interaction error:', error);
-    return NextResponse.json({ error: 'Failed to process frame interaction' }, { status: 500 });
-  }
-}
-
-// Notification Creation Functions
-function createMilestoneNotification(milestone: Milestone) {
-  return {
-    title: milestone.notification.title,
-    body: milestone.notification.body,
-    targetUrl: milestone.notification.targetUrl || `${process.env.NEXT_PUBLIC_URL}?tab=rewards`,
-    icon: `${process.env.NEXT_PUBLIC_URL}/images/ninja-icon.png`
-  };
-}
-
-function createFirstPaymentNotification(amount: number) {
-  return {
-    title: "💰 First Payment Received!",
-    body: `Congratulations! You just earned $${(amount / 100).toFixed(2)} from your X402 content.`,
-    targetUrl: `${process.env.NEXT_PUBLIC_URL}?tab=stats`,
-    icon: `${process.env.NEXT_PUBLIC_URL}/images/payment-icon.png`
-  };
-}
-
-function createWeeklySummaryNotification(stats: any) {
-  const revenue = (stats.totalRevenue || 0) / 100;
-  return {
-    title: "📊 Weekly X402 Summary",
-    body: `This week: $${revenue.toFixed(2)} earned • ${stats.totalLinks || 0} links • ${stats.totalPurchases || 0} purchases`,
-    targetUrl: `${process.env.NEXT_PUBLIC_URL}?tab=stats`,
-    icon: `${process.env.NEXT_PUBLIC_URL}/images/stats-icon.png`
-  };
-}
-
-function createStevenTokensNotification(tokenCount: number) {
-  return {
-    title: "🥷 Tokens Ready!",
-    body: `You have ${tokenCount.toLocaleString()} 🥷 tokens waiting to be claimed!`,
-    targetUrl: `${process.env.NEXT_PUBLIC_URL}?tab=rewards`,
-    icon: `${process.env.NEXT_PUBLIC_URL}/images/🥷-icon.png`
-  };
-}
-
-// Send notification via Farcaster API
-async function sendFarcasterNotification(fid: string, notification: any) {
-  try {
-    // This would use the actual Farcaster API when available
-    // For now, we'll log the notification
-    console.log('Sending notification to FID:', fid, notification);
-    
-    // Mock response
-    return {
-      id: `notif_${Date.now()}`,
-      sent: true,
+async function handleFrameAdded(fid: number, notificationDetails?: FrameNotificationDetails) {
+  console.log('🎉 User added dstealth Mini App:', fid);
+  
+  if (notificationDetails) {
+    // Store notification token for this user
+    // In a real app, you'd save this to your database
+    console.log('📱 Notification details:', {
       fid,
-      notification
-    };
+      url: notificationDetails.url,
+      token: notificationDetails.token.slice(0, 8) + '...'
+    });
     
-    // Actual implementation would be:
-    // const response = await fetch('https://api.farcaster.xyz/v1/notifications', {
-    //   method: 'POST',
-    //   headers: {
-    //     'Authorization': `Bearer ${process.env.FARCASTER_API_KEY}`,
-    //     'Content-Type': 'application/json'
-    //   },
-    //   body: JSON.stringify({
-    //     fid,
-    //     ...notification
-    //   })
-    // });
-    // 
-    // return await response.json();
-
-  } catch (error) {
-    console.error('Failed to send Farcaster notification:', error);
-    throw error;
+    // Example: Store in database
+    // await database.storeNotificationToken(fid, notificationDetails);
+  }
+  
+  // Optional: Send welcome notification
+  if (notificationDetails) {
+    await sendWelcomeNotification(fid, notificationDetails);
   }
 }
 
-// Handle OPTIONS for CORS
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
+async function handleFrameRemoved(fid: number) {
+  console.log('👋 User removed dstealth Mini App:', fid);
+  
+  // Clean up user's notification tokens
+  // await database.removeNotificationTokens(fid);
+}
+
+async function handleNotificationsEnabled(fid: number, notificationDetails?: FrameNotificationDetails) {
+  console.log('🔔 Notifications enabled for user:', fid);
+  
+  if (notificationDetails) {
+    // Store new notification token
+    // await database.storeNotificationToken(fid, notificationDetails);
+  }
+}
+
+async function handleNotificationsDisabled(fid: number) {
+  console.log('🔕 Notifications disabled for user:', fid);
+  
+  // Remove notification tokens
+  // await database.removeNotificationTokens(fid);
+}
+
+async function sendWelcomeNotification(fid: number, notificationDetails: FrameNotificationDetails) {
+  try {
+    const notification = {
+      notificationId: `welcome_${fid}_${Date.now()}`,
+      title: 'Welcome to dstealth! 🥷',
+      body: 'Your privacy-first payment app is ready. Start earning with stealth addresses.',
+      targetUrl: 'https://dstealth.app/user',
+      tokens: [notificationDetails.token]
+    };
+
+    const response = await fetch(notificationDetails.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(notification)
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      console.log('✅ Welcome notification sent:', result);
+    } else {
+      console.error('❌ Failed to send welcome notification:', response.status);
+    }
+  } catch (error) {
+    console.error('❌ Welcome notification error:', error);
+  }
+}
+
+// Health check endpoint
+export async function GET() {
+  return NextResponse.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    service: 'farcaster-webhook'
   });
 }

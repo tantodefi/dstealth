@@ -3,12 +3,14 @@
 import { useState, useEffect } from "react";
 import { useAccount, useEnsName, useEnsAvatar } from 'wagmi';
 import { Button } from "@/components/Button";
-import { ExternalLink, Link as LinkIcon, Eye, Copy, Share, DollarSign, FileText, Shield } from 'lucide-react';
+import { ExternalLink, Link as LinkIcon, Eye, Copy, Share, DollarSign, FileText, Shield, User, MessageCircle } from 'lucide-react';
 import NotificationModal from './NotificationModal';
 import Link from 'next/link';
 import type { ZKReceipt } from './ZKReceiptCard';
 import { database } from '@/lib/database';
 import dynamic from 'next/dynamic';
+import DaimoPayButton from './DaimoPayButton';
+import ConvosChat from './ConvosChat';
 
 const ZKReceiptCard = dynamic(() => import('./ZKReceiptCard'), { ssr: false });
 
@@ -108,8 +110,9 @@ export default function UserProfile({ address: propAddress, viewOnly = false }: 
     title: '',
     message: ''
   });
+  const [showConvosChat, setShowConvosChat] = useState(false);
 
-  // Load real user data from working APIs
+  // Load real user data from working APIs and database
   useEffect(() => {
     const loadUserData = async () => {
       if (!targetAddress) {
@@ -120,20 +123,43 @@ export default function UserProfile({ address: propAddress, viewOnly = false }: 
       setLoading(true);
       
       try {
-        // Initialize with basic data
+        // Load data from local database first
+        const dbUser = database.getUser(targetAddress);
+        const dbStats = database.calculateUserStats(targetAddress);
+        const dbLinks = database.getUserX402Links(targetAddress);
+
+        // Initialize with database data if available
         let userData: Partial<UserData> = {
-          username: ensName || `${targetAddress.slice(0, 6)}...${targetAddress.slice(-4)}`,
-          bio: "Web3 enthusiast",
-          avatar: ensAvatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${targetAddress}`,
+          username: dbUser?.ensName || ensName || `${targetAddress.slice(0, 6)}...${targetAddress.slice(-4)}`,
+          bio: dbUser?.bio || "Web3 enthusiast", 
+          avatar: dbUser?.avatar || ensAvatar,
           stats: {
-            totalEarnings: 0,
-            totalLinks: 0,
-            privacyScore: 85,
-            stealthActions: 12
+            totalEarnings: dbStats.totalEarnings,
+            totalLinks: dbStats.totalLinks,
+            privacyScore: dbStats.privacyScore,
+            stealthActions: dbStats.stealthActions
           },
-          x402Links: [],
+          x402Links: dbLinks.map(link => ({
+            id: link.id,
+            title: link.title,
+            description: link.description,
+            price: link.price.toFixed(2),
+            currency: 'USDC',
+            linkType: link.linkType,
+            directUrl: link.directUrl,
+            proxyUrl: link.proxyUrl,
+            frameUrl: link.frameUrl,
+            ogImageUrl: link.ogImageUrl,
+            viewCount: link.viewCount,
+            purchaseCount: link.purchaseCount,
+            totalEarnings: link.totalEarnings,
+            isActive: link.isActive,
+            createdAt: link.createdAt,
+            network: 'Base',
+            x402Uri: `x402://base:${targetAddress}/${link.id}`
+          })),
           zkReceipts: [],
-          ensName: ensName || undefined,
+          ensName: dbUser?.ensName || ensName || undefined,
           ensAvatar: ensAvatar || undefined,
           proxy402Urls: [],
           address: targetAddress
@@ -146,6 +172,11 @@ export default function UserProfile({ address: propAddress, viewOnly = false }: 
             const baseNameData = await baseNameRes.json();
             if (baseNameData.length > 0) {
               userData.baseName = baseNameData[0].name;
+              // Update database with base name
+              await database.createOrUpdateUser({
+                address: targetAddress,
+                ensName: baseNameData[0].name
+              });
             }
           }
         } catch (error) {
@@ -154,93 +185,96 @@ export default function UserProfile({ address: propAddress, viewOnly = false }: 
 
         // Load Farcaster data from Neynar API
         try {
-          const farcasterRes = await fetch(`/api/farcaster/user-by-verification?address=${targetAddress}`);
+          const farcasterRes = await fetch(`/api/farcaster/search?q=${targetAddress}`);
           if (farcasterRes.ok) {
             const farcasterData = await farcasterRes.json();
-            if (farcasterData.users && farcasterData.users.length > 0) {
-              const farcasterUser = farcasterData.users[0];
+            if (farcasterData.result?.users && farcasterData.result.users.length > 0) {
+              const farcasterUser = farcasterData.result.users[0];
               userData = {
                 ...userData,
                 username: farcasterUser.username || userData.username,
                 bio: farcasterUser.profile?.bio?.text || userData.bio,
                 avatar: farcasterUser.pfp_url || userData.avatar,
                 farcasterProfile: {
-                  fid: farcasterUser.fid,
+                  fid: farcasterUser.fid.toString(),
                   username: farcasterUser.username,
                   displayName: farcasterUser.display_name,
                   bio: farcasterUser.profile?.bio?.text,
                   avatar: farcasterUser.pfp_url
                 }
               };
+
+              // Update database with Farcaster data
+              await database.createOrUpdateUser({
+                address: targetAddress,
+                bio: farcasterUser.profile?.bio?.text || userData.bio,
+                avatar: farcasterUser.pfp_url || userData.avatar
+              });
             }
           }
         } catch (error) {
           console.warn('Failed to fetch Farcaster data:', error);
         }
 
-        // Try to find fkey.id for this address by searching common username patterns
-        try {
-          const possibleUsernames = [
-            userData.farcasterProfile?.username,
-            userData.ensName?.replace('.eth', ''),
-            userData.baseName?.replace('.base.eth', ''),
-            targetAddress.slice(2, 8) // First 6 chars of address
-          ].filter(Boolean);
+        // Look for fkey profile
+        const possibleUsernames = [
+          userData.farcasterProfile?.username,
+          userData.ensName?.replace('.eth', ''),
+          userData.baseName?.replace('.base.eth', '')
+        ].filter(Boolean);
 
-          for (const username of possibleUsernames) {
-            try {
-              const fkeyRes = await fetch(`/api/fkey/lookup/${username}`);
-              if (fkeyRes.ok) {
-                const fkeyData = await fkeyRes.json();
-                if (fkeyData.isRegistered && fkeyData.address?.toLowerCase() === targetAddress.toLowerCase()) {
-                  userData.fkeyProfile = {
-                    username: username!,
-                    address: fkeyData.address,
-                    isRegistered: true
-                  };
-                  break;
-                }
+        for (const username of possibleUsernames) {
+          try {
+            const fkeyRes = await fetch(`/api/fkey/lookup/${username}`);
+            if (fkeyRes.ok) {
+              const fkeyData = await fkeyRes.json();
+              if (fkeyData.success) {
+                userData.fkeyProfile = {
+                  username: username,
+                  address: fkeyData.address || targetAddress,
+                  isRegistered: true
+                };
+                
+                // Update database with fkey ID
+                await database.createOrUpdateUser({
+                  address: targetAddress,
+                  fkeyId: `${username}.fkey.id`
+                });
+                break;
               }
-            } catch (error) {
-              console.warn(`Failed to check fkey ${username}:`, error);
             }
+          } catch (error) {
+            console.warn(`Failed to check fkey ${username}:`, error);
           }
-        } catch (error) {
-          console.warn('Failed to search for fkey.id:', error);
         }
 
-        // Try to find convos.org profile similarly
-        try {
-          const possibleUsernames = [
-            userData.farcasterProfile?.username,
-            userData.ensName?.replace('.eth', ''),
-            userData.baseName?.replace('.base.eth', ''),
-            userData.fkeyProfile?.username
-          ].filter(Boolean);
-
-          for (const username of possibleUsernames) {
-            try {
-              const convosRes = await fetch(`/api/convos/lookup/${username}`);
-              if (convosRes.ok) {
-                const convosData = await convosRes.json();
-                if (convosData.success && convosData.profile) {
-                  userData.convosProfile = {
-                    username: username!,
-                    name: convosData.profile.name,
-                    bio: convosData.profile.description,
-                    avatar: convosData.profile.avatar,
-                    xmtpId: convosData.xmtpId,
-                    turnkeyAddress: convosData.profile.address
-                  };
-                  break;
-                }
+        // Try to find convos.org profile
+        for (const username of possibleUsernames) {
+          try {
+            const convosRes = await fetch(`/api/convos/lookup/${username}`);
+            if (convosRes.ok) {
+              const convosData = await convosRes.json();
+              if (convosData.success && convosData.profile) {
+                userData.convosProfile = {
+                  username: username!,
+                  name: convosData.profile.name,
+                  bio: convosData.profile.description,
+                  avatar: convosData.profile.avatar,
+                  xmtpId: convosData.xmtpId,
+                  turnkeyAddress: convosData.profile.address
+                };
+                
+                // Update database with convos username
+                await database.createOrUpdateUser({
+                  address: targetAddress,
+                  convosUsername: username
+                });
+                break;
               }
-            } catch (error) {
-              console.warn(`Failed to check convos ${username}:`, error);
             }
+          } catch (error) {
+            console.warn(`Failed to check convos ${username}:`, error);
           }
-        } catch (error) {
-          console.warn('Failed to search for convos.org:', error);
         }
 
         // Load x402 content proxy URLs from JWT/localStorage (only for own profile)
@@ -256,17 +290,8 @@ export default function UserProfile({ address: propAddress, viewOnly = false }: 
           } catch (error) {
             console.warn('Failed to load proxy402 URLs from JWT:', error);
           }
-        }
 
-        // Generate x402 links based on user's identity
-        userData.x402Links = generateUserLinks(targetAddress, userData);
-        if (userData.stats) {
-          userData.stats.totalLinks = userData.x402Links.length;
-          userData.stats.totalEarnings = userData.x402Links.reduce((sum, link) => sum + Number(link.price), 0);
-        }
-
-        // Generate demo ZK receipts (only for own profile)
-        if (isOwnProfile) {
+          // Generate demo ZK receipts (only for own profile)
           userData.zkReceipts = [{
             id: '1',
             timestamp: new Date().toISOString(),
@@ -284,14 +309,62 @@ export default function UserProfile({ address: propAddress, viewOnly = false }: 
           }];
         }
 
+        // For public profiles (viewOnly), check privacy settings before showing X402 content
+        if (viewOnly) {
+          try {
+            const privacyResponse = await fetch(`/api/user/profile/${targetAddress}`);
+            if (privacyResponse.ok) {
+              const privacyData = await privacyResponse.json();
+              if (privacyData.success && privacyData.profile) {
+                // Only show x402 content if user has made it public
+                if (privacyData.profile.x402Links) {
+                  userData.x402Links = privacyData.profile.x402Links.map((link: any) => ({
+                    id: link.id,
+                    title: link.title,
+                    description: link.description,
+                    price: link.price?.toString() || '0.00',
+                    currency: 'USDC',
+                    linkType: link.linkType || 'document',
+                    directUrl: link.directUrl,
+                    proxyUrl: link.proxyUrl,
+                    frameUrl: link.frameUrl || `/api/x402/frame/${link.id}`,
+                    ogImageUrl: link.ogImageUrl,
+                    viewCount: link.viewCount || 0,
+                    purchaseCount: link.purchaseCount || 0,
+                    totalEarnings: link.totalEarnings || 0,
+                    isActive: link.isActive !== false,
+                    createdAt: link.createdAt || new Date().toISOString(),
+                    network: 'Base',
+                    x402Uri: `x402://base:${targetAddress}/${link.id}`
+                  }));
+                }
+              }
+            }
+          } catch (error) {
+            console.warn('Failed to load privacy-filtered content:', error);
+          }
+        } else {
+          // For own profile, show all content from database
+          // If no x402 links from database, generate some based on user's identity (fallback)
+          if (userData.x402Links?.length === 0) {
+            userData.x402Links = generateUserLinks(targetAddress, userData);
+          }
+        }
+
+        // Recalculate stats based on final data
+        if (userData.stats) {
+          userData.stats.totalLinks = userData.x402Links?.length || 0;
+          userData.stats.totalEarnings = userData.x402Links?.reduce((sum, link) => sum + Number(link.price), 0) || 0;
+        }
+
         setUserData(userData as UserData);
       } catch (error) {
         console.error('Failed to load user data:', error);
         // Create fallback data
         const fallbackData: UserData = {
           username: ensName || `${targetAddress.slice(0, 6)}...${targetAddress.slice(-4)}`,
-          bio: "Web3 enthusiast",
-          avatar: ensAvatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${targetAddress}`,
+          bio: "Web3 enthusiast", 
+          avatar: ensAvatar || `https://api.ensideas.com/v1/avatar/${targetAddress}`,
           stats: {
             totalEarnings: 0,
             totalLinks: 0,
@@ -447,26 +520,142 @@ export default function UserProfile({ address: propAddress, viewOnly = false }: 
     <div className="space-y-6 max-w-md mx-auto p-4 mobile-scroll hide-scrollbar overflow-y-auto">
       {/* Profile Header */}
       <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 rounded-lg p-6 mobile-scroll hide-scrollbar">
-        <div className="flex items-center gap-4 mb-4">
+                    <div className="flex items-center gap-4 mb-4">
           <div className="relative">
             <img
-              src={userData?.avatar}
+              src={userData?.avatar || userData?.ensAvatar || `https://api.ensideas.com/v1/avatar/${targetAddress}`}
               alt={userData?.username}
               className="w-16 h-16 rounded-full border-2 border-blue-500"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
-                target.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${targetAddress}`;
+                // Try ENS avatar first, then fallback to address-based avatar
+                if (!target.src.includes('ensideas.com')) {
+                  target.src = `https://api.ensideas.com/v1/avatar/${targetAddress}`;
+                }
               }}
             />
+            <div className="absolute -bottom-1 -right-1 bg-green-500 w-4 h-4 rounded-full border-2 border-gray-900"></div>
           </div>
           <div className="flex-1">
             <h2 className="text-2xl font-bold text-white mb-1">
               {userData?.username}
             </h2>
-            <p className="text-blue-300 text-sm font-mono">{targetAddress}</p>
+            <p className="text-blue-300 text-sm font-mono">{targetAddress.slice(0, 6)}...{targetAddress.slice(-4)}</p>
+            
+            {/* Identity Tags */}
+            <div className="flex flex-wrap gap-2 mt-2">
+              {userData?.ensName && (
+                <div className="bg-blue-900/30 border border-blue-600/30 rounded-lg px-2 py-1">
+                  <span className="text-xs text-blue-300">{userData.ensName}</span>
+                </div>
+              )}
+              
+              {userData?.baseName && (
+                <div className="bg-indigo-900/30 border border-indigo-600/30 rounded-lg px-2 py-1">
+                  <span className="text-xs text-indigo-300">{userData.baseName}</span>
+                </div>
+              )}
+              
+              {userData?.fkeyProfile && (
+                <div className="bg-purple-900/30 border border-purple-600/30 rounded-lg px-2 py-1">
+                  <span className="text-xs text-purple-300">{userData.fkeyProfile.username}.fkey.id</span>
+                </div>
+              )}
+              
+              {userData?.convosProfile && (
+                <div className="bg-green-900/30 border border-green-600/30 rounded-lg px-2 py-1">
+                  <span className="text-xs text-green-300">{userData.convosProfile.username}.convos.org</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        
+        {/* Bio */}
+        {userData?.bio && (
+          <p className="text-gray-300 text-sm mb-4">{userData.bio}</p>
+        )}
+        
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="bg-gray-800/50 rounded-lg p-3">
+            <div className="text-lg font-bold text-purple-400">{userData?.stats?.totalLinks || 0}</div>
+            <div className="text-xs text-gray-400">Content</div>
+          </div>
+          <div className="bg-gray-800/50 rounded-lg p-3">
+            <div className="text-lg font-bold text-green-400">{userData?.stats?.totalEarnings || 0}</div>
+            <div className="text-xs text-gray-400">USDC</div>
+          </div>
+          <div className="bg-gray-800/50 rounded-lg p-3">
+            <div className="text-lg font-bold text-blue-400">{userData?.stats?.privacyScore || 0}</div>
+            <div className="text-xs text-gray-400">Privacy</div>
+          </div>
+          <div className="bg-gray-800/50 rounded-lg p-3">
+            <div className="text-lg font-bold text-orange-400">{userData?.stats?.stealthActions || 0}</div>
+            <div className="text-xs text-gray-400">Stealth</div>
           </div>
         </div>
       </div>
+
+      {/* DaimoPay Button - Show if user has fkey.id */}
+      {userData?.fkeyProfile && (
+        <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 mobile-scroll hide-scrollbar">
+          <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+            <DollarSign className="h-4 w-4 text-green-400" />
+            Send Payment
+          </h3>
+          <p className="text-sm text-gray-400 mb-3">
+            Send USDC to {userData.fkeyProfile.username}.fkey.id using ZK stealth payments
+          </p>
+          <DaimoPayButton
+            toAddress={userData.address as `0x${string}`}
+            memo={`Payment to ${userData.fkeyProfile.username}.fkey.id`}
+            username={userData.fkeyProfile.username}
+            onPaymentCompleted={(event) => {
+              console.log('Payment completed to', userData.fkeyProfile?.username, event);
+              setNotification({
+                isOpen: true,
+                type: 'success',
+                title: 'Payment Sent!',
+                message: `Payment sent to ${userData.fkeyProfile?.username}.fkey.id`
+              });
+            }}
+          />
+        </div>
+      )}
+
+      {/* Convos Chat Widget - Show if user has convos profile */}
+      {userData?.convosProfile && (
+        <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 mobile-scroll hide-scrollbar">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+              <MessageCircle className="h-4 w-4 text-blue-400" />
+              Chat on Convos
+            </h3>
+            <button
+              onClick={() => setShowConvosChat(!showConvosChat)}
+              className="text-sm bg-blue-600 hover:bg-blue-500 text-white py-1 px-3 rounded transition-colors"
+            >
+              {showConvosChat ? 'Hide' : 'Show'} Chat
+            </button>
+          </div>
+          
+          {showConvosChat && (
+            <ConvosChat
+              xmtpId={userData.convosProfile.xmtpId}
+              username={userData.convosProfile.username}
+              url={`https://${userData.convosProfile.username}.convos.org`}
+              profile={{
+                name: userData.convosProfile.name,
+                username: userData.convosProfile.username,
+                description: userData.convosProfile.bio,
+                avatar: userData.convosProfile.avatar || userData.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${userData.convosProfile.username}`,
+                address: userData.address
+              }}
+            />
+          )}
+        </div>
+      )}
 
       {/* Content Sections */}
       <div className="space-y-6 mobile-scroll hide-scrollbar">

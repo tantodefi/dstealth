@@ -21,7 +21,9 @@ import { env } from './config/env.js';
 import fkeyRoutes from './routes/fkey.js';
 import convosRoutes from './routes/convos.js';
 import webhookRoutes from './routes/webhooks.js';
-import { X402BackendAgent } from './agents/x402-agent.js';
+import { DStealthAgent } from './agents/dstealth-agent.js';
+import { agentDb } from './lib/agent-database.js';
+import { stealthMonitor } from './services/stealth-monitor.js';
 
 const { WALLET_KEY, API_SECRET_KEY, ENCRYPTION_KEY, XMTP_ENV, PORT } =
   validateEnvironment([
@@ -35,8 +37,8 @@ const { WALLET_KEY, API_SECRET_KEY, ENCRYPTION_KEY, XMTP_ENV, PORT } =
 let GROUP_ID = process.env.GROUP_ID;
 // Global XMTP client
 let xmtpClient: Client;
-// Global X402 Backend Agent
-let x402Agent: X402BackendAgent;
+// Global dStealth Agent (combines X402 and dStealth functionality)
+let dStealthAgent: DStealthAgent;
 
 // Initialize XMTP client
 const initializeXmtpClient = async () => {
@@ -59,8 +61,8 @@ const initializeXmtpClient = async () => {
 
     console.log("✅ XMTP Client initialized with inbox ID:", xmtpClient.inboxId);
     
-    // Initialize X402 Backend Agent
-    await initializeX402Agent();
+    // Initialize dStealth Agent
+    await initializeDStealthAgent();
     
     // Only try to setup group functionality if not in Vercel (to avoid memory issues)
     // Vercel has VERCEL=1, Render has RENDER environment variable
@@ -141,28 +143,28 @@ const initializeXmtpClient = async () => {
   }
 };
 
-// Initialize X402 Backend Agent
-const initializeX402Agent = async () => {
+// Initialize dStealth Agent
+const initializeDStealthAgent = async () => {
   try {
-    if (x402Agent) {
-      console.log("🤖 X402 Backend Agent already initialized, skipping...");
+    if (dStealthAgent) {
+      console.log("🤖 dStealth Agent already initialized, skipping...");
       return;
     }
 
-    console.log("🤖 Initializing X402 Backend Agent...");
+    console.log("🤖 Initializing dStealth Agent...");
     
-    x402Agent = new X402BackendAgent();
-    const agentInfo = await x402Agent.initialize(WALLET_KEY, ENCRYPTION_KEY, XMTP_ENV as XmtpEnv);
+    dStealthAgent = new DStealthAgent();
+    const agentInfo = await dStealthAgent.initialize(WALLET_KEY, ENCRYPTION_KEY, XMTP_ENV as XmtpEnv);
     
-    console.log("✅ X402 Backend Agent initialized:");
+    console.log("✅ dStealth Agent initialized:");
     console.log(`   📬 Agent Inbox ID: ${agentInfo.inboxId}`);
     console.log(`   🔑 Agent Address: ${agentInfo.address}`);
     
     // Start the agent listening for messages
-    await x402Agent.startListening();
+    await dStealthAgent.startListening();
     
   } catch (error) {
-    console.error("❌ Failed to initialize X402 Backend Agent:", error);
+    console.error("❌ Failed to initialize dStealth Agent:", error);
     // Don't throw - let the server continue without the agent
   }
 };
@@ -284,18 +286,18 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Get X402 Agent contact information
+// Get dStealth Agent contact information
 app.get("/api/agent/info", (req, res) => {
   try {
-    if (!x402Agent) {
+    if (!dStealthAgent) {
       return res.status(503).json({
         success: false,
-        message: "X402 Agent not available",
+        message: "dStealth Agent not available",
         error: "Agent service is temporarily unavailable"
       });
     }
 
-    const agentInfo = x402Agent.getContactInfo();
+    const agentInfo = dStealthAgent.getContactInfo();
     res.json({
       success: true,
       agent: {
@@ -306,7 +308,10 @@ app.get("/api/agent/info", (req, res) => {
           "X402 Content Creation",
           "Smart Wallet Operations", 
           "AI-Powered Responses",
-          "Token Management"
+          "dStealth Address Lookup",
+          "Privacy-focused Scanning",
+          "Proxy402 Link Management",
+          "ZK Proof Storage"
         ]
       }
     });
@@ -315,6 +320,44 @@ app.get("/api/agent/info", (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to get agent information",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// Legacy endpoint for dStealth Agent (redirects to unified agent)
+app.get("/api/dstealth/info", (req, res) => {
+  try {
+    if (!dStealthAgent) {
+      return res.status(503).json({
+        success: false,
+        message: "Unified Agent not available",
+        error: "Agent service is temporarily unavailable"
+      });
+    }
+
+    const agentInfo = dStealthAgent.getContactInfo();
+    res.json({
+      success: true,
+      agent: {
+        inboxId: agentInfo.inboxId,
+        address: agentInfo.address,
+        status: "active",
+        features: [
+          "Stealth Address Lookup via fkey.id",
+          "Privacy-focused Address Scanning", 
+          "Proxy402 Link Management",
+          "ZK Proof Storage & Retrieval",
+          "X402 Content Creation",
+          "Smart Wallet Operations"
+        ]
+      }
+    });
+  } catch (error) {
+    console.error("Error getting unified agent info:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get unified agent information",
       error: error instanceof Error ? error.message : "Unknown error"
     });
   }
@@ -475,6 +518,207 @@ app.use('/api/fkey', fkeyRoutes);
 app.use('/api/convos', convosRoutes);
 app.use('/api/webhooks', webhookRoutes);
 
+// Stealth notification endpoints
+app.post("/api/stealth/register", async (req, res) => {
+  try {
+    const { userId, address, notificationPrefs, stealthScanKeys } = req.body;
+    
+    if (!userId || !address) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID and address are required'
+      });
+    }
+
+    const userData = {
+      userId,
+      address: address.toLowerCase(),
+      notificationPrefs: {
+        stealthEnabled: true,
+        stealthPayments: true,
+        stealthRegistrations: true,
+        stealthAnnouncements: true,
+        ...notificationPrefs
+      },
+      stealthScanKeys: stealthScanKeys || [],
+      registeredAt: Date.now()
+    };
+
+    await agentDb.storeStealthUser(userId, userData);
+
+    res.json({
+      success: true,
+      message: 'Successfully registered for stealth notifications',
+      userId,
+      monitoring: true
+    });
+
+    console.log(`🔔 Registered user ${userId} for stealth notifications`);
+
+  } catch (error) {
+    console.error('Error registering for stealth notifications:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to register for stealth notifications'
+    });
+  }
+});
+
+app.post("/api/stealth/unregister", async (req, res) => {
+  try {
+    const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    // Update user to disable stealth notifications
+    const existingUser = await agentDb.getUsersWithStealthNotifications();
+    const user = existingUser.find(u => u.userId === userId);
+    
+    if (user) {
+      const updatedData = {
+        ...user,
+        notificationPrefs: {
+          ...user.notificationPrefs,
+          stealthEnabled: false
+        }
+      };
+      
+      await agentDb.storeStealthUser(userId, updatedData);
+    }
+
+    res.json({
+      success: true,
+      message: 'Successfully unregistered from stealth notifications',
+      userId,
+      monitoring: false
+    });
+
+    console.log(`🔕 Unregistered user ${userId} from stealth notifications`);
+
+  } catch (error) {
+    console.error('Error unregistering from stealth notifications:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to unregister from stealth notifications'
+    });
+  }
+});
+
+app.get("/api/stealth/status", async (req, res) => {
+  try {
+    const { userId } = req.query;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    const users = await agentDb.getUsersWithStealthNotifications();
+    const user = users.find(u => u.userId === userId);
+    
+    res.json({
+      success: true,
+      monitoring: !!user && user.notificationPrefs?.stealthEnabled !== false,
+      preferences: user?.notificationPrefs || null,
+      lastNotification: user?.lastStealthNotification || null
+    });
+
+  } catch (error) {
+    console.error('Error getting stealth notification status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get stealth notification status'
+    });
+  }
+});
+
+// Agent settings endpoint - allows agent to access user preferences
+app.get("/api/agent/user-settings/:userInboxId", async (req, res) => {
+  try {
+    const { userInboxId } = req.params;
+    
+    if (!userInboxId) {
+      return res.status(400).json({ success: false, error: 'User inbox ID required' });
+    }
+
+    // Get user settings from Redis database
+    const userData = await agentDb.getStealthDataByUser(userInboxId);
+    
+    // Mock user preferences (in production, this would come from a user preferences store)
+    const userSettings = {
+      inboxId: userInboxId,
+      fkeyId: userData?.fkeyId || null,
+      stealthAddress: userData?.stealthAddress || null,
+      preferences: {
+        enableAI: true,
+        privacyMode: 'standard',
+        notifications: true,
+        language: 'en'
+      },
+      lastInteraction: userData?.lastUpdated || null
+    };
+
+    res.json({
+      success: true,
+      settings: userSettings
+    });
+
+  } catch (error) {
+    console.error('Error fetching user settings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch user settings'
+    });
+  }
+});
+
+// Agent settings endpoint - allows agent to access user preferences
+app.get("/api/agent/user-settings/:userInboxId", async (req, res) => {
+  try {
+    const { userInboxId } = req.params;
+    
+    if (!userInboxId) {
+      return res.status(400).json({ success: false, error: 'User inbox ID required' });
+    }
+
+    // Get user settings from Redis database
+    const userData = await agentDb.getStealthDataByUser(userInboxId);
+    
+    // Mock user preferences (in production, this would come from a user preferences store)
+    const userSettings = {
+      inboxId: userInboxId,
+      fkeyId: userData?.fkeyId || null,
+      stealthAddress: userData?.stealthAddress || null,
+      preferences: {
+        enableAI: true,
+        privacyMode: 'standard',
+        notifications: true,
+        language: 'en'
+      },
+      lastInteraction: userData?.lastUpdated || null
+    };
+
+    res.json({
+      success: true,
+      settings: userSettings
+    });
+
+  } catch (error) {
+    console.error('Error fetching user settings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch user settings'
+    });
+  }
+});
+
 // Start Server
 void (async () => {
   try {
@@ -489,6 +733,16 @@ void (async () => {
       console.error("⚠️ XMTP initialization failed, but server continues:", error);
       // Server continues to run without XMTP for API routes that don't need it
     });
+
+    // Start stealth monitoring service (in background)
+    try {
+      console.log("🥷 Starting stealth transaction monitoring service...");
+      await stealthMonitor.start();
+      console.log("✅ Stealth monitor started successfully");
+    } catch (error) {
+      console.error("⚠️ Stealth monitor failed to start, but server continues:", error);
+      // Server continues to run without stealth monitoring
+    }
 
   } catch (error) {
     console.error("Failed to start server:", error);

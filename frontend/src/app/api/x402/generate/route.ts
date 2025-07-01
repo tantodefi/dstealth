@@ -1,5 +1,12 @@
 import { NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
+import { Redis } from '@upstash/redis';
+
+// Redis client setup
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+});
 
 interface X402URIRequest {
   name: string;
@@ -15,6 +22,8 @@ interface X402URIRequest {
   fileUrl?: string;
   fileSize?: number;
   duration?: number;
+  paymentRecipient?: string;
+  fileInfo?: any;
 }
 
 interface X402Metadata {
@@ -50,28 +59,27 @@ interface X402Metadata {
     type?: string;
   };
   x402_requirements?: any;
+  created?: string;
+  contentId?: string;
+  creator?: string;
 }
 
 // USDC contract addresses for different networks
 const USDC_CONTRACTS = {
-  'base': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // Base mainnet USDC
-  'base-sepolia': '0x036CbD53842c5426634e7929541eC2318f3dCF7e', // Base Sepolia USDC
-  'ethereum': '0xA0b86a33E6441c8e96d3B98a80CB0Bb7d8A3B1b7', // Mainnet USDC (fallback)
+  'base': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  'base-sepolia': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+  'ethereum': '0xA0b86a33E6413bF74d5c567F9e29C6B6d1e5A8C1',
+  'polygon': '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'
 };
 
-// Default payment recipient - this is where USDC payments will be sent
-// You can override this with NEXT_PUBLIC_DEFAULT_PAYMENT_RECIPIENT environment variable
-const DEFAULT_PAYMENT_RECIPIENT = process.env.NEXT_PUBLIC_DEFAULT_PAYMENT_RECIPIENT || '0x706AfBE28b1e1CB40cd552Fa53A380f658e38332';
+// Default payment recipient
+const DEFAULT_PAYMENT_RECIPIENT = '0x706AfBE28b1e1CB40cd552Fa53A380f658e38332';
 
-function corsHeaders(response: Response) {
+function corsHeaders(response: NextResponse) {
   response.headers.set('Access-Control-Allow-Origin', '*');
-  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  response.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
   response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   return response;
-}
-
-export async function OPTIONS() {
-  return corsHeaders(new NextResponse(null, { status: 200 }));
 }
 
 export async function POST(request: Request) {
@@ -101,7 +109,7 @@ export async function POST(request: Request) {
     const contentId = randomBytes(16).toString('hex');
     
     // Create x402:// URI following L402 pattern
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://dstealth.vercel.app';
+    const baseUrl = process.env.NEXT_PUBLIC_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://dstealth.vercel.app';
     const domain = baseUrl.replace(/^https?:\/\//, '');
     const x402Uri = `x402://${domain}/content/${contentId}`;
     
@@ -155,18 +163,29 @@ export async function POST(request: Request) {
         }
       },
       file_info: fileInfo,
-      x402_requirements: x402Requirements
+      x402_requirements: x402Requirements,
+      created: new Date().toISOString(),
+      contentId: contentId,
+      creator: payTo
     };
 
-    // Store metadata (in production, use a proper database)
-    // For now, we'll include it in the response for the frontend to handle
+    // 🎯 Store metadata in Redis database (persistent storage)
+    await storeX402Metadata(contentId, metadata, payTo);
     
     const viewerUrl = `${baseUrl}/viewer?uri=${encodeURIComponent(x402Uri)}`;
+    
+    console.log('✅ X402 content created and stored:', {
+      contentId,
+      name,
+      price: enhancedPricing[0].amount,
+      creator: payTo
+    });
     
     return corsHeaders(NextResponse.json({
       success: true,
       contentId,
       uri: x402Uri,
+      x402_uri: x402Uri, // Add this for compatibility
       metadata,
       viewerUrl,
       accessEndpoint,
@@ -185,26 +204,80 @@ export async function POST(request: Request) {
   }
 }
 
-function generateContentId(): string {
-  return Array.from(crypto.getRandomValues(new Uint8Array(16)))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
+// Store X402 metadata in Redis with multiple keys for different access patterns
+async function storeX402Metadata(contentId: string, metadata: X402Metadata, creator: string) {
+  try {
+    const now = new Date().toISOString();
+    
+    // Primary content storage
+    const contentKey = `x402:content:${contentId}`;
+    await redis.set(contentKey, JSON.stringify(metadata), { ex: 86400 * 30 }); // 30 days
+    
+    // Index by creator
+    const creatorKey = `x402:creator:${creator.toLowerCase()}`;
+    const creatorContent = await redis.get(creatorKey);
+    let creatorList: string[] = [];
+    
+    if (creatorContent) {
+      creatorList = typeof creatorContent === 'string' ? JSON.parse(creatorContent) : creatorContent;
+    }
+    
+    creatorList.unshift(contentId); // Add to front
+    creatorList = creatorList.slice(0, 100); // Keep only last 100 items
+    
+    await redis.set(creatorKey, JSON.stringify(creatorList), { ex: 86400 * 30 }); // 30 days
+    
+    // Global content index
+    await redis.zadd('x402:content:index', { score: Date.now(), member: contentId });
+    
+    // Content stats initialization
+    const statsKey = `content:stats:${contentId}`;
+    const initialStats = {
+      contentId,
+      creator,
+      createdAt: now,
+      totalPurchases: 0,
+      totalRevenue: 0,
+      uniquePayers: [],
+      lastPurchase: null,
+      viewCount: 0
+    };
+    
+    await redis.set(statsKey, JSON.stringify(initialStats), { ex: 86400 * 90 }); // 90 days
+    
+    // Update creator stats
+    const creatorStatsKey = `creator:stats:${creator.toLowerCase()}`;
+    const creatorStats = await redis.get(creatorStatsKey);
+    
+    let stats = {
+      totalContent: 0,
+      totalRevenue: 0,
+      totalPurchases: 0,
+      lastCreated: now
+    };
+    
+    if (creatorStats) {
+      const existing = typeof creatorStats === 'string' ? JSON.parse(creatorStats) : creatorStats;
+      stats = {
+        totalContent: (existing.totalContent || 0) + 1,
+        totalRevenue: existing.totalRevenue || 0,
+        totalPurchases: existing.totalPurchases || 0,
+        lastCreated: now
+      };
+    } else {
+      stats.totalContent = 1;
+    }
+    
+    await redis.set(creatorStatsKey, JSON.stringify(stats), { ex: 86400 * 30 }); // 30 days
+    
+    console.log('📦 X402 metadata stored in Redis:', { contentId, creator });
+    
+  } catch (error) {
+    console.error('❌ Failed to store X402 metadata in Redis:', error);
+    throw error;
+  }
 }
 
-function getBaseUrl(): string {
-  return process.env.NODE_ENV === 'production' 
-    ? 'https://dstealth.vercel.app'
-    : 'http://localhost:3000';
-}
-
-function getHost(): string {
-  return process.env.NODE_ENV === 'production' 
-    ? 'dstealth.vercel.app'
-    : 'localhost:3000';
-}
-
-// TODO: Implement these functions with your database
-async function storeX402Metadata(contentId: string, metadata: X402Metadata, fileUrl?: string) {
-  // Store in your database - you'll need to implement this
-  console.log('Storing X402 metadata:', { contentId, metadata, fileUrl });
+export async function OPTIONS(request: Request) {
+  return corsHeaders(new NextResponse(null, { status: 200 }));
 } 

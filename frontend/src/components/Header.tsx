@@ -64,7 +64,8 @@ export function Header({ onLogout, isConnected, onShowEarningsChart }: HeaderPro
 
     // Check immediately and then every 30 seconds
     checkBackendStatus();
-    const interval = setInterval(checkBackendStatus, 30000);
+    // Check every 5 minutes - reduced from 30 seconds to prevent Redis spam
+    const interval = setInterval(checkBackendStatus, 5 * 60 * 1000);
 
     return () => clearInterval(interval);
   }, []);

@@ -355,7 +355,7 @@ export default function StevenRewards() {
   }
 
   return (
-    <div className="space-y-6 mobile-scroll hide-scrollbar overflow-y-auto">
+    <div className="space-y-6">
       {/* Notification Modal */}
       <NotificationModal
         isOpen={notification.isOpen}

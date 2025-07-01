@@ -195,10 +195,10 @@ export function Proxy402Balance({ onShowChart, compact = false }: Proxy402Balanc
     };
   }, [effectiveAddress]);
 
-  // Refresh data every 5 minutes
+  // Refresh data every 15 minutes - reduced from 5 minutes to prevent Redis spam
   useEffect(() => {
     if (effectiveAddress && !compact) { // Only auto-refresh for non-compact version
-      const interval = setInterval(fetchEarningsData, 5 * 60 * 1000);
+      const interval = setInterval(fetchEarningsData, 15 * 60 * 1000);
       return () => clearInterval(interval);
     }
   }, [effectiveAddress, compact]);
