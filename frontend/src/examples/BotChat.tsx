@@ -1,15 +1,18 @@
 "use client";
 
-import { Client, Conversation, DecodedMessage, Dm } from "@xmtp/browser-sdk";
+import React from "react";
+import { type Conversation, type DecodedMessage } from "@xmtp/browser-sdk";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAccount } from "wagmi";
 import { Button } from "@/components/Button";
 import { useXMTP } from "@/context/xmtp-context";
 
-// Backend X402 Agent address - will be fetched dynamically
-const FALLBACK_BOT_ADDRESS = "0x20b572be48527a770479744aec6fe5644f97678b";
+// Backend dStealth Agent address - will be fetched dynamically
+const AGENT_ADDRESS = "";
 
 export default function BotChat() {
   const { client } = useXMTP();
+  const { address, isConnected } = useAccount();
 
   // State
   const [message, setMessage] = useState("");
@@ -27,64 +30,68 @@ export default function BotChat() {
   // Use ref to track if stream is already started to prevent infinite loops
   const streamStartedRef = useRef(false);
 
+  // Check if user has any connection (wallet or ephemeral)
+  const hasConnection = isConnected || !!client;
+
+  // Get effective address for display
+  const effectiveAddress = address || (client ? 'ephemeral' : null);
+
   // Fetch agent information from backend
   const fetchAgentInfo = useCallback(async () => {
+    if (!client) return;
+    
     try {
-      setError(null); // Clear any previous errors
-      // Use frontend API route that proxies to backend
-      const response = await fetch('/api/agent/info');
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
+      console.log('Fetching agent info from:', `${backendUrl}/api/agent/info`);
       
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.agent) {
-          setAgentAddress(data.agent.address);
-          setAgentInfo(data.agent);
-          console.log('✅ Fetched agent info:', data.agent);
-        } else {
-          console.warn('⚠️ Agent not available, using fallback address');
-          setAgentAddress(FALLBACK_BOT_ADDRESS);
-        }
+      const response = await fetch(`${backendUrl}/api/agent/info`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success && data.agent) {
+        setAgentAddress(data.agent.address);
+        setAgentInfo(data.agent);
+        console.log('✅ dStealth agent info loaded:', data.agent);
       } else {
-        console.warn('⚠️ Failed to fetch agent info, using fallback address');
-        setAgentAddress(FALLBACK_BOT_ADDRESS);
+        console.warn('⚠️ Agent info request succeeded but no agent data received');
       }
     } catch (error) {
       console.error('❌ Error fetching agent info:', error);
-      setAgentAddress(FALLBACK_BOT_ADDRESS);
     }
-  }, []);
+  }, [client]);
 
   // Initialize the conversation with the backend agent
   const initializeConversation = useCallback(async () => {
-    if (!client || !agentAddress) {
-      console.log('❌ Cannot initialize conversation - missing client or agentAddress:', { client: !!client, agentAddress });
-      return;
-    }
-    
-    // Validate that we have a real address, not a placeholder
-    if (agentAddress === "Agent Address" || !agentAddress.startsWith('0x') || agentAddress.length !== 42) {
-      console.error('❌ Invalid agent address detected:', agentAddress);
-      setError('Invalid agent address. Please try refreshing the page.');
-      return;
-    }
-    
-    let botConversation: Conversation<any> | null = null;
+    if (!client || !agentAddress || isConnecting) return;
+
     setIsConnecting(true);
+    
     try {
-      console.log('🤖 Initializing conversation with agent address:', agentAddress);
-      botConversation = await client.conversations.newDmWithIdentifier({
-        identifier: agentAddress,
-        identifierKind: "Ethereum",
-      });
-      setBotConversation(botConversation);
-      console.log('✅ Conversation initialized successfully');
+      console.log("🚀 Initializing conversation with dStealth agent:", agentAddress);
+      
+      // Create conversation with the agent using address
+      const conversation = await client.conversations.newDm(agentAddress);
+      
+      // Sync to get any existing messages
+      await conversation.sync();
+      const existingMessages = await conversation.messages();
+      
+      console.log("✅ dStealth agent conversation initialized");
+      console.log("📬 Existing messages:", existingMessages.length);
+      
+      setBotConversation(conversation);
+      setMessages(existingMessages);
+      
+      setIsConnecting(false);
     } catch (error) {
-      console.error("❌ Error initializing X402 agent conversation:", error);
-      setError(`Failed to connect to agent: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
+      console.error("❌ Error initializing dStealth agent conversation:", error);
       setIsConnecting(false);
     }
-  }, [client, agentAddress]);
+  }, [client, agentAddress, isConnecting]);
 
   // Start a stream to listen for new messages
   const startMessageStream = useCallback(async () => {
@@ -93,7 +100,7 @@ export default function BotChat() {
       return;
 
     try {
-      console.log("Starting message stream for X402 agent conversation");
+      console.log("Starting message stream for dStealth agent conversation");
       // Set flag before state to prevent race conditions
       streamStartedRef.current = true;
       setStreamActive(true);
@@ -105,7 +112,7 @@ export default function BotChat() {
       const streamMessages = async () => {
         try {
           for await (const message of stream) {
-            console.log("Received message from X402 agent:", message);
+            console.log("Received message from dStealth agent:", message);
             // Ensure we don't add undefined to the messages array
             if (message) {
               setMessages((prevMessages) => [...prevMessages, message]);
@@ -144,10 +151,10 @@ export default function BotChat() {
 
   // Initialize conversation when client and agent address are available
   useEffect(() => {
-    if (client && agentAddress && !botConversation && !isConnecting) {
+    if (agentAddress && client && !botConversation && !isConnecting) {
       initializeConversation();
     }
-  }, [client, agentAddress, botConversation, isConnecting, initializeConversation]);
+  }, [agentAddress, client, botConversation, isConnecting, initializeConversation]);
 
   // Start stream when conversation is available
   useEffect(() => {
@@ -172,14 +179,14 @@ export default function BotChat() {
     };
   }, [client, botConversation, startMessageStream]);
 
-  // Send message to the X402 agent
+  // Send message to the dStealth agent
   const handleSendMessage = async () => {
     if (!client || !botConversation || !message.trim()) return;
 
     setSending(true);
 
     try {
-      // Send the message to the X402 agent
+      // Send the message to the dStealth agent
       await botConversation.send(message);
 
       // Clear input
@@ -195,7 +202,7 @@ export default function BotChat() {
     <div className="w-full flex flex-col gap-3">
       <div className="w-full bg-gray-900 p-3 rounded-md">
         <div className="flex justify-between items-center">
-          <h2 className="text-white text-sm font-medium">X402 Agent Chat</h2>
+          <h2 className="text-white text-sm font-medium">dStealth Agent Chat</h2>
           <div className="flex items-center">
             <div
               className={`h-2 w-2 rounded-full mr-2 ${streamActive ? "bg-green-500" : "bg-red-500"}`}
@@ -209,18 +216,24 @@ export default function BotChat() {
         {/* Agent Info Display */}
         {agentInfo && (
           <div className="mt-2 p-2 bg-gray-800 rounded text-xs">
-            <div className="text-green-400 font-medium">🤖 Agent Status: {agentInfo.status}</div>
+            <div className="text-green-400 font-medium">🥷 Agent Status: {agentInfo.status}</div>
             <div className="text-gray-300">📬 Address: {agentAddress?.slice(0, 6)}...{agentAddress?.slice(-4)}</div>
             <div className="text-gray-300">✨ Features: {agentInfo.features?.slice(0, 2).join(', ')}</div>
           </div>
         )}
 
-        {!client ? (
-          <p className="text-gray-400 text-xs mt-2">
-            Connect your wallet to chat with the X402 agent
+        {!hasConnection ? (
+          <p className="text-red-500 text-xs mt-2">
+            Connect your wallet to chat with the dStealth agent
+          </p>
+        ) : !client ? (
+          <p className="text-yellow-500 text-xs mt-2">
+            Initializing XMTP client...
           </p>
         ) : !agentAddress ? (
-          <p className="text-yellow-500 text-xs mt-2">Fetching agent information...</p>
+          <p className="text-yellow-500 text-xs mt-2">
+            Loading agent information...
+          </p>
         ) : error ? (
           <div className="mt-2 p-2 bg-red-900/30 border border-red-700 rounded text-xs">
             <p className="text-red-400 font-medium">Connection Error</p>
@@ -236,7 +249,7 @@ export default function BotChat() {
             </button>
           </div>
         ) : isConnecting ? (
-          <p className="text-yellow-500 text-xs mt-2">Connecting to X402 agent...</p>
+          <p className="text-yellow-500 text-xs mt-2">Connecting to dStealth agent...</p>
         ) : !botConversation ? (
           <div className="mt-2">
             <Button
@@ -245,7 +258,7 @@ export default function BotChat() {
               onClick={initializeConversation}
               disabled={isConnecting}
               className="w-full">
-              Connect to X402 Agent
+              Connect to dStealth Agent
             </Button>
           </div>
         ) : (
@@ -289,7 +302,7 @@ export default function BotChat() {
                 })
               ) : (
                 <p className="text-gray-500 text-xs">
-                  No messages yet. Try &quot;/help&quot; to see what the X402 agent can do!
+                  No messages yet. Try &quot;/help&quot; to see what the dStealth agent can do!
                 </p>
               )}
             </div>
@@ -300,7 +313,7 @@ export default function BotChat() {
                 type="text"
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                placeholder="Ask the X402 agent anything..."
+                placeholder="Ask the dStealth agent anything..."
                 className="flex-1 bg-gray-800 text-white text-sm rounded-l-md px-3 py-2 outline-none"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !sending) {

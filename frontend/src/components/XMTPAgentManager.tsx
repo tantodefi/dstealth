@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Bot, MessageCircle, Copy, Check, Play, Square, Users, Wallet, TrendingUp, Edit3 } from 'lucide-react';
+import { Bot, MessageCircle, Copy, Check, Play, Square, Users, Wallet, TrendingUp, Edit3, Shield, Eye, Receipt } from 'lucide-react';
 
 interface AgentInfo {
   inboxId: string;
@@ -19,9 +19,9 @@ export default function XMTPAgentManager() {
     // Load saved prompt from localStorage
     if (typeof window !== 'undefined') {
       return localStorage.getItem('custom_agent_prompt') || 
-        "Act as a helpful sales assistant for my content. Be persuasive but friendly when promoting my paid content to users. Highlight the value and benefits clearly.";
+        "Act as a helpful privacy advisor focused on stealth addresses and anonymous payments. Guide users through creating stealth addresses, generating payment links, and understanding zk receipts for enhanced privacy.";
     }
-    return "Act as a helpful sales assistant for my content. Be persuasive but friendly when promoting my paid content to users. Highlight the value and benefits clearly.";
+    return "Act as a helpful privacy advisor focused on stealth addresses and anonymous payments. Guide users through creating stealth addresses, generating payment links, and understanding zk receipts for enhanced privacy.";
   });
 
   useEffect(() => {
@@ -61,7 +61,7 @@ export default function XMTPAgentManager() {
       if (data.success) {
         setAgentInfo(data.agent);
         setAgentStatus('running');
-        console.log('🤖 X402 Agent info loaded successfully');
+        console.log('🥷 dStealth Agent info loaded successfully');
       } else {
         throw new Error(data.message || 'Failed to get agent info');
       }
@@ -103,13 +103,13 @@ export default function XMTPAgentManager() {
   return (
     <div className="space-y-6 mobile-scroll hide-scrollbar overflow-y-auto max-h-full">
       {/* Agent Status Header */}
-      <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 rounded-lg p-6">
+      <div className="bg-gradient-to-r from-purple-900/20 to-blue-900/20 border border-purple-600/30 rounded-lg p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <Bot className="h-8 w-8 text-blue-400" />
+            <Bot className="h-8 w-8 text-purple-400" />
             <div>
-              <h2 className="text-2xl font-bold text-white">X402 XMTP Agent</h2>
-              <p className="text-blue-300">Intelligent assistant for content monetization</p>
+              <h2 className="text-2xl font-bold text-white">dStealth XMTP Agent</h2>
+              <p className="text-purple-300">Privacy-focused assistant for stealth addresses & anonymous payments</p>
             </div>
           </div>
           <div className={`text-lg font-semibold ${getStatusColor()}`}>
@@ -122,7 +122,7 @@ export default function XMTPAgentManager() {
           <button
             onClick={fetchAgentInfo}
             disabled={agentStatus === 'loading'}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
           >
             <Bot className="h-4 w-4" />
             {agentStatus === 'loading' ? 'Checking...' : 'Refresh Status'}
@@ -149,19 +149,19 @@ export default function XMTPAgentManager() {
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
                 <Edit3 className="h-4 w-4" />
-                Your Custom Agent Prompt
+                Your Custom Privacy Agent Prompt
               </label>
               <div className="mb-2">
                 <p className="text-xs text-gray-400">
-                  This is how the agent will act when trying to sell your content. Be specific about tone, approach, and key points to emphasize.
+                  Customize how the agent helps users with stealth addresses, payment links, and privacy features. Focus on tone, privacy education, and key stealth features to emphasize.
                 </p>
               </div>
               <textarea
                 value={customPrompt}
                 onChange={(e) => setCustomPrompt(e.target.value)}
-                placeholder="Enter your custom agent prompt here..."
+                placeholder="Enter your custom privacy agent prompt here..."
                 rows={4}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               />
               <div className="mt-1 text-xs text-gray-500">
                 Character count: {customPrompt.length} • Saved automatically
@@ -221,7 +221,7 @@ export default function XMTPAgentManager() {
             {/* Widget Code */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
-                Embeddable Widget Code
+                Embeddable Privacy Widget Code
               </label>
               <div className="relative">
                 <textarea
@@ -250,7 +250,7 @@ export default function XMTPAgentManager() {
                 </button>
               </div>
               <div className="mt-2 text-xs text-gray-400">
-                💡 This widget includes your custom agent prompt and can be embedded on any website
+                🥷 This privacy widget includes your custom agent prompt and can be embedded on any website
               </div>
             </div>
           </div>
@@ -260,56 +260,62 @@ export default function XMTPAgentManager() {
       {/* Agent Capabilities */}
       <div className="bg-gray-900/50 border border-gray-600/30 rounded-lg p-6">
         <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-          <Users className="h-5 w-5" />
-          Agent Capabilities
+          <Shield className="h-5 w-5" />
+          Privacy & Stealth Capabilities
         </h3>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-3">
-            <h4 className="font-semibold text-white">Content Management</h4>
+            <h4 className="font-semibold text-white flex items-center gap-2">
+              <Eye className="h-4 w-4" />
+              Stealth Address Generation
+            </h4>
             <ul className="space-y-1 text-sm text-gray-300">
-              <li>• Create paid content via chat</li>
-              <li>• Generate X402:// URLs</li>
-              <li>• Search content database</li>
-              <li>• Track earnings and analytics</li>
+              <li>• Generate anonymous stealth addresses</li>
+              <li>• fkey.id integration & verification</li>
+              <li>• Multi-chain stealth support</li>
+              <li>• Privacy score tracking</li>
             </ul>
           </div>
           
           <div className="space-y-3">
-            <h4 className="font-semibold text-white">User Services</h4>
+            <h4 className="font-semibold text-white flex items-center gap-2">
+              <Receipt className="h-4 w-4" />
+              ZK Receipts & Payment Links
+            </h4>
             <ul className="space-y-1 text-sm text-gray-300">
-              <li>• Check 🥷 token balances</li>
-              <li>• Process payments</li>
-              <li>• Manage fkey.id profiles</li>
-              <li>• Award milestone rewards</li>
+              <li>• Generate anonymous payment links</li>
+              <li>• ZK receipt generation</li>
+              <li>• Stealth payment processing</li>
+              <li>• Privacy rewards tracking</li>
             </ul>
           </div>
           
           <div className="space-y-3">
-            <h4 className="font-semibold text-white">Social Features</h4>
+            <h4 className="font-semibold text-white">Privacy Education</h4>
             <ul className="space-y-1 text-sm text-gray-300">
-              <li>• User discovery and messaging</li>
-              <li>• Content recommendations</li>
-              <li>• Collaborative features</li>
-              <li>• Community building</li>
+              <li>• Stealth address tutorials</li>
+              <li>• Privacy best practices</li>
+              <li>• FluidKey Score optimization</li>
+              <li>• Anonymous transaction guidance</li>
             </ul>
           </div>
           
           <div className="space-y-3">
             <h4 className="font-semibold text-white">AI & Automation</h4>
             <ul className="space-y-1 text-sm text-gray-300">
-              <li>• Natural language processing</li>
-              <li>• Smart recommendations</li>
-              <li>• Automated workflows</li>
-              <li>• 24/7 availability</li>
+              <li>• Natural language privacy help</li>
+              <li>• Smart stealth recommendations</li>
+              <li>• Automated privacy workflows</li>
+              <li>• 24/7 privacy assistance</li>
             </ul>
           </div>
         </div>
 
         {agentInfo && agentInfo.features && (
-          <div className="mt-4 p-3 bg-green-900/20 border border-green-600/30 rounded-lg">
-            <h5 className="font-semibold text-green-300 mb-2">Active Features:</h5>
-            <ul className="text-sm text-green-200">
+          <div className="mt-4 p-3 bg-purple-900/20 border border-purple-600/30 rounded-lg">
+            <h5 className="font-semibold text-purple-300 mb-2">Active Privacy Features:</h5>
+            <ul className="text-sm text-purple-200">
               {agentInfo.features.map((feature, index) => (
                 <li key={index}>• {feature}</li>
               ))}
@@ -322,25 +328,25 @@ export default function XMTPAgentManager() {
       <div className="bg-gray-900/50 border border-gray-600/30 rounded-lg p-6">
         <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
           <TrendingUp className="h-5 w-5" />
-          Performance Metrics
+          Privacy Performance Metrics
         </h3>
         
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="text-center">
-            <div className="text-2xl font-bold text-blue-400">24/7</div>
-            <div className="text-sm text-gray-400">Availability</div>
+            <div className="text-2xl font-bold text-purple-400">24/7</div>
+            <div className="text-sm text-gray-400">Privacy Help</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-green-400">AI</div>
-            <div className="text-sm text-gray-400">Powered</div>
+            <div className="text-2xl font-bold text-green-400">ZK</div>
+            <div className="text-sm text-gray-400">Receipts</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-purple-400">Real-time</div>
-            <div className="text-sm text-gray-400">Responses</div>
+            <div className="text-2xl font-bold text-blue-400">Stealth</div>
+            <div className="text-sm text-gray-400">Addresses</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-yellow-400">Multi</div>
-            <div className="text-sm text-gray-400">Platform</div>
+            <div className="text-2xl font-bold text-yellow-400">Anonymous</div>
+            <div className="text-sm text-gray-400">Payments</div>
           </div>
         </div>
       </div>
@@ -349,7 +355,7 @@ export default function XMTPAgentManager() {
       <div className="bg-gray-900/50 border border-gray-600/30 rounded-lg p-6">
         <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
           <Wallet className="h-5 w-5" />
-          How to Interact with the Agent
+          How to Use the dStealth Agent
         </h3>
         
         <div className="space-y-4 text-gray-300">
@@ -359,19 +365,19 @@ export default function XMTPAgentManager() {
           </div>
           
           <div>
-            <h4 className="font-semibold text-white mb-2">2. Try These Commands</h4>
+            <h4 className="font-semibold text-white mb-2">2. Try These Privacy Commands</h4>
             <div className="bg-gray-800/50 p-3 rounded-lg font-mono text-sm space-y-1">
-              <div>/help - Show all available commands</div>
-              <div>/create Secret Recipe | Amazing cookies | 299 | USD</div>
-              <div>/search defi strategies</div>
-              <div>/balance - Check your 🥷 tokens</div>
-              <div>/claim - Claim ninja rewards</div>
+              <div>/help - Show all privacy commands</div>
+              <div>tantodefi - Set your fkey.id username</div>
+              <div>create payment link for $50 - Generate stealth payment</div>
+              <div>/scan 0x123... - Check address privacy score</div>
+              <div>/links - View your payment links</div>
             </div>
           </div>
           
           <div>
-            <h4 className="font-semibold text-white mb-2">3. Natural Language</h4>
-            <p className="text-sm">You can also ask questions naturally like &quot;How do I earn tokens?&quot; or &quot;What&apos;s the pricing?&quot;</p>
+            <h4 className="font-semibold text-white mb-2">3. Natural Language Privacy Help</h4>
+            <p className="text-sm">Ask questions like &quot;How do I create a stealth address?&quot; or &quot;What are zk receipts?&quot;</p>
           </div>
         </div>
       </div>

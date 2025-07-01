@@ -261,19 +261,19 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
 
       // Add user to notifications system with proper error handling
       try {
-        await notificationClient.addUserToNotifications(inboxId, undefined);
+      await notificationClient.addUserToNotifications(inboxId, undefined);
       } catch (error) {
         console.warn("Failed to add user to notifications (Redis may not be configured):", error);
       }
 
       // Set default preferences with error handling
       try {
-        await notificationClient.setUserPreferences({
-          userId: inboxId,
-          enableMilestones: true,
-          enablePayments: true,
-          enableSocial: true,
-          enableFKSRewards: true,
+      await notificationClient.setUserPreferences({
+        userId: inboxId,
+        enableMilestones: true,
+        enablePayments: true,
+        enableSocial: true,
+        enableFKSRewards: true,
           lastNotificationTime: new Date().toISOString(),
           farcaster: false,
           achievements: false,
@@ -289,15 +289,15 @@ export const XMTPProvider: React.FC<XMTPProviderProps> = ({
 
       // Store user activity stats for stats dashboard with error handling
       try {
-        await notificationClient.cacheUserStats(inboxId, {
-          totalLinks: 0,
-          totalPurchases: 0,
-          totalRevenue: 0,
-          joinedAt: new Date().toISOString(),
-          lastActive: new Date().toISOString(),
-          xmtpAddress: effectiveAddress,
-          connectionType: connectionType || 'unknown'
-        });
+      await notificationClient.cacheUserStats(inboxId, {
+        totalLinks: 0,
+        totalPurchases: 0,
+        totalRevenue: 0,
+        joinedAt: new Date().toISOString(),
+        lastActive: new Date().toISOString(),
+        xmtpAddress: effectiveAddress,
+        connectionType: connectionType || 'unknown'
+      });
       } catch (error) {
         console.warn("Failed to cache user stats (Redis may not be configured):", error);
       }

@@ -352,8 +352,8 @@ app.get("/api/agent/info", (req, res) => {
           status: "initializing",
           error: "XMTP agent is currently initializing or experiencing connectivity issues",
           features: [
-            "X402 Content Creation (Limited)",
-            "Basic API Access", 
+            "Stealth Address Generation (Limited)",
+            "Privacy Analysis (Basic)", 
             "Fallback Mode Active",
             "Retrying Connection..."
           ],
@@ -371,13 +371,13 @@ app.get("/api/agent/info", (req, res) => {
         address: agentInfo.address,
         status: "active",
         features: [
-          "X402 Content Creation",
-          "Smart Wallet Operations", 
-          "AI-Powered Responses",
-          "dStealth Address Lookup",
-          "Privacy-focused Scanning",
-          "Proxy402 Link Management",
-          "ZK Proof Storage"
+          "Stealth Address Generation",
+          "ZK Receipt Creation", 
+          "Anonymous Payment Links",
+          "Privacy Score Analysis",
+          "fkey.id Integration",
+          "Multi-chain Stealth Support",
+          "FluidKey Rewards System"
         ],
         fallbackMode: false
       }

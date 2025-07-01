@@ -149,11 +149,11 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
         return (
           <div className="h-full space-y-4 mobile-scroll hide-scrollbar overflow-y-auto">
             {/* Always show search component prominently */}
-            <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-600/30 rounded-lg p-4">
+            <div className="bg-gradient-to-r from-purple-900/20 to-blue-900/20 border border-purple-600/30 rounded-lg p-4">
               <div className="flex items-center gap-3 mb-3">
-                <Search className="h-5 w-5 text-blue-400" />
-                <h2 className="text-lg font-semibold text-white">User Search</h2>
-                <span className="text-sm text-blue-300">Find stealth address to pay</span>
+                <Search className="h-5 w-5 text-purple-400" />
+                <h2 className="text-lg font-semibold text-white">Stealth Address Lookup</h2>
+                <span className="text-sm text-purple-300">Find users & create anonymous payments</span>
               </div>
               <FkeySearch />
             </div>
@@ -169,8 +169,8 @@ export default function MainInterface({ showEarningsChart, onCloseEarningsChart 
                     <span className="text-white font-bold text-sm">📊</span>
                   </div>
                   <div className="text-left">
-                    <h3 className="text-lg font-semibold text-white">Activity Dashboard</h3>
-                    <p className="text-sm text-gray-400">Privacy actions, earnings, and user metrics</p>
+                    <h3 className="text-lg font-semibold text-white">Privacy Dashboard</h3>
+                    <p className="text-sm text-gray-400">Stealth transactions, zk receipts, and privacy metrics</p>
                   </div>
                 </div>
                 {showActivityStats ? (

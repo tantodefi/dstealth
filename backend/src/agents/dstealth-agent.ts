@@ -573,79 +573,421 @@ export class DStealthAgent {
       console.log('🔄 Initial conversation sync...');
       await this.client.conversations.sync();
       
-      // 🔥 FIXED: Simplified stream processing without aggressive sync loops
+      // Get all conversations and log them for debugging
+      const conversations = await this.client.conversations.list();
+      console.log(`📋 Agent has ${conversations.length} conversations`);
+      
+      // Sync each conversation individually to ensure we can receive messages
+      for (const conversation of conversations) {
+        try {
+          await conversation.sync();
+          console.log(`🔄 Synced conversation: ${conversation.id}`);
+        } catch (syncError) {
+          console.warn(`⚠️ Failed to sync conversation ${conversation.id}:`, syncError);
+        }
+      }
+      
+      // 🔥 SIMPLIFIED: Clean message stream processing
       console.log('🌊 Starting message stream...');
       const messageStream = await this.client.conversations.streamAllMessages();
       console.log('✅ Message stream created, listening for messages...');
+
+      // Force one more sync right before listening
+      console.log('🔄 Final sync before message processing...');
+      await this.client.conversations.sync();
+      let finalConversations = await this.client.conversations.list();
+
+      // Add VERY aggressive periodic conversation sync to catch new conversations  
+      const syncInterval = setInterval(async () => {
+        try {
+          console.log('🔄 Periodic conversation sync...');
+          await this.client!.conversations.sync();
+          const currentConversations = await this.client!.conversations.list();
+          const newCount = currentConversations.length;
+          
+          // Log ALL current conversation IDs for debugging
+          const currentIds = currentConversations.map(c => c.id);
+          const previousIds = finalConversations.map(c => c.id);
+          
+          // Check for any new conversation IDs
+          const newConversationIds = currentIds.filter(id => !previousIds.includes(id));
+          
+          if (newConversationIds.length > 0) {
+            console.log(`🆕 Found ${newConversationIds.length} new conversation IDs: ${newConversationIds.join(', ')}`);
+            
+            // Process messages from ALL newly discovered conversations
+            for (const newId of newConversationIds) {
+              const newConversation = currentConversations.find(c => c.id === newId);
+              if (!newConversation) continue;
+              
+              try {
+                await newConversation.sync();
+                const messages = await newConversation.messages();
+                console.log(`📬 NEW Conversation ${newConversation.id}: ${messages.length} messages`);
+                
+                // Process ALL unprocessed user messages from this conversation
+                for (let j = messages.length - 1; j >= 0; j--) {
+                  const message = messages[j];
+                  if (message.senderInboxId !== this.client!.inboxId) {
+                    // Check if we already processed this message
+                    if (!this.processedMessages.has(message.id)) {
+                      console.log(`🔄 Processing unprocessed message from new conversation: "${message.content}"`);
+                      await this.processIncomingMessage(message);
+                      
+                      // Mark as processed
+                      this.processedMessages.add(message.id);
+                      
+                      // Keep processed messages list manageable
+                      if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
+                        const firstItem = this.processedMessages.values().next().value;
+                        this.processedMessages.delete(firstItem);
+                      }
+                    }
+                  }
+                }
+              } catch (error) {
+                console.warn(`⚠️ Failed to process new conversation ${newConversation.id}:`, error);
+              }
+            }
+            
+            // Update our conversation list
+            finalConversations.splice(0, finalConversations.length, ...currentConversations);
+          } else if (newCount !== finalConversations.length) {
+            console.log(`📋 Conversation count changed from ${finalConversations.length} to ${newCount} but no new IDs detected`);
+            finalConversations.splice(0, finalConversations.length, ...currentConversations);
+          }
+          
+          console.log(`📋 Current conversation count: ${newCount}`);
+          
+          // DEBUG: Log first few conversation IDs
+          if (currentIds.length > 0) {
+            console.log(`🔍 Current conversation IDs (first 3): ${currentIds.slice(0, 3).join(', ')}`);
+          }
+          
+        } catch (syncError) {
+          console.warn('⚠️ Periodic sync failed:', syncError);
+        }
+      }, 5000); // Even more aggressive: every 5 seconds
+
+      // Cleanup interval on shutdown
+      const originalShutdown = this.shutdown.bind(this);
+      this.shutdown = async () => {
+        clearInterval(syncInterval);
+        return originalShutdown();
+      };
+      console.log(`📋 Final conversation count: ${finalConversations.length}`);
+
+      // 🔥 CRITICAL FIX: Process existing messages first
+      console.log('🔍 Processing existing messages from all conversations...');
+      console.log('📋 Known conversation IDs:', finalConversations.map(c => c.id));
+      let existingMessageCount = 0;
       
-      let messageCount = 0;
+      for (const conversation of finalConversations) {
+        try {
+          await conversation.sync();
+          const messages = await conversation.messages();
+          console.log(`📬 Conversation ${conversation.id}: ${messages.length} messages`);
+          
+          // Find the most recent message from a user (not the agent)
+          if (messages.length > 0) {
+            // Look backwards through messages to find the latest user message
+            let latestUserMessage = null;
+            for (let j = messages.length - 1; j >= 0; j--) {
+              const message = messages[j];
+              if (message.senderInboxId !== this.client.inboxId) {
+                latestUserMessage = message;
+                break;
+              }
+            }
+            
+            if (latestUserMessage) {
+              console.log(`🔄 Processing latest user message: "${latestUserMessage.content}" from ${latestUserMessage.senderInboxId}`);
+              existingMessageCount++;
+              
+              // Process this user message
+              await this.processIncomingMessage(latestUserMessage);
+            } else {
+              console.log(`📭 No user messages found in conversation (all ${messages.length} messages from agent)`);
+            }
+          }
+        } catch (error) {
+          console.warn(`⚠️ Failed to process existing messages from conversation ${conversation.id}:`, error);
+        }
+      }
       
-      // Process message stream with deduplication
-      for await (const message of messageStream) {
-        if (this.isShuttingDown) {
-          break;
+      console.log(`✅ Processed ${existingMessageCount} existing messages`);
+
+      // 🔥 FORCE IMMEDIATE RE-SYNC to catch any conversations we might have missed
+      console.log('🔍 Force re-sync to catch any missed conversations...');
+      await this.client.conversations.sync();
+      const resynced = await this.client.conversations.list();
+      
+      if (resynced.length > finalConversations.length) {
+        console.log(`🆕 Found ${resynced.length - finalConversations.length} additional conversations on re-sync!`);
+        
+        // Process messages from newly found conversations
+        for (let i = finalConversations.length; i < resynced.length; i++) {
+          const newConversation = resynced[i];
+          try {
+            await newConversation.sync();
+            const messages = await newConversation.messages();
+            console.log(`📬 RESYNC Conversation ${newConversation.id}: ${messages.length} messages`);
+            
+            // Find the most recent user message (not from agent)
+            if (messages.length > 0) {
+              let latestUserMessage = null;
+              for (let j = messages.length - 1; j >= 0; j--) {
+                const message = messages[j];
+                if (message.senderInboxId !== this.client.inboxId) {
+                  latestUserMessage = message;
+                  break;
+                }
+              }
+              
+              if (latestUserMessage) {
+                console.log(`🔄 Processing message from resync conversation: "${latestUserMessage.content}"`);
+                await this.processIncomingMessage(latestUserMessage);
+                existingMessageCount++;
+              }
+            }
+          } catch (error) {
+            console.warn(`⚠️ Failed to process resync conversation ${newConversation.id}:`, error);
+          }
         }
         
-        messageCount++;
-        console.log(`📬 Received message #${messageCount}:`, {
-          senderInboxId: message?.senderInboxId,
-          content: message?.content,
-          conversationId: message?.conversationId,
-          sentAt: message?.sentAt,
-          messageId: message?.id
-        });
+        finalConversations = resynced;
+        console.log(`✅ After re-sync, processed ${existingMessageCount} total existing messages`);
+      }
 
-        // 🔥 NEW: Message deduplication - prevent infinite loops
-        if (message?.id && this.processedMessages.has(message.id)) {
-          console.log(`⏭️ Skipping already processed message: ${message.id}`);
-          continue;
-        }
+      console.log(`✅ Final total: processed ${existingMessageCount} existing messages from ${finalConversations.length} conversations`);
 
-        // Skip own messages
-        if (message?.senderInboxId.toLowerCase() === this.client.inboxId.toLowerCase()) {
-          console.log(`⏭️ Skipping own message`);
-          continue;
-        }
+      // 🔥 HYBRID MESSAGE DETECTION: Stream ALL messages + sync-based discovery  
+      console.log('🎧 Starting HYBRID message stream for NEW messages...');
+      let newMessageCount = 0;
+      
+      // Test if stream is working at all
+      const streamTestTimeout = setTimeout(() => {
+        console.log('⚠️ No NEW messages received in first 60 seconds - stream is working but no new messages sent');
+      }, 60000);
 
-        // Skip non-text messages
-        if (message?.contentType?.typeId !== 'text') {
-          console.log(`⏭️ Skipping non-text message`);
-          continue;
-        }
+      for await (const message of messageStream) {
+        try {
+          newMessageCount++;
+          console.log(`\n🔔 NEW MESSAGE STREAM EVENT #${newMessageCount}:`);
+          
+          // Clear the "no messages" timeout since we got one
+          if (newMessageCount === 1) {
+            clearTimeout(streamTestTimeout);
+          }
+          
+          // Skip if shutting down
+          if (this.isShuttingDown) {
+            console.log('🛑 Shutting down, breaking message loop');
+            break;
+          }
 
-        // 🔥 NEW: Mark message as processed before processing
-        if (message?.id) {
+          // Log ALL stream events for debugging
+          console.log('📨 RAW STREAM MESSAGE:', {
+            hasMessage: !!message,
+            content: message?.content || 'no-content',
+            senderInboxId: message?.senderInboxId || 'no-sender',
+            agentInboxId: this.client.inboxId,
+            contentType: message?.contentType?.typeId || 'no-type',
+            conversationId: message?.conversationId || 'no-conversation',
+            messageId: message?.id || 'no-id',
+            sentAt: message?.sentAt || 'no-timestamp'
+          });
+
+          // Basic message validation
+          if (!message || !message.content || !message.senderInboxId) {
+            console.log('⏭️ Skipping invalid message (missing content or sender)');
+            console.log('   - hasMessage:', !!message);
+            console.log('   - hasContent:', !!(message?.content));
+            console.log('   - hasSender:', !!(message?.senderInboxId));
+            continue;
+          }
+
+          // Enhanced message details for debugging
+          const contentString = typeof message.content === 'string' ? message.content : String(message.content);
+          console.log('📧 VALID MESSAGE DETAILS:', {
+            content: `"${contentString}"`,
+            contentLength: contentString.length,
+            contentType: typeof message.content,
+            senderInboxId: message.senderInboxId,
+            agentInboxId: this.client.inboxId,
+            isOwnMessage: message.senderInboxId === this.client.inboxId,
+            messageContentType: message.contentType?.typeId,
+            conversationId: message.conversationId
+          });
+
+          // Skip own messages - FIXED comparison
+          if (message.senderInboxId === this.client.inboxId) {
+            console.log('⏭️ Skipping own message');
+            continue;
+          }
+
+          // Skip non-text messages
+          if (message.contentType?.typeId !== 'text') {
+            console.log('⏭️ Skipping non-text message:', message.contentType?.typeId);
+            continue;
+          }
+
+          // 🔥 CRITICAL: Check if we already processed this message to prevent duplicates
+          if (this.processedMessages.has(message.id)) {
+            console.log(`⏭️ Skipping already processed message: ${message.id}`);
+            continue;
+          }
+
+          console.log(`🚀 PROCESSING NEW MESSAGE from ${message.senderInboxId}: "${message.content}"`);
+          
+          // Mark as processed BEFORE processing to prevent race conditions
           this.processedMessages.add(message.id);
           
           // Keep processed messages list manageable
           if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
-            const messagesArray = Array.from(this.processedMessages);
-            const keepMessages = messagesArray.slice(-this.MAX_PROCESSED_MESSAGES / 2);
-            this.processedMessages = new Set(keepMessages);
+            const firstItem = this.processedMessages.values().next().value;
+            this.processedMessages.delete(firstItem);
           }
-        }
 
-        console.log(`✅ Processing new message from ${message.senderInboxId}`);
-        
-        // Process the message
-        try {
-          await this.processMessageEnhanced(message);
-          console.log(`✅ Message processed successfully`);
+          // 🔥 HYBRID APPROACH: Try to get conversation by ID first, then fall back to getConversationById
+          try {
+            // Method 1: Try to get conversation from our synced list
+            let conversation = await this.client.conversations.getConversationById(message.conversationId);
+            
+            // Method 2: If not found, force a conversation sync and try again
+            if (!conversation) {
+              console.log(`🔄 Conversation ${message.conversationId} not found, forcing sync...`);
+              await this.client.conversations.sync();
+              conversation = await this.client.conversations.getConversationById(message.conversationId);
+            }
+            
+            // Method 3: If still not found, try to process the message anyway
+            if (!conversation) {
+              console.log(`⚠️ Conversation ${message.conversationId} still not found after sync, processing message directly`);
+              
+              // Process message directly without conversation context
+              const messageContent = message.content;
+              if (typeof messageContent === 'string') {
+                const response = await this.processMessage(messageContent, message.senderInboxId);
+                
+                if (response && response.trim()) {
+                  console.log(`✅ Generated direct response (${response.length} chars): "${response.substring(0, 100)}..."`);
+                  
+                  // Try to send response by creating a new DM
+                  try {
+                    console.log(`🔄 Creating new DM to send response to ${message.senderInboxId}...`);
+                    
+                    // Get the sender's address from inboxId
+                    const inboxState = await this.client.preferences.inboxStateFromInboxIds([message.senderInboxId]);
+                    if (inboxState && inboxState.length > 0 && inboxState[0].identifiers.length > 0) {
+                      const senderAddress = inboxState[0].identifiers[0].identifier;
+                      console.log(`📮 Found sender address: ${senderAddress}`);
+                      
+                      // Create new DM with sender
+                      const newDm = await this.client.conversations.newDm(senderAddress);
+                      await newDm.send(response);
+                      console.log(`✅ Response sent via new DM to ${senderAddress}`);
+                    } else {
+                      console.log(`❌ Could not find address for inbox ID: ${message.senderInboxId}`);
+                    }
+                  } catch (dmError) {
+                    console.error(`❌ Failed to send response via new DM:`, dmError);
+                  }
+                }
+              }
+            } else {
+              // Standard processing with found conversation
+              await this.processIncomingMessage(message);
+            }
+            
+          } catch (error) {
+            console.error(`❌ Error in hybrid message processing:`, error);
+            
+            // Final fallback: try direct message processing
+            try {
+              const messageContent = message.content;
+              if (typeof messageContent === 'string') {
+                const response = await this.processMessage(messageContent, message.senderInboxId);
+                console.log(`🔄 Fallback processing generated response: "${response?.substring(0, 50)}..."`);
+              }
+            } catch (fallbackError) {
+              console.error(`❌ Even fallback processing failed:`, fallbackError);
+            }
+          }
+          
         } catch (error) {
-          console.error(`❌ Error processing message:`, error);
+          console.error('❌ Error in hybrid message loop:', error);
+          // Continue processing other messages even if one fails
         }
       }
-      
+
     } catch (error) {
       console.error('❌ Message listener error:', error);
       throw error;
     }
   }
 
+  // 🔥 NEW: Simplified message processing
+  private async processIncomingMessage(message: any): Promise<void> {
+    try {
+      const messageContent = message.content;
+      const senderInboxId = message.senderInboxId;
+      
+      if (typeof messageContent !== 'string') {
+        console.warn('⚠️ Message content is not a string, skipping processing');
+        return;
+      }
+      const conversationId = message.conversationId;
+
+      console.log(`🔄 Processing message: "${messageContent}" from ${senderInboxId}`);
+
+      // Generate response using existing logic
+      const response = await this.processMessage(messageContent, senderInboxId);
+      
+      if (!response || !response.trim()) {
+        console.warn('⚠️ No response generated for message');
+        return;
+      }
+
+      console.log(`✅ Generated response (${response.length} chars): "${response.substring(0, 100)}..."`);
+
+      // Get conversation and send response
+      const conversation = await this.client!.conversations.getConversationById(conversationId);
+      
+      if (!conversation) {
+        console.error(`❌ Could not find conversation: ${conversationId}`);
+        return;
+      }
+
+      // Send the response
+      await conversation.send(response);
+      console.log(`✅ Response sent successfully to ${senderInboxId}`);
+
+    } catch (error) {
+      console.error('❌ Error processing incoming message:', error);
+      
+      // Send error response as fallback
+      try {
+        const conversation = await this.client!.conversations.getConversationById(message.conversationId);
+        if (conversation) {
+          await conversation.send('🤖 Sorry, I encountered an error. Please try again or type "help" for assistance.');
+          console.log('✅ Error response sent');
+        }
+      } catch (sendError) {
+        console.error('❌ Failed to send error response:', sendError);
+      }
+    }
+  }
+
   private async processMessageEnhanced(message: any): Promise<void> {
     try {
-      const messageContent = message.content as string;
+      const messageContent = message.content;
       const senderInboxId = message.senderInboxId;
+      
+      if (typeof messageContent !== 'string') {
+        console.warn('⚠️ Message content is not a string, skipping enhanced processing');
+        return;
+      }
       const conversationId = message.conversationId;
 
       console.log(`📨 Processing message from ${senderInboxId}: "${messageContent}"`);
@@ -945,11 +1287,6 @@ This fkey.id doesn't exist yet. You can:
       };
 
       await agentDb.storeUserStealthData(stealthData);
-      // TODO: Optimize logging - temporarily disabled to prevent Redis spam
-      // await agentDb.logUserInteraction(senderInboxId, 'fkey_set', { 
-      //   fkeyId: `${username}.fkey.id`,
-      //   address: lookupResult.address 
-      // });
 
       return `✅ **Excellent! Your fkey.id is verified!**
 
@@ -976,6 +1313,39 @@ ${this.getDStealthMiniAppLink()}
 
     } catch (error) {
       return `❌ **Error setting fkey.id**\nPlease try again or type /help for assistance.`;
+    }
+  }
+
+  private async handleFkeyLookup(fkeyId: string, senderInboxId: string): Promise<string> {
+    try {
+      const cachedData = await agentDb.getStealthDataByFkey(fkeyId);
+      if (cachedData) {
+        return `🔑 **Stealth Address Found (cached)**\n📍 fkey.id: ${fkeyId}\n🏠 Address: ${cachedData.stealthAddress}`;
+      }
+
+      const lookupResult = await this.apiClient.lookupFkey(fkeyId);
+      
+      if (!lookupResult.success || !lookupResult.isRegistered) {
+        return `❌ **Fkey Lookup Failed**\n${lookupResult.error || 'Profile not found'}`;
+      }
+
+      const stealthData: UserStealthData = {
+        userId: senderInboxId,
+        fkeyId,
+        stealthAddress: lookupResult.address,
+        zkProof: lookupResult.proof,
+        lastUpdated: Date.now(),
+        requestedBy: this.client!.inboxId
+      };
+
+      await agentDb.storeUserStealthData(stealthData);
+
+      return `🔑 **Fkey Lookup Successful**
+📍 fkey.id: ${fkeyId}
+🏠 Address: ${lookupResult.address}`;
+
+    } catch (error) {
+      return `❌ **Error looking up fkey.id**\nPlease try again or type /help for assistance.`;
     }
   }
 
@@ -1248,96 +1618,25 @@ Type "/links" to see all your payment links or "/rewards" to check your privacy 
 Type **/help** to see available commands.`;
   }
 
-  private async handleFkeyLookup(fkeyId: string, senderInboxId: string): Promise<string> {
-    try {
-      const cachedData = await agentDb.getStealthDataByFkey(fkeyId);
-      if (cachedData) {
-        return `🔑 **Stealth Address Found (cached)**\n📍 fkey.id: ${fkeyId}\n🏠 Address: ${cachedData.stealthAddress}`;
-      }
-
-      const lookupResult = await this.apiClient.lookupFkey(fkeyId);
-      
-      if (!lookupResult.success || !lookupResult.isRegistered) {
-        return `❌ **Fkey Lookup Failed**\n${lookupResult.error || 'Profile not found'}`;
-      }
-
-      const stealthData: UserStealthData = {
-        userId: senderInboxId,
-        fkeyId,
-        stealthAddress: lookupResult.address,
-        zkProof: lookupResult.proof,
-        lastUpdated: Date.now(),
-        requestedBy: this.client!.inboxId
-      };
-
-      await agentDb.storeUserStealthData(stealthData);
-
-      return `✅ **Stealth Address Retrieved**\n📍 fkey.id: ${fkeyId}\n🏠 Address: ${lookupResult.address}`;
-
-    } catch (error) {
-      return `❌ **Error**\nFailed to lookup fkey.id: ${fkeyId}`;
-    }
-  }
-
   private async handleStealthScan(address: string, senderInboxId: string): Promise<string> {
     try {
-      // Check if user has completed full setup for advanced scanning
-      const hasMiniAppSetup = await this.checkMiniAppRegistration(senderInboxId);
-      
-      await agentDb.logUserInteraction(senderInboxId, 'stealth_scan', { address });
-
       const scanResult = await this.apiClient.scanStealthAddress(address);
-
+      
       if (!scanResult.success) {
-        return `❌ **Scan Failed**: Unable to scan address ${address}`;
+        return `❌ **Scan Failed**\n${scanResult.error || 'Unable to scan address'}`;
       }
 
-      if (!hasMiniAppSetup) {
-        // Basic scan results for users without full setup
-        return `🔍 **Basic Address Scan**: ${address}
-
-⚠️ **Limited Results** (complete setup for full analysis)
-
-📊 **Basic Info**:
-- Address appears valid: ✅
-- Privacy status: Analysis requires setup
-
-🎯 **Unlock Full Scanning**:
-${this.getDStealthMiniAppLink()}
-
-Complete setup and type "/setup complete" for:
-- Detailed privacy scoring
-- Transaction history analysis  
-- FluidKey Score integration
-- Privacy recommendations
-
-Type "/help" for available commands.`;
-      }
-
-      // Full scan results for users with complete setup
-      return `🔍 **Complete Privacy Analysis**: ${address}
-
-📊 **Scan Results**:
-- Privacy Score: ${scanResult.privacyScore || 'Calculating...'}
-- Stealth Transactions: ${scanResult.transactions?.length || 0}
-- Balance: ${scanResult.balance || '0.00'} ETH
-- FluidKey Integration: ✅ Active
-
-🏆 **Privacy Rewards**: Scanning earns you points!
-
-${scanResult.transactions?.length > 0 ? 
-  `📋 **Recent Activity**: Found ${scanResult.transactions.length} privacy transactions` : 
-  '📋 **Activity**: No recent stealth transactions found'
-}
-
-**Need help improving privacy?** Type "create payment link" to start using stealth addresses!`;
+      return `🔍 **Address Scan Results**
+📍 Address: ${address}
+🏆 Privacy Score: ${scanResult.privacyScore || 'Unknown'}
+📊 Activity: ${scanResult.activityLevel || 'Unknown'}`;
 
     } catch (error) {
-      return `❌ **Scan Error**: Failed to analyze address. Please try again or contact support.`;
+      return `❌ **Error scanning address**\nPlease try again or type /help for assistance.`;
     }
   }
 
-  private async handleProxy402Links(senderInboxId: string, userAddress?: string): Promise<string> {
+  private async handleProxy402Links(senderInboxId: string): Promise<string> {
     try {
       // Check if user has completed full setup
       const hasMiniAppSetup = await this.checkMiniAppRegistration(senderInboxId);
@@ -1346,332 +1645,195 @@ ${scanResult.transactions?.length > 0 ?
         return this.requireMiniAppSetup("Links Management");
       }
 
-      await agentDb.logUserInteraction(senderInboxId, 'proxy402_links_view', { userAddress });
-
-      const linksResult = await this.apiClient.getProxy402Links(userAddress);
-
-      if (!linksResult.success) {
-        return `❌ **Failed to fetch links**: Please try again later`;
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      if (!userData?.stealthAddress) {
+        return `❌ **Address Required**\n\nPlease set your fkey.id first!`;
       }
 
-      const links = linksResult.links || [];
-
-      if (links.length === 0) {
-        return `📊 **Your Privacy Links**
-
-🔗 **No links created yet**
-
-**Ready to start earning?**
-- "create payment link for $5" - Anonymous payments
-- "/create content" - Monetized content  
-- "generate proxy402 link" - Advanced monetization
-
-**Privacy Rewards**: Every link earns you points and increases your FluidKey Score!
-
-**Get started**: Try saying "create payment link for $10"`;
+      const linksResult = await this.apiClient.getProxy402Links(userData.stealthAddress);
+      
+      if (!linksResult.success || !linksResult.links || linksResult.links.length === 0) {
+        return `📄 **No Links Found**\n\nYou haven't created any content links yet. Type "/create content" to get started!`;
       }
 
-      const linksList = links.map((link: any, index: number) => 
-        `${index + 1}. **${link.title}** - $${link.price}
-   💰 Earned: $${link.earnings || '0.00'}
-   👀 Views: ${link.views || 0}
-   📅 Created: ${new Date(link.createdAt).toLocaleDateString()}`
-      ).join('\n\n');
+      const linkList = linksResult.links.map((link: any, index: number) => 
+        `${index + 1}. ${link.title || 'Untitled'} - ${link.price || '0'} USDC`
+      ).join('\n');
 
-      const totalEarnings = links.reduce((sum: number, link: any) => sum + (link.earnings || 0), 0);
-
-      return `📊 **Your Privacy Links & Earnings**
-
-💰 **Total Earnings**: $${totalEarnings.toFixed(2)}
-🔗 **Active Links**: ${links.length}
-🏆 **Privacy Rewards**: ✅ Earning points
-
-${linksList}
-
-**Want to create more?**
-- "create payment link for $X" 
-- "/create content title"
-- "generate proxy402 link"
-
-**Privacy tip**: More links = higher FluidKey Score!`;
+      return `📊 **Your Content Links**\n\n${linkList}\n\nType "/create content" to create new monetized content!`;
 
     } catch (error) {
-      return `❌ **Error fetching links**: Please try again or contact support.`;
-    }
-  }
-
-  private async handleCreateContent(command: string, senderInboxId: string): Promise<string> {
-    const parts = command.replace('/create ', '').split(' | ');
-    
-    if (parts.length !== 4) {
-      return `❌ **Invalid format!**\nUse: \`/create [title] | [description] | [price] | [currency]\``;
-    }
-
-    const [title, description, price, currency] = parts.map(p => p.trim());
-    
-    const result = await this.apiClient.createX402Content({
-      title,
-      description,
-      price: parseFloat(price),
-      currency
-    });
-
-    if (result.success) {
-      return `✅ **Content Created!**\n"${title}" - ${price} ${currency}`;
-    } else {
-      return `❌ **Creation Failed**\n${result.error}`;
+      return `❌ **Error fetching links**\nPlease try again or type /help for assistance.`;
     }
   }
 
   private async handleCheckBalance(senderInboxId: string): Promise<string> {
     try {
-      const userAddress = `0x${senderInboxId.slice(0, 40)}`;
-      const balance = await this.apiClient.getBalance(userAddress);
+      // Check if user has completed full setup
+      const hasMiniAppSetup = await this.checkMiniAppRegistration(senderInboxId);
       
-      return `💰 **Your Balance**\n💵 USDC: $${balance?.usdc || '0.00'}\n⚡ ETH: ${balance?.eth || '0.00'}`;
+      if (!hasMiniAppSetup) {
+        return this.requireMiniAppSetup("Balance Checking");
+      }
 
-    } catch (error) {
-      return '❌ Unable to fetch balance';
-    }
-  }
-
-  private shouldUseAI(content: string, context: ConversationContext): boolean {
-    const lowerContent = content.toLowerCase();
-    const aiTriggers = ['what', 'how', 'why', 'explain', 'help me', 'can you', 'stealth', 'x402'];
-    const shouldUse = aiTriggers.some(trigger => lowerContent.includes(trigger));
-    
-    console.log(`🤖 AI Decision for "${content}":`, {
-      shouldUseAI: shouldUse,
-      triggers: aiTriggers.filter(trigger => lowerContent.includes(trigger)),
-      contentLength: content.length
-    });
-    
-    return shouldUse;
-  }
-
-  private async generateAIResponse(content: string, senderInboxId: string, context: ConversationContext): Promise<string | null> {
-    console.log(`🧠 Generating AI response for: "${content}"`);
-    
-    if (!this.openai) {
-      console.log(`❌ OpenAI client not initialized`);
-      return null;
-    }
-
-    try {
-      // Get user's stored data for personalized responses
       const userData = await agentDb.getStealthDataByUser(senderInboxId);
-      const userContext = userData ? `User has fkey.id: ${userData.fkeyId}, stealth address: ${userData.stealthAddress}` : 'New user';
+      if (!userData?.stealthAddress) {
+        return `❌ **Address Required**\n\nPlease set your fkey.id first!`;
+      }
 
-      const systemPrompt = `You are a dStealth Web3 Agent specializing in privacy-focused cryptocurrency operations and content monetization.
-
-CORE CAPABILITIES:
-🔑 Stealth Address Management - Help users find and manage stealth addresses via fkey.id
-🕵️ Privacy Analysis - Scan addresses for activity and privacy scores  
-📡 Proxy402 Integration - Manage monetized content links and payments
-🎨 X402 Content Creation - Help create and monetize digital content
-💰 Portfolio Tracking - Monitor balances and transactions
-
-AVAILABLE COMMANDS:
-/fkey <fkey.id> - Lookup stealth address
-/scan <address> - Analyze address privacy
-/links - View monetized content
-/create <title> | <desc> | <price> | <currency> - Create content
-/balance - Check portfolio
-/help - Show all commands
-
-USER CONTEXT: ${userContext}
-
-RESPONSE STYLE:
-- Keep responses under 150 words
-- Use emojis for clarity
-- Always suggest relevant commands
-- Focus on privacy and Web3 best practices
-- Be helpful and educational about stealth addresses and crypto privacy`;
-
-      console.log(`📤 Making OpenAI request for: "${content.substring(0, 50)}..."`);
+      const balanceResult = await this.apiClient.getBalance(userData.stealthAddress);
       
-      const completion = await this.openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: content }
-        ],
-        max_tokens: 200,
-        temperature: 0.7,
-      });
+      if (!balanceResult.success) {
+        return `❌ **Balance Check Failed**\n${balanceResult.error || 'Unable to check balance'}`;
+      }
 
-      const response = completion.choices[0]?.message?.content?.trim() || null;
-      console.log(`📥 OpenAI response: "${response?.substring(0, 100)}..."`);
-      
-      return response;
+      return `💰 **Account Balance**
+🏠 Address: ${userData.stealthAddress}
+💵 Balance: ${balanceResult.balance || '0'} USDC
+🏆 Privacy Score: ${balanceResult.privacyScore || 'Unknown'}`;
 
     } catch (error) {
-      console.error('OpenAI API error:', error);
-      return 'I encountered an error with AI processing. Please try using specific commands like /help, /fkey, or /scan.';
+      return `❌ **Error checking balance**\nPlease try again or type /help for assistance.`;
+    }
+  }
+
+  private async handleCreateContent(command: string, senderInboxId: string): Promise<string> {
+    try {
+      // Check if user has completed full setup
+      const hasMiniAppSetup = await this.checkMiniAppRegistration(senderInboxId);
+      
+      if (!hasMiniAppSetup) {
+        return this.requireMiniAppSetup("Content Creation");
+      }
+
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      if (!userData?.stealthAddress) {
+        return `❌ **Address Required**\n\nPlease set your fkey.id first!`;
+      }
+
+      return `🚧 **Content Creation Coming Soon**
+
+Advanced content creation features are in development!
+
+**Available now:**
+- Payment links: "create payment link for $10"
+- Address scanning: /scan <address>
+- Balance checking: /balance
+
+**Coming soon:**
+- Monetized content creation
+- Privacy-protected file sharing
+- Anonymous content publishing
+
+Stay tuned for updates!`;
+
+    } catch (error) {
+      return `❌ **Error creating content**\nPlease try again or type /help for assistance.`;
     }
   }
 
   private processBasicKeywords(content: string, senderInboxId: string): string | null {
-    const trimmed = content.toLowerCase().trim();
-    
-    // Handle "no" response for users without fkey.id - multiple variations
-    if (trimmed === 'no' || 
-        trimmed === 'nope' || 
-        trimmed === 'no i don\'t' ||
-        trimmed === 'i don\'t have one' ||
-        trimmed === 'don\'t have fkey' ||
-        trimmed === 'no fkey' ||
-        trimmed.includes("don't have") ||
-        trimmed.includes("no fkey") ||
-        trimmed.includes("don't have fkey") ||
-        trimmed.includes("need to create")) {
+    const lower = content.toLowerCase().trim();
+
+    // Handle greetings
+    if (lower === 'hi' || lower === 'hello' || lower === 'hey' || lower === 'sup' || lower === 'yo') {
+      console.log('👋 Greeting detected');
+      return null; // Let it fall through to first-time user flow
+    }
+
+    // Handle "no" responses
+    if (lower === 'no' || lower === 'nope' || lower === 'none' || lower === 'i don\'t have one') {
       return this.handleNoFkeyId();
     }
 
-    // Handle greetings with better onboarding
-    if (trimmed.includes('hello') || trimmed.includes('hi') || trimmed.includes('hey')) {
-      return `👋 **Hello! I'm your dStealth privacy agent.**
-
-🥷 I help you earn rewards for using stealth addresses and privacy tools!
-
-**🔑 Quick Question: Do you have a fkey.id?**
-- **YES**: Tell me your username (e.g. "tantodefi")
-- **NO**: Say "no" and I'll send you an invite link!
-
-Type /help for full commands or let's get you started earning privacy rewards!`;
+    // Handle affirmative responses without username
+    if (lower === 'yes' || lower === 'yeah' || lower === 'yep' || lower === 'i have one') {
+      return `✅ **Great! You have a fkey.id**\n\nPlease tell me your username (e.g., "tantodefi" for tantodefi.fkey.id)`;
     }
-    
-    if (trimmed.includes('help')) {
+
+    // Handle help requests
+    if (lower.includes('help') || lower.includes('what can you do') || lower.includes('commands')) {
       return this.getHelpMessage();
     }
-    
-    if (trimmed.includes('privacy') || trimmed.includes('stealth')) {
-      return '🔒 I help with stealth addresses and privacy-focused Web3 transactions. Type /help for more details!';
-    }
-    
+
     return null;
   }
 
   private getHelpMessage(): string {
-    return `🥷 **dStealth Agent - Privacy Rewards Helper**
+    return `🤖 **dStealth Agent - Complete Command List**
 
-**💰 EARN REWARDS FOR PRIVACY:**
-- Use stealth addresses to earn points
-- Generate anonymous payment links  
-- Build your FluidKey Score
-- Complete privacy challenges
+**🔧 Setup Commands:**
+• Tell me your **fkey.id username** (e.g., "tantodefi")
+• Say **"no"** if you don't have a fkey.id yet
+• **/setup complete** - After finishing mini app setup
 
-**🚀 GETTING STARTED:**
-1. Tell me your fkey.id username (or say "no" to create one)
-2. Complete setup in the dStealth mini app
-3. Type "/setup complete" to unlock all features
+**🔍 Privacy Tools:**
+• **/scan <address>** - Check address privacy score
+• **/fkey <username>** - Look up any fkey.id
 
-**⚙️ SETUP COMMANDS:**
-• **/setup complete** - Finish mini app onboarding
-• **username** - Set your fkey.id (e.g., "tantodefi")
-• **"no"** - Get FluidKey creation link
+**💳 Payment Features:** (Requires setup)
+• **"create payment link for $X"** - Generate anonymous payment links
+• **/balance** - Check your stealth address balance
+• **/links** - View your content links
 
-**🔒 PRIVACY FEATURES** (after setup):
-• **create payment link for $X** - Anonymous payments
-• **/scan <address>** - Privacy analysis
-• **/links** - View your payment links & earnings
-• **/balance** - Check balances
-• **/fkey <username.fkey.id>** - Lookup stealth addresses
+**📡 Advanced Features:** (Requires setup)
+• **/create content** - Monetized content creation (coming soon)
+• **/rewards** - Check privacy earnings (coming soon)
 
-**📡 CONTENT MONETIZATION:**
-• **/create content** - Generate Proxy402 links
+**ℹ️ Info Commands:**
+• **/help** - This help message
 
-**🏆 PRIVACY REWARDS TIPS:**
-- More stealth transactions = higher rewards
-- Anonymous payments boost FluidKey Score
-- Privacy challenges unlock bonus points
-- Consistent usage increases earning multiplier
+**🎯 Quick Start:**
+1. Tell me your fkey.id username OR say "no" to create one
+2. Complete setup in the dStealth Mini App
+3. Return and type "/setup complete"
+4. Start earning privacy rewards!
 
-**❓ Need help?** Just tell me what you want to do!
-
-**🎯 Start earning**: "create payment link for $5"`;
+**💡 Pro Tip:** The more you use stealth addresses and privacy features, the higher your FluidKey Score and rewards!`;
   }
 
-  private getFallbackResponse(setupStatus: string): string {
-    if (setupStatus === 'new') {
-      return '👋 Welcome to dStealth! I help with stealth addresses and privacy rewards. Tell me your fkey.id username to get started, or say "no" if you don\'t have one yet.';
-    } else if (setupStatus === 'fkey_pending') {
-      return '📍 Please tell me your fkey.id username (e.g., "tantodefi" for tantodefi.fkey.id) or say "no" if you don\'t have one.';
-    } else if (setupStatus === 'miniapp_pending') {
-      return '🎯 Complete your setup in the dStealth mini app, then type "/setup complete" to unlock all features!';
-    } else if (setupStatus === 'complete') {
-      return this.getHelpMessage();
-    } else {
-      return '🤖 Sorry, I encountered an error processing your request. Please try again or type "help" for assistance.';
-    }
-  }
-
-  stop() {
-    this.isRunning = false;
-  }
-
-  getContactInfo(): AgentContactInfo {
+  // Helper method to get current status
+  getStatus(): { isRunning: boolean; agentAddress: string | null } {
     return {
-      inboxId: this.client?.inboxId || 'unknown',
-      address: this.agentAddress || 'unknown',
-      status: this.isRunning ? 'active' : 'inactive'
+      isRunning: this.isRunning,
+      agentAddress: this.agentAddress
     };
   }
 
-  // Public getters for external access
-  getAgentAddress(): string | null {
-    return this.agentAddress;
+  // Get contact information for API endpoints
+  getContactInfo(): { inboxId: string; address: string } {
+    return {
+      inboxId: this.client?.inboxId || 'not-initialized',
+      address: this.agentAddress || 'not-initialized'
+    };
   }
 
-  getInboxId(): string | null {
-    return this.client?.inboxId || null;
-  }
-
-  async startListeningPublic(): Promise<void> {
-    return this.startListening();
-  }
-
-  private async testXMTPConnection(): Promise<void> {
+  // Graceful shutdown
+  async shutdown(): Promise<void> {
+    if (this.isShuttingDown) return;
+    
+    this.isShuttingDown = true;
+    console.log('🔄 Shutting down dStealth Agent...');
+    
     try {
-      console.log('🧪 Testing XMTP connection...');
+      // Stop message processing
+      this.isRunning = false;
       
-      // Test basic client functionality
-      console.log(`🔍 Client inbox ID: ${this.client?.inboxId}`);
-      console.log(`🔍 Client installation ID: ${this.client?.installationId}`);
+      // Shutdown worker pools and queues
+      this.workerPool.shutdown();
+      this.messageQueue.shutdown();
       
-      // Test conversation listing
-      await this.client!.conversations.sync();
-      const conversations = await this.client!.conversations.list();
-      console.log(`📋 Initial conversations: ${conversations.length}`);
+      // Clear XMTP client reference
+      if (this.client) {
+        this.client = null;
+      }
       
-      console.log('✅ XMTP connection test passed');
-      
+      console.log('✅ dStealth Agent shutdown complete');
     } catch (error) {
-      console.error('❌ XMTP connection test failed:', error);
-      // Don't throw - let the agent continue
+      console.error('❌ Error during shutdown:', error);
     }
   }
 }
 
-// Main execution
-async function main() {
-  const agent = new DStealthAgent();
-  
-  try {
-    await agent.initialize();
-    
-    console.log('🚀 dStealth Agent started!');
-    console.log(`📬 Contact: ${agent.getAgentAddress()}`);
-    console.log(`🆔 Inbox: ${agent.getInboxId()}`);
-    
-    await agent.startListeningPublic();
-    
-  } catch (error) {
-    console.error('❌ Failed to start dStealth Agent:', error);
-    process.exit(1);
-  }
-}
-
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch(console.error);
-}
+// Export the agent instance
+export const dStealthAgent = new DStealthAgent();
