@@ -575,16 +575,27 @@ export class DStealthAgent {
     for await (const message of stream) {
       if (this.isShuttingDown) break;
       
+      console.log(`📬 Received message:`, {
+        senderInboxId: message?.senderInboxId,
+        contentType: message?.contentType?.typeId,
+        content: message?.content,
+        conversationId: message?.conversationId
+      });
+      
       // Skip own messages
       if (message?.senderInboxId.toLowerCase() === this.client.inboxId.toLowerCase()) {
+        console.log(`⏭️ Skipping own message from ${message.senderInboxId}`);
         continue;
       }
 
       // Skip non-text messages
       if (message?.contentType?.typeId !== 'text') {
+        console.log(`⏭️ Skipping non-text message type: ${message?.contentType?.typeId}`);
         continue;
       }
 
+      console.log(`✅ Processing valid message from ${message.senderInboxId}`);
+      
       // Process message with enhanced context and performance features
       await this.processMessageEnhanced(message);
     }
@@ -596,67 +607,56 @@ export class DStealthAgent {
       const senderInboxId = message.senderInboxId;
       const conversationId = message.conversationId;
 
-      // Get conversation context
-      const context = await this.contextManager.getContext(senderInboxId, conversationId);
-      
-      // Add user message to history
-      this.contextManager.addToHistory(context, 'user', messageContent);
+      console.log(`📨 Processing message from ${senderInboxId}: "${messageContent}"`);
+      console.log(`🔍 Conversation ID: ${conversationId}`);
 
-      // Analyze message for triggers and processing requirements
-      const analysis = this.analyzeMessage(messageContent, context);
-      
-      // Determine processing strategy based on message complexity
+      // Simplify processing - skip complex context for now and go straight to message processing
       let response: string;
       
-      if (analysis.requiresAI || analysis.isComplex) {
-        // Use worker thread for complex processing
-        const taskResult = await this.workerPool.executeTask({
-          id: `ai-${Date.now()}`,
-          type: 'ai_processing',
-          data: {
-            message: messageContent,
-            context: context,
-            analysis: analysis
-          },
-          priority: analysis.priority
-        });
-        
-        response = await this.generateResponseFromTask(taskResult, context, analysis);
-      } else {
-        // Process directly for simple messages
-        response = await this.processMessage(messageContent, senderInboxId, context);
+      try {
+        // Process message directly with simpler logic
+        response = await this.processMessage(messageContent, senderInboxId);
+        console.log(`✅ Generated response: "${response.substring(0, 100)}..."`);
+      } catch (processError) {
+        console.error('❌ Error in processMessage:', processError);
+        response = '🤖 Sorry, I encountered an error processing your message. Please try again or type "help" for assistance.';
       }
 
       // Send response
+      console.log(`🔄 Getting conversation by ID: ${conversationId}`);
       const conversation = await this.client!.conversations.getConversationById(conversationId);
-      if (conversation && response) {
-        await conversation.send(response);
-        
-        // Add agent response to history
-        this.contextManager.addToHistory(context, 'agent', response, analysis.primaryTrigger);
+      
+      if (!conversation) {
+        console.error(`❌ Could not find conversation with ID: ${conversationId}`);
+        return;
+      }
+      
+      console.log(`✅ Found conversation, sending response...`);
+      
+      if (response) {
+        try {
+          await conversation.send(response);
+          console.log(`✅ Response sent successfully to ${senderInboxId}`);
+        } catch (sendError) {
+          console.error('❌ Failed to send response:', sendError);
+          throw sendError;
+        }
+      } else {
+        console.warn('⚠️ No response generated for message');
       }
 
-      // Update context
-      await this.contextManager.updateContext(context);
-
-      // TODO: Optimize logging - temporarily disabled to prevent Redis spam
-      // await agentDb.logUserInteraction(senderInboxId, 'message_processed', {
-      //   trigger: analysis.primaryTrigger,
-      //   setupStatus: context.setupStatus,
-      //   responseLength: response.length
-      // });
-
     } catch (error) {
-      console.error('Error processing enhanced message:', error);
+      console.error('❌ Error processing enhanced message:', error);
       
       // Send error response
       try {
         const conversation = await this.client!.conversations.getConversationById(message.conversationId);
         if (conversation) {
           await conversation.send('🤖 Sorry, I encountered an error processing your message. Please try again or type "help" for assistance.');
+          console.log('✅ Error response sent');
         }
       } catch (sendError) {
-        console.error('Failed to send error response:', sendError);
+        console.error('❌ Failed to send error response:', sendError);
       }
     }
   }
@@ -725,47 +725,48 @@ export class DStealthAgent {
     }
 
     // For now, fall back to regular processing since we're not using actual AI workers yet
-    return await this.processMessage(analysis.data?.message || '', context.userId, context);
+    return await this.processMessage(analysis.data?.message || '', context.userId);
   }
 
   // Keep all existing message processing logic intact
-  private async processMessage(messageContent: string, senderInboxId: string, context?: ConversationContext): Promise<string> {
+  private async processMessage(messageContent: string, senderInboxId: string): Promise<string> {
     const trimmed = messageContent.trim();
+    
+    console.log(`🔍 Processing message: "${trimmed}"`);
     
     // Handle commands first
     if (trimmed.startsWith('/')) {
+      console.log(`⚙️ Processing command: ${trimmed}`);
       const response = await this.processCommand(trimmed, senderInboxId);
-      if (response) return response;
+      if (response) {
+        console.log(`✅ Command response generated`);
+        return response;
+      }
     }
 
     // Check for payment requests
     const paymentMatch = this.extractPaymentAmount(trimmed);
     if (paymentMatch) {
+      console.log(`💰 Payment request detected: $${paymentMatch.amount}`);
       return await this.handlePaymentLinkRequest(paymentMatch.amount, senderInboxId);
     }
 
     // Check if this looks like a fkey.id
     if (this.isFkeyIdPattern(trimmed)) {
+      console.log(`🔑 fkey.id pattern detected`);
       return await this.handleFkeyIdSubmission(trimmed, senderInboxId);
     }
 
     // Check for basic keywords
     const basicResponse = this.processBasicKeywords(trimmed, senderInboxId);
-    if (basicResponse) return basicResponse;
-
-    // For first-time users or unrecognized patterns, use AI if available
-    if (context?.setupStatus === 'new' || !context) {
-      return await this.handleFirstTimeUser(senderInboxId);
+    if (basicResponse) {
+      console.log(`📝 Basic keyword response generated`);
+      return basicResponse;
     }
 
-    // Use AI for complex responses if available
-    if (this.shouldUseAI(trimmed, context)) {
-      const aiResponse = await this.generateAIResponse(trimmed, senderInboxId, context);
-      if (aiResponse) return aiResponse;
-    }
-
-    // Fallback response
-    return this.getFallbackResponse(context?.setupStatus || 'new');
+    // For first-time users - simplified logic
+    console.log(`👋 Treating as first-time user`);
+    return await this.handleFirstTimeUser(senderInboxId);
   }
 
   private async handleFirstTimeUser(senderInboxId: string): Promise<string> {
