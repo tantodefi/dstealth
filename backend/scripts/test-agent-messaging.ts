@@ -4,151 +4,94 @@ import 'dotenv/config';
 import { createSigner, getEncryptionKeyFromHex, validateEnvironment } from '../src/helper.js';
 import { Client, type XmtpEnv, IdentifierKind } from '@xmtp/node-sdk';
 
-// Test user credentials (you can change these)
-const TEST_PRIVATE_KEY = '0x' + '1'.repeat(64); // Test private key
-const TEST_ENCRYPTION_KEY = '1'.repeat(64); // Test encryption key
-
 async function main() {
-  console.log('🧪 Testing PRODUCTION Agent Messaging with FORCED SYNC...\n');
+  console.log('🔍 PRODUCTION BACKEND WALLET KEY DEBUG...\n');
   
   try {
-    // Get environment variables
-    const { XMTP_ENV } = validateEnvironment(['XMTP_ENV']);
+    // Get local environment variables
+    const { XMTP_ENV, WALLET_KEY, ENCRYPTION_KEY } = validateEnvironment(['XMTP_ENV', 'WALLET_KEY', 'ENCRYPTION_KEY']);
     
-    // Production agent address from logs
-    const AGENT_ADDRESS = '0xcbc46acb62a71fdaea2205cfe3ba16832699670b';
+    console.log('📋 **LOCAL ENVIRONMENT CHECK**');
+    console.log('🌍 XMTP_ENV:', XMTP_ENV);
+    console.log('🔑 Local WALLET_KEY (first 10 chars):', WALLET_KEY.substring(0, 10) + '...');
     
-    console.log('🤖 Production Agent Address:', AGENT_ADDRESS);
-    console.log('🌍 Environment:', XMTP_ENV);
-    console.log('⏳ Creating test client...\n');
+    const localSigner = createSigner(WALLET_KEY);
+    const localIdentifier = localSigner.getIdentifier();
+    const localAddress = typeof localIdentifier === 'object' && 'identifier' in localIdentifier 
+      ? localIdentifier.identifier 
+      : (await localIdentifier).identifier;
     
-    // Create test client
-    const testSigner = createSigner(TEST_PRIVATE_KEY);
-    const testEncryptionKey = getEncryptionKeyFromHex(TEST_ENCRYPTION_KEY);
+    console.log('📧 Local address from WALLET_KEY:', localAddress);
+    console.log('✅ Local environment verified\n');
     
-    const testClient = await Client.create(testSigner, {
-      dbEncryptionKey: testEncryptionKey,
-      env: XMTP_ENV as XmtpEnv,
-    });
+    // Check production backend
+    console.log('📋 **PRODUCTION BACKEND CHECK**');
+    const prodBackendUrl = 'https://xmtp-mini-app-examples.onrender.com';
+    console.log('🌐 Production backend URL:', prodBackendUrl);
     
-    console.log('✅ Test client created');
-    console.log('📬 Test client inbox ID:', testClient.inboxId);
+    console.log('🔄 Fetching production agent info...');
+    const response = await fetch(`${prodBackendUrl}/api/agent/info`);
     
-    // Get test client address
-    const testIdentifier = testSigner.getIdentifier();
-    const testAddress = typeof testIdentifier === 'object' && 'identifier' in testIdentifier 
-      ? testIdentifier.identifier 
-      : (await testIdentifier).identifier;
-    console.log('🔑 Test client address:', testAddress);
-    
-    // FORCE multiple sync attempts
-    console.log('🔄 FORCED SYNC - Multiple sync attempts...');
-    for (let i = 0; i < 3; i++) {
-      console.log(`   Sync attempt ${i + 1}/3...`);
-      await testClient.conversations.sync();
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s between syncs
+    if (!response.ok) {
+      throw new Error(`Backend returned ${response.status}: ${response.statusText}`);
     }
     
-    // Create conversation with agent
-    console.log('💬 Creating conversation with PRODUCTION agent...');
-    const conversation = await testClient.conversations.newDmWithIdentifier({
-      identifier: AGENT_ADDRESS,
-      identifierKind: IdentifierKind.Ethereum,
-    });
+    const data = await response.json() as any;
     
-    console.log('✅ Conversation created:', conversation.id);
-    
-    // SYNC the conversation immediately after creation
-    console.log('🔄 Syncing newly created conversation...');
-    await conversation.sync();
-    
-    // Send multiple test messages to increase chance of discovery
-    const messages = [
-      'PRODUCTION TEST 1: /help - agent discovery message',
-      'PRODUCTION TEST 2: Hello production agent!',
-      'PRODUCTION TEST 3: Please respond to confirm you are working'
-    ];
-    
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i];
-      console.log(`📤 Sending message ${i + 1}/${messages.length}:`, msg);
-      await conversation.send(msg);
+    if (data.success && data.agent) {
+      console.log('📧 Production agent address:', data.agent.address);
+      console.log('📬 Production inbox ID:', data.agent.inboxId);
+      console.log('📊 Production status:', data.agent.status);
       
-      // Wait between messages
-      if (i < messages.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 3000));
+      const addressMatch = localAddress.toLowerCase() === data.agent.address.toLowerCase();
+      console.log('\n🔍 **ANALYSIS**');
+      console.log('Address Match:', addressMatch ? 'YES ✅' : 'NO ❌');
+      
+      if (!addressMatch) {
+        console.log('\n🚨 **CONFIRMED: DIFFERENT WALLET KEYS!**');
+        console.log('Local WALLET_KEY generates:', localAddress);
+        console.log('Production backend uses:', data.agent.address);
+        console.log('\n🛠️ **SOLUTION REQUIRED:**');
+        console.log('1. Check Render dashboard environment variables');
+        console.log('2. Update WALLET_KEY in Render to match local');
+        console.log('3. Update ENCRYPTION_KEY in Render to match local');
+        console.log('4. Redeploy the Render service');
+        console.log('\n💡 **VERIFICATION:**');
+        console.log('After updating Render env vars, the production agent should have address:', localAddress);
+      } else {
+        console.log('\n✅ **ADDRESSES MATCH!**');
+        console.log('The wallet keys are identical - issue must be elsewhere');
       }
+    } else {
+      console.error('❌ Failed to get production agent info:', data);
     }
     
-    console.log('✅ All messages sent to PRODUCTION agent!');
+    // Test with local backend if different
+    console.log('\n📋 **LOCAL BACKEND CHECK**');
+    const localBackendUrl = 'http://localhost:5001';
     
-    // Wait longer for production and try additional syncs
-    console.log('⏳ Waiting for PRODUCTION agent response (60 seconds max with periodic syncs)...');
-    
-    let responseReceived = false;
-    const startTime = Date.now();
-    const maxWaitTime = 60000; // 60 seconds for production
-    
-    // Start listening for responses
-    const stream = await conversation.stream();
-    
-    // Periodic sync while waiting
-    const syncInterval = setInterval(async () => {
-      if (!responseReceived) {
-        console.log('🔄 Periodic sync while waiting for response...');
-        try {
-          await testClient.conversations.sync();
-          await conversation.sync();
-        } catch (syncError) {
-          console.warn('⚠️ Sync error:', syncError);
+    try {
+      console.log('🔄 Fetching local agent info...');
+      const localResponse = await fetch(`${localBackendUrl}/api/agent/info`);
+      
+      if (localResponse.ok) {
+        const localData = await localResponse.json() as any;
+        if (localData.success && localData.agent) {
+          console.log('📧 Local backend agent address:', localData.agent.address);
+          console.log('📬 Local backend inbox ID:', localData.agent.inboxId);
+          
+          const localMatch = localAddress.toLowerCase() === localData.agent.address.toLowerCase();
+          console.log('🔍 Local backend match:', localMatch ? 'YES ✅' : 'NO ❌');
         }
+      } else {
+        console.log('⚠️ Local backend not running (this is normal if not started)');
       }
-    }, 10000); // Sync every 10 seconds
-    
-    const timeout = setTimeout(() => {
-      if (!responseReceived) {
-        clearInterval(syncInterval);
-        console.log('⏰ Timeout reached - PRODUCTION agent did not respond');
-        console.log('🔍 This confirms the production agent is not processing messages correctly');
-        console.log('📋 Possible issues:');
-        console.log('   - Agent stream not detecting new conversations');
-        console.log('   - XMTP network sync issues in production');
-        console.log('   - Agent conversation discovery logic needs fixing');
-        process.exit(1);
-      }
-    }, maxWaitTime);
-    
-    for await (const message of stream) {
-      if (message && message.senderInboxId !== testClient.inboxId) {
-        console.log('\n🎉 **PRODUCTION AGENT RESPONDED!**');
-        console.log('📨 Response:', message.content);
-        console.log('⏱️  Response time:', Date.now() - startTime, 'ms');
-        console.log('✅ Production agent is working correctly!');
-        
-        responseReceived = true;
-        clearInterval(syncInterval);
-        clearTimeout(timeout);
-        break;
-      }
+    } catch (localError) {
+      console.log('⚠️ Local backend not accessible (this is normal if not started)');
     }
-    
-    console.log('\n✅ Production agent messaging test completed successfully!');
     
   } catch (error) {
-    console.error('❌ Error testing PRODUCTION agent messaging:', error);
-    
-    // If it's a "user not registered" error, provide instructions
-    if (error instanceof Error && error.message.includes('not registered')) {
-      console.log('\n💡 **SOLUTION**: The test user needs to be registered with XMTP first.');
-      console.log('   Try using a real wallet address that has used XMTP before.');
-      console.log('   Or create a conversation from a real XMTP app like Converse.');
-    } else {
-      console.log('\n🔍 **PRODUCTION AGENT ISSUE DETECTED**');
-      console.log('   The production agent is not processing messages correctly.');
-      console.log('   Check the Render logs for the backend service.');
-      console.log('   The agent may need a conversation discovery fix.');
-    }
-    
+    console.error('❌ Error:', error);
     process.exit(1);
   }
 }

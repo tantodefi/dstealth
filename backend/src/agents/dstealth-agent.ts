@@ -512,7 +512,7 @@ export class DStealthAgent {
     this.workerPool = new WorkerPoolManager();
     this.messageQueue = new MessageQueueManager();
     
-    const frontendURL = env.FRONTEND_URL || process.env.NEXT_PUBLIC_URL || 'http://localhost:3000';
+    const frontendURL = env.FRONTEND_URL || process.env.NEXT_PUBLIC_URL || 'https://dstealth.xyz';
     this.apiClient = new UnifiedApiClient(frontendURL);
     
     console.log('🚀 dStealth Agent initialized');
@@ -754,12 +754,23 @@ export class DStealthAgent {
               }
             }
             
-            if (latestUserMessage) {
+            if (latestUserMessage && !this.processedMessages.has(latestUserMessage.id)) {
               console.log(`🔄 Processing latest user message: "${latestUserMessage.content}" from ${latestUserMessage.senderInboxId}`);
               existingMessageCount++;
               
+              // Mark as processed BEFORE processing to prevent duplicates
+              this.processedMessages.add(latestUserMessage.id);
+              
+              // Keep processed messages list manageable
+              if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
+                const firstItem = this.processedMessages.values().next().value;
+                this.processedMessages.delete(firstItem);
+              }
+              
               // Process this user message
               await this.processIncomingMessage(latestUserMessage);
+            } else if (latestUserMessage) {
+              console.log(`⏭️ Skipping already processed existing message: ${latestUserMessage.id}`);
             } else {
               console.log(`📭 No user messages found in conversation (all ${messages.length} messages from agent)`);
             }
@@ -798,10 +809,22 @@ export class DStealthAgent {
                 }
               }
               
-              if (latestUserMessage) {
+              if (latestUserMessage && !this.processedMessages.has(latestUserMessage.id)) {
                 console.log(`🔄 Processing message from resync conversation: "${latestUserMessage.content}"`);
+                
+                // Mark as processed BEFORE processing to prevent duplicates
+                this.processedMessages.add(latestUserMessage.id);
+                
+                // Keep processed messages list manageable
+                if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
+                  const firstItem = this.processedMessages.values().next().value;
+                  this.processedMessages.delete(firstItem);
+                }
+                
                 await this.processIncomingMessage(latestUserMessage);
                 existingMessageCount++;
+              } else if (latestUserMessage) {
+                console.log(`⏭️ Skipping already processed resync message: ${latestUserMessage.id}`);
               }
             }
           } catch (error) {
@@ -1438,8 +1461,8 @@ ${this.getFluidKeyInviteLink()}
   }
 
   private getDStealthMiniAppLink(): string {
-    // Use environment variable or fallback to localhost for development
-    const frontendURL = process.env.NEXT_PUBLIC_URL || 'http://localhost:3000';
+    // Use production URL for dStealth mini app
+    const frontendURL = process.env.NEXT_PUBLIC_URL || process.env.FRONTEND_URL || 'https://dstealth.xyz';
     return `🚀 **dStealth Mini App**: ${frontendURL}`;
   }
 
