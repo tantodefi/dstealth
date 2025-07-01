@@ -514,12 +514,16 @@ export class DStealthAgent {
     }, 60 * 60 * 1000); // Every hour
   }
 
-  async initialize(): Promise<void> {
+  async initialize(retryCount = 0, maxRetries = 3): Promise<void> {
     try {
-      console.log('🔥 Initializing Enhanced dStealth Agent...');
+      console.log(`🔥 Initializing Enhanced dStealth Agent... (attempt ${retryCount + 1}/${maxRetries + 1})`);
       
       const signer = createSigner(WALLET_KEY);
       const dbEncryptionKey = getEncryptionKeyFromHex(ENCRYPTION_KEY);
+      
+      // Store agent address for logging (from signer)
+      const identifier = await signer.getIdentifier();
+      this.agentAddress = identifier.identifier;
       
       // Initialize XMTP client
       this.client = await Client.create(signer, {
@@ -527,8 +531,8 @@ export class DStealthAgent {
         env: XMTP_ENV as XmtpEnv,
       });
 
-      console.log(`✅ Enhanced dStealth Agent initialized`);
-      // console.log(`📧 Agent Address: ${this.client.accountAddress || 'Unknown'}`);
+      console.log(`✅ Enhanced dStealth Agent initialized successfully!`);
+      console.log(`🏠 Agent Address: ${this.agentAddress}`);
       console.log(`📬 Agent Inbox ID: ${this.client.inboxId}`);
       console.log(`🆔 Agent Installation ID: ${this.client.installationId}`);
       console.log(`🔧 Worker threads: Ready`);
@@ -537,7 +541,23 @@ export class DStealthAgent {
       
       await this.startListening();
     } catch (error) {
-      console.error('❌ Failed to initialize Enhanced dStealth Agent:', error);
+      console.error(`❌ Failed to initialize Enhanced dStealth Agent (attempt ${retryCount + 1}):`, error);
+      
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isInboxLogFull = errorMessage.includes("inbox log is full");
+      
+      // Retry logic for "inbox log is full" error
+      if (isInboxLogFull && retryCount < maxRetries) {
+        const retryDelay = Math.min(2000 * Math.pow(2, retryCount), 60000); // Exponential backoff, max 60s
+        console.log(`🔄 Agent "inbox log is full" error detected. Retrying in ${retryDelay}ms...`);
+        
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        
+        // Recursive retry
+        return this.initialize(retryCount + 1, maxRetries);
+      }
+      
       throw error;
     }
   }
@@ -1390,9 +1410,7 @@ RESPONSE STYLE:
     const lowerContent = content.toLowerCase();
     
     if (lowerContent.includes('hello') || lowerContent.includes('hi') || lowerContent.includes('hey')) {
-      return this.handleFirstTimeUser(senderInboxId).then(result => result).catch(() => 
-        '👋 Hello! I\'m your dStealth privacy agent. Type /help to see what I can do!'
-      ) as any;
+      return '👋 Hello! I\'m your dStealth privacy agent. Type /help to see what I can do or tell me your fkey.id username to get started!';
     }
     
     if (lowerContent.includes('help')) {
@@ -1448,11 +1466,11 @@ RESPONSE STYLE:
 
   private getFallbackResponse(setupStatus: string): string {
     if (setupStatus === 'new') {
-      return this.handleFirstTimeUser(this.client!.inboxId);
+      return '👋 Welcome to dStealth! I help with stealth addresses and privacy rewards. Tell me your fkey.id username to get started, or say "no" if you don\'t have one yet.';
     } else if (setupStatus === 'fkey_pending') {
-      return this.handleFkeyIdSubmission(this.client!.inboxId, this.client!.inboxId);
+      return '📍 Please tell me your fkey.id username (e.g., "tantodefi" for tantodefi.fkey.id) or say "no" if you don\'t have one.';
     } else if (setupStatus === 'miniapp_pending') {
-      return this.handleSetupComplete(this.client!.inboxId);
+      return '🎯 Complete your setup in the dStealth mini app, then type "/setup complete" to unlock all features!';
     } else if (setupStatus === 'complete') {
       return this.getHelpMessage();
     } else {
@@ -1464,12 +1482,25 @@ RESPONSE STYLE:
     this.isRunning = false;
   }
 
-  getContactInfo() {
+  getContactInfo(): AgentContactInfo {
     return {
       inboxId: this.client?.inboxId || 'unknown',
-      address: this.client?.inboxId || 'unknown', // Use inboxId as fallback for address
+      address: this.agentAddress || 'unknown',
       status: this.isRunning ? 'active' : 'inactive'
     };
+  }
+
+  // Public getters for external access
+  getAgentAddress(): string | null {
+    return this.agentAddress;
+  }
+
+  getInboxId(): string | null {
+    return this.client?.inboxId || null;
+  }
+
+  async startListeningPublic(): Promise<void> {
+    return this.startListening();
   }
 }
 
@@ -1481,10 +1512,10 @@ async function main() {
     await agent.initialize();
     
     console.log('🚀 dStealth Agent started!');
-    console.log(`📬 Contact: ${agent.agentAddress}`);
-    console.log(`🆔 Inbox: ${agent.client?.inboxId}`);
+    console.log(`📬 Contact: ${agent.getAgentAddress()}`);
+    console.log(`🆔 Inbox: ${agent.getInboxId()}`);
     
-    await agent.startListening();
+    await agent.startListeningPublic();
     
   } catch (error) {
     console.error('❌ Failed to start dStealth Agent:', error);

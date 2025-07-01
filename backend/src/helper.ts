@@ -150,6 +150,28 @@ export const resetXmtpDatabase = (env: string) => {
 };
 
 /**
+ * Reset XMTP database - use when database is corrupted
+ */
+export const resetXmtpDatabase = (env: string) => {
+  const dbPath = getDbPath(env);
+  console.log(`🗑️ Attempting to reset XMTP database at: ${dbPath}`);
+  
+  try {
+    if (fs.existsSync(dbPath)) {
+      fs.unlinkSync(dbPath);
+      console.log(`✅ Successfully deleted corrupted database: ${dbPath}`);
+      return true;
+    } else {
+      console.log(`ℹ️ Database file does not exist: ${dbPath}`);
+      return true;
+    }
+  } catch (error) {
+    console.error(`❌ Failed to delete database file ${dbPath}:`, error);
+    return false;
+  }
+};
+
+/**
  * Appends a variable to the .env file
  */
 
