@@ -185,9 +185,10 @@ const initializeDStealthAgent = async () => {
 
     console.log("🤖 Initializing dStealth Agent...");
     
-    // Add delay to prevent "inbox log is full" error when initializing multiple XMTP clients
-    console.log("⏳ Waiting 5 seconds before agent initialization to prevent conflicts...");
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Add progressive delay to prevent XMTP rate limiting in production
+    const baseDelay = process.env.NODE_ENV === 'production' ? 15000 : 5000; // 15s for prod, 5s for dev
+    console.log(`⏳ Waiting ${baseDelay/1000}s before agent initialization to prevent rate limits...`);
+    await new Promise(resolve => setTimeout(resolve, baseDelay));
     
     dStealthAgent = new DStealthAgent();
     await dStealthAgent.initialize();

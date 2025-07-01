@@ -74,7 +74,10 @@ export default function BotChat() {
       console.log("🚀 Initializing conversation with dStealth agent:", agentAddress);
       
       // Create conversation with the agent using address
-      const conversation = await client.conversations.newDm(agentAddress);
+      const conversation = await client.conversations.newDmWithIdentifier({
+        identifier: agentAddress,
+        identifierKind: "Ethereum"
+      });
       
       // Sync to get any existing messages
       await conversation.sync();
@@ -112,7 +115,10 @@ export default function BotChat() {
       const streamMessages = async () => {
         try {
           for await (const message of stream) {
-            console.log("Received message from dStealth agent:", message);
+            console.log("Received message from dStealth agent:");
+            console.log("  - Content:", message?.content);
+            console.log("  - Sender:", message?.senderInboxId);
+            console.log("  - Type:", message?.contentType?.typeId);
             // Ensure we don't add undefined to the messages array
             if (message) {
               setMessages((prevMessages) => [...prevMessages, message]);
@@ -267,9 +273,9 @@ export default function BotChat() {
             <div className="mt-2 border border-gray-800 rounded-md p-2 max-h-40 overflow-y-auto">
               {messages.length > 0 ? (
                 messages.map((msg, index) => {
-                  // Get sender address safely
-                  const senderAddress = agentAddress;
-
+                  // Check if message is from the agent (using inbox IDs)
+                  const isFromAgent = msg.senderInboxId === agentInfo?.inboxId;
+                  
                   // Get client address
                   const clientAddress = client.inboxId;
 
@@ -282,13 +288,13 @@ export default function BotChat() {
                     <div
                       key={index}
                       className={`mb-2 text-xs ${
-                        senderAddress === clientAddress
+                        !isFromAgent
                           ? "text-right"
                           : "text-left"
                       }`}>
                       <div
                         className={`inline-block px-2 py-1 rounded-md ${
-                          senderAddress === clientAddress
+                          !isFromAgent
                             ? "bg-blue-900 text-white"
                             : "bg-gray-800 text-gray-200"
                         }`}>

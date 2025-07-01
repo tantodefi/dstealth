@@ -52,9 +52,12 @@ interface WorkerTask {
   priority: number;
 }
 
-// Environment validation
-const { WALLET_KEY, ENCRYPTION_KEY, XMTP_ENV, OPENAI_API_KEY } =
-  validateEnvironment(["WALLET_KEY", "ENCRYPTION_KEY", "XMTP_ENV", "OPENAI_API_KEY"]);
+// Environment validation with proper typing
+const envVars = validateEnvironment(["WALLET_KEY", "ENCRYPTION_KEY", "XMTP_ENV", "OPENAI_API_KEY"]);
+const WALLET_KEY = envVars.WALLET_KEY!;
+const ENCRYPTION_KEY = envVars.ENCRYPTION_KEY!;
+const XMTP_ENV = envVars.XMTP_ENV!;
+const OPENAI_API_KEY = envVars.OPENAI_API_KEY;
 
 // Initialize OpenAI client
 let openai: OpenAI | null = null;
@@ -515,9 +518,16 @@ export class DStealthAgent {
     console.log('🚀 dStealth Agent initialized');
   }
 
-  async initialize(retryCount = 0, maxRetries = 3): Promise<void> {
+  async initialize(retryCount = 0, maxRetries = 5): Promise<void> {
     try {
       console.log(`🚀 Initializing dStealth Agent (attempt ${retryCount + 1}/${maxRetries + 1})...`);
+      
+      // Add progressive delay to avoid rate limiting
+      if (retryCount > 0) {
+        const delay = Math.min(Math.pow(2, retryCount) * 10000, 120000); // Max 2 minutes
+        console.log(`⏳ Waiting ${delay/1000}s before retry to avoid rate limits...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
       
       // Create signer and client
       const signer = createSigner(WALLET_KEY);
@@ -667,7 +677,7 @@ export class DStealthAgent {
         } catch (syncError) {
           console.warn('⚠️ Periodic sync failed:', syncError);
         }
-      }, 5000); // Even more aggressive: every 5 seconds
+      }, 300000); // Much less aggressive: every 5 minutes to avoid rate limits
 
       // Cleanup interval on shutdown
       const originalShutdown = this.shutdown.bind(this);
