@@ -61,6 +61,7 @@ export interface UserStealthData {
   network?: string;
   metadata?: any;
   miniAppRegistered?: boolean; // Track if user completed mini app setup
+  setupStatus?: 'new' | 'fkey_pending' | 'fkey_set' | 'miniapp_pending' | 'complete'; // Setup progress
 }
 
 export interface Proxy402Link {
@@ -532,6 +533,24 @@ export class AgentDatabase {
     } catch (error) {
       console.error('❌ Error closing Redis connection:', error);
     }
+  }
+
+  // Helper method to update stealth data by user
+  async updateStealthDataByUser(userId: string, updates: Partial<UserStealthData>): Promise<void> {
+    const existingData = await this.getStealthDataByUser(userId);
+    
+    if (!existingData) {
+      throw new Error(`No stealth data found for user ${userId}`);
+    }
+
+    const updatedData: UserStealthData = {
+      ...existingData,
+      ...updates,
+      userId, // Ensure userId is preserved
+      lastUpdated: Date.now()
+    };
+
+    await this.storeUserStealthData(updatedData);
   }
 }
 

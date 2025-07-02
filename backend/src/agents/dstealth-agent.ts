@@ -13,6 +13,7 @@ import { env } from '../config/env.js';
 import { validateEnvironment } from "../helper.js";
 import { Worker } from 'worker_threads';
 import { Redis } from '@upstash/redis';
+import { daimoPayClient, getDaimoChainId } from '../lib/daimo-pay.js';
 import os from 'os';
 
 interface AgentContactInfo {
@@ -606,132 +607,9 @@ export class DStealthAgent {
       console.log('🔄 Final sync before message processing...');
       await this.client.conversations.sync();
       let finalConversations = await this.client.conversations.list();
-
-      // Add immediate sync check after 10 seconds, then periodic every 30 seconds
-      setTimeout(async () => {
-        try {
-          console.log('🔄 Initial 10-second sync check for new conversations...');
-          await this.client!.conversations.sync();
-          const quickCheckConversations = await this.client!.conversations.list();
-          if (quickCheckConversations.length > finalConversations.length) {
-            console.log(`🆕 Quick check found ${quickCheckConversations.length - finalConversations.length} new conversations!`);
-            // Process the new conversations immediately
-            for (let i = finalConversations.length; i < quickCheckConversations.length; i++) {
-              const newConversation = quickCheckConversations[i];
-              try {
-                await newConversation.sync();
-                const messages = await newConversation.messages();
-                console.log(`📬 QUICK CHECK Conversation ${newConversation.id}: ${messages.length} messages`);
-                
-                // Process latest user message
-                if (messages.length > 0) {
-                  let latestUserMessage = null;
-                  for (let j = messages.length - 1; j >= 0; j--) {
-                    const message = messages[j];
-                    if (message.senderInboxId !== this.client!.inboxId) {
-                      latestUserMessage = message;
-                      break;
-                    }
-                  }
-                  
-                  if (latestUserMessage && !this.processedMessages.has(latestUserMessage.id)) {
-                    console.log(`🔄 Processing quick check message: "${latestUserMessage.content}"`);
-                    await this.processIncomingMessage(latestUserMessage);
-                    this.processedMessages.add(latestUserMessage.id);
-                  }
-                }
-              } catch (error) {
-                console.warn(`⚠️ Failed to process quick check conversation ${newConversation.id}:`, error);
-              }
-            }
-            finalConversations = quickCheckConversations;
-          }
-        } catch (error) {
-          console.warn('⚠️ Quick sync check failed:', error);
-        }
-      }, 10000); // 10 seconds after startup
-
-      // Regular periodic conversation sync to catch new conversations  
-      const syncInterval = setInterval(async () => {
-        try {
-          console.log('🔄 Periodic conversation sync...');
-          await this.client!.conversations.sync();
-          const currentConversations = await this.client!.conversations.list();
-          const newCount = currentConversations.length;
-          
-          // Log ALL current conversation IDs for debugging
-          const currentIds = currentConversations.map(c => c.id);
-          const previousIds = finalConversations.map(c => c.id);
-          
-          // Check for any new conversation IDs
-          const newConversationIds = currentIds.filter(id => !previousIds.includes(id));
-          
-          if (newConversationIds.length > 0) {
-            console.log(`🆕 Found ${newConversationIds.length} new conversation IDs: ${newConversationIds.join(', ')}`);
-            
-            // Process messages from ALL newly discovered conversations
-            for (const newId of newConversationIds) {
-              const newConversation = currentConversations.find(c => c.id === newId);
-              if (!newConversation) continue;
-              
-              try {
-                await newConversation.sync();
-                const messages = await newConversation.messages();
-                console.log(`📬 NEW Conversation ${newConversation.id}: ${messages.length} messages`);
-                
-                // Process ALL unprocessed user messages from this conversation
-                for (let j = messages.length - 1; j >= 0; j--) {
-                  const message = messages[j];
-                  if (message.senderInboxId !== this.client!.inboxId) {
-                    // Check if we already processed this message
-                    if (!this.processedMessages.has(message.id)) {
-                      console.log(`🔄 Processing unprocessed message from new conversation: "${message.content}"`);
-                      await this.processIncomingMessage(message);
-                      
-                      // Mark as processed
-                      this.processedMessages.add(message.id);
-                      
-                      // Keep processed messages list manageable
-                      if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
-                        const firstItem = this.processedMessages.values().next().value;
-                        this.processedMessages.delete(firstItem);
-                      }
-                    }
-                  }
-                }
-              } catch (error) {
-                console.warn(`⚠️ Failed to process new conversation ${newConversation.id}:`, error);
-              }
-            }
-            
-            // Update our conversation list
-            finalConversations.splice(0, finalConversations.length, ...currentConversations);
-          } else if (newCount !== finalConversations.length) {
-            console.log(`📋 Conversation count changed from ${finalConversations.length} to ${newCount} but no new IDs detected`);
-            finalConversations.splice(0, finalConversations.length, ...currentConversations);
-          }
-          
-          console.log(`📋 Current conversation count: ${newCount}`);
-          
-          // DEBUG: Log first few conversation IDs
-          if (currentIds.length > 0) {
-            console.log(`🔍 Current conversation IDs (first 3): ${currentIds.slice(0, 3).join(', ')}`);
-          }
-          
-        } catch (syncError) {
-          console.warn('⚠️ Periodic sync failed:', syncError);
-        }
-      }, 30000); // Every 30 seconds for production responsiveness
-
-      // Cleanup interval on shutdown
-      const originalShutdown = this.shutdown.bind(this);
-      this.shutdown = async () => {
-        clearInterval(syncInterval);
-        return originalShutdown();
-      };
       console.log(`📋 Final conversation count: ${finalConversations.length}`);
 
-      // 🔥 CRITICAL FIX: Process existing messages first
+      // 🔥 CRITICAL FIX: Process existing messages ONCE to avoid duplicates
       console.log('🔍 Processing existing messages from all conversations...');
       console.log('📋 Known conversation IDs:', finalConversations.map(c => c.id));
       let existingMessageCount = 0;
@@ -754,7 +632,7 @@ export class DStealthAgent {
               }
             }
             
-            if (latestUserMessage && !this.processedMessages.has(latestUserMessage.id)) {
+            if (latestUserMessage && latestUserMessage.id && !this.processedMessages.has(latestUserMessage.id)) {
               console.log(`🔄 Processing latest user message: "${latestUserMessage.content}" from ${latestUserMessage.senderInboxId}`);
               existingMessageCount++;
               
@@ -769,7 +647,7 @@ export class DStealthAgent {
               
               // Process this user message
               await this.processIncomingMessage(latestUserMessage);
-            } else if (latestUserMessage) {
+            } else if (latestUserMessage && latestUserMessage.id) {
               console.log(`⏭️ Skipping already processed existing message: ${latestUserMessage.id}`);
             } else {
               console.log(`📭 No user messages found in conversation (all ${messages.length} messages from agent)`);
@@ -782,7 +660,7 @@ export class DStealthAgent {
       
       console.log(`✅ Processed ${existingMessageCount} existing messages`);
 
-      // 🔥 FORCE IMMEDIATE RE-SYNC to catch any conversations we might have missed
+      // 🔥 SIMPLIFIED: Single sync check for missed conversations
       console.log('🔍 Force re-sync to catch any missed conversations...');
       await this.client.conversations.sync();
       const resynced = await this.client.conversations.list();
@@ -809,7 +687,7 @@ export class DStealthAgent {
                 }
               }
               
-              if (latestUserMessage && !this.processedMessages.has(latestUserMessage.id)) {
+              if (latestUserMessage && latestUserMessage.id && !this.processedMessages.has(latestUserMessage.id)) {
                 console.log(`🔄 Processing message from resync conversation: "${latestUserMessage.content}"`);
                 
                 // Mark as processed BEFORE processing to prevent duplicates
@@ -823,7 +701,7 @@ export class DStealthAgent {
                 
                 await this.processIncomingMessage(latestUserMessage);
                 existingMessageCount++;
-              } else if (latestUserMessage) {
+              } else if (latestUserMessage && latestUserMessage.id) {
                 console.log(`⏭️ Skipping already processed resync message: ${latestUserMessage.id}`);
               }
             }
@@ -833,12 +711,29 @@ export class DStealthAgent {
         }
         
         finalConversations = resynced;
-        console.log(`✅ After re-sync, processed ${existingMessageCount} total existing messages`);
       }
 
       console.log(`✅ Final total: processed ${existingMessageCount} existing messages from ${finalConversations.length} conversations`);
 
-      // 🔥 HYBRID MESSAGE DETECTION: Stream ALL messages + sync-based discovery  
+      // 🔥 SIMPLIFIED: Single periodic sync - reduced complexity to prevent duplicates
+      const syncInterval = setInterval(async () => {
+        try {
+          console.log('🔄 Periodic conversation sync...');
+          await this.client!.conversations.sync();
+          const currentConversations = await this.client!.conversations.list();
+          console.log(`📋 Current conversation count: ${currentConversations.length}`);
+          
+          // Only log for debugging - don't process existing messages in periodic sync
+          if (currentConversations.length > 0) {
+            const currentIds = currentConversations.map(c => c.id);
+            console.log(`🔍 Current conversation IDs (first 3): ${currentIds.slice(0, 3).join(', ')}`);
+          }
+        } catch (syncError) {
+          console.warn('⚠️ Periodic sync failed:', syncError);
+        }
+      }, 30000); // Every 30 seconds
+
+      // 🔥 CLEAN STREAM PROCESSING: Only process new messages from stream
       console.log('🎧 Starting HYBRID message stream for NEW messages...');
       let newMessageCount = 0;
       
@@ -846,6 +741,14 @@ export class DStealthAgent {
       const streamTestTimeout = setTimeout(() => {
         console.log('⚠️ No NEW messages received in first 60 seconds - stream is working but no new messages sent');
       }, 60000);
+
+      // Cleanup interval on shutdown
+      const originalShutdown = this.shutdown.bind(this);
+      this.shutdown = async () => {
+        clearTimeout(streamTestTimeout);
+        clearInterval(syncInterval);
+        return originalShutdown();
+      };
 
       for await (const message of messageStream) {
         try {
@@ -878,9 +781,6 @@ export class DStealthAgent {
           // Basic message validation
           if (!message || !message.content || !message.senderInboxId) {
             console.log('⏭️ Skipping invalid message (missing content or sender)');
-            console.log('   - hasMessage:', !!message);
-            console.log('   - hasContent:', !!(message?.content));
-            console.log('   - hasSender:', !!(message?.senderInboxId));
             continue;
           }
 
@@ -910,8 +810,14 @@ export class DStealthAgent {
           }
 
           // 🔥 CRITICAL: Check if we already processed this message to prevent duplicates
-          if (this.processedMessages.has(message.id)) {
+          if (message.id && this.processedMessages.has(message.id)) {
             console.log(`⏭️ Skipping already processed message: ${message.id}`);
+            continue;
+          }
+
+          // Skip messages without IDs
+          if (!message.id) {
+            console.log('⏭️ Skipping message without ID');
             continue;
           }
 
@@ -926,74 +832,11 @@ export class DStealthAgent {
             this.processedMessages.delete(firstItem);
           }
 
-          // 🔥 HYBRID APPROACH: Try to get conversation by ID first, then fall back to getConversationById
-          try {
-            // Method 1: Try to get conversation from our synced list
-            let conversation = await this.client.conversations.getConversationById(message.conversationId);
-            
-            // Method 2: If not found, force a conversation sync and try again
-            if (!conversation) {
-              console.log(`🔄 Conversation ${message.conversationId} not found, forcing sync...`);
-              await this.client.conversations.sync();
-              conversation = await this.client.conversations.getConversationById(message.conversationId);
-            }
-            
-            // Method 3: If still not found, try to process the message anyway
-            if (!conversation) {
-              console.log(`⚠️ Conversation ${message.conversationId} still not found after sync, processing message directly`);
-              
-              // Process message directly without conversation context
-              const messageContent = message.content;
-              if (typeof messageContent === 'string') {
-                const response = await this.processMessage(messageContent, message.senderInboxId);
-                
-                if (response && response.trim()) {
-                  console.log(`✅ Generated direct response (${response.length} chars): "${response.substring(0, 100)}..."`);
-                  
-                  // Try to send response by creating a new DM
-                  try {
-                    console.log(`🔄 Creating new DM to send response to ${message.senderInboxId}...`);
-                    
-                    // Get the sender's address from inboxId
-                    const inboxState = await this.client.preferences.inboxStateFromInboxIds([message.senderInboxId]);
-                    if (inboxState && inboxState.length > 0 && inboxState[0].identifiers.length > 0) {
-                      const senderAddress = inboxState[0].identifiers[0].identifier;
-                      console.log(`📮 Found sender address: ${senderAddress}`);
-                      
-                      // Create new DM with sender
-                      const newDm = await this.client.conversations.newDm(senderAddress);
-                      await newDm.send(response);
-                      console.log(`✅ Response sent via new DM to ${senderAddress}`);
-                    } else {
-                      console.log(`❌ Could not find address for inbox ID: ${message.senderInboxId}`);
-                    }
-                  } catch (dmError) {
-                    console.error(`❌ Failed to send response via new DM:`, dmError);
-                  }
-                }
-              }
-            } else {
-              // Standard processing with found conversation
+          // 🔥 SIMPLIFIED: Direct message processing
               await this.processIncomingMessage(message);
-            }
             
           } catch (error) {
-            console.error(`❌ Error in hybrid message processing:`, error);
-            
-            // Final fallback: try direct message processing
-            try {
-              const messageContent = message.content;
-              if (typeof messageContent === 'string') {
-                const response = await this.processMessage(messageContent, message.senderInboxId);
-                console.log(`🔄 Fallback processing generated response: "${response?.substring(0, 50)}..."`);
-              }
-            } catch (fallbackError) {
-              console.error(`❌ Even fallback processing failed:`, fallbackError);
-            }
-          }
-          
-        } catch (error) {
-          console.error('❌ Error in hybrid message loop:', error);
+          console.error('❌ Error in message stream processing:', error);
           // Continue processing other messages even if one fails
         }
       }
@@ -1004,7 +847,7 @@ export class DStealthAgent {
     }
   }
 
-  // 🔥 NEW: Simplified message processing
+  // 🔥 NEW: Enhanced message processing with group/DM awareness
   private async processIncomingMessage(message: any): Promise<void> {
     try {
       const messageContent = message.content;
@@ -1016,10 +859,28 @@ export class DStealthAgent {
       }
       const conversationId = message.conversationId;
 
-      console.log(`🔄 Processing message: "${messageContent}" from ${senderInboxId}`);
+      // 🔥 NEW: Detect conversation type (Group vs DM)
+      const conversation = await this.client!.conversations.getConversationById(conversationId);
+      if (!conversation) {
+        console.error(`❌ Could not find conversation: ${conversationId}`);
+        return;
+      }
 
-      // Generate response using existing logic
-      const response = await this.processMessage(messageContent, senderInboxId);
+      const isGroupChat = conversation instanceof Group;
+      const isDirectMention = this.isDirectMention(messageContent);
+      const isInvocationCommand = this.isInvocationCommand(messageContent);
+
+      console.log(`🔄 Processing message: "${messageContent}" from ${senderInboxId}`);
+      console.log(`📍 Context: ${isGroupChat ? 'GROUP' : 'DM'} chat`);
+
+      // 🔥 GROUP CHAT LOGIC: Only respond to mentions or specific commands
+      if (isGroupChat && !isDirectMention && !isInvocationCommand) {
+        console.log('👥 Group message without mention/command - ignoring to prevent spam');
+        return;
+      }
+
+      // Generate appropriate response based on context
+      const response = await this.processMessage(messageContent, senderInboxId, isGroupChat);
       
       if (!response || !response.trim()) {
         console.warn('⚠️ No response generated for message');
@@ -1027,14 +888,6 @@ export class DStealthAgent {
       }
 
       console.log(`✅ Generated response (${response.length} chars): "${response.substring(0, 100)}..."`);
-
-      // Get conversation and send response
-      const conversation = await this.client!.conversations.getConversationById(conversationId);
-      
-      if (!conversation) {
-        console.error(`❌ Could not find conversation: ${conversationId}`);
-        return;
-      }
 
       // Send the response
       await conversation.send(response);
@@ -1056,73 +909,36 @@ export class DStealthAgent {
     }
   }
 
-  private async processMessageEnhanced(message: any): Promise<void> {
-    try {
-      const messageContent = message.content;
-      const senderInboxId = message.senderInboxId;
-      
-      if (typeof messageContent !== 'string') {
-        console.warn('⚠️ Message content is not a string, skipping enhanced processing');
-        return;
-      }
-      const conversationId = message.conversationId;
+  // 🔥 NEW: Check if message directly mentions the agent
+  private isDirectMention(content: string): boolean {
+    const mentionPatterns = [
+      /@dstealth/i,
+      /hey dstealth/i,
+      /hi dstealth/i,
+      /dstealth/i,
+      /@agent/i,
+      /hey agent/i,
+      /hi agent/i
+    ];
+    
+    return mentionPatterns.some(pattern => pattern.test(content));
+  }
 
-      console.log(`📨 Processing message from ${senderInboxId}: "${messageContent}"`);
-      console.log(`🔍 Conversation ID: ${conversationId}`);
-
-      // Process message directly with optimized logic
-      let response: string;
-      
-      try {
-        console.log(`🔄 Calling processMessage function...`);
-        response = await this.processMessage(messageContent, senderInboxId);
-        console.log(`✅ Generated response (length: ${response.length}): "${response.substring(0, 100)}..."`);
-      } catch (processError) {
-        console.error('❌ Error in processMessage:', processError);
-        response = '🤖 Sorry, I encountered an error processing your message. Please try again or type "help" for assistance.';
-      }
-
-      // Send response
-      console.log(`🔄 Getting conversation by ID: ${conversationId}`);
-      const conversation = await this.client!.conversations.getConversationById(conversationId);
-      
-      if (!conversation) {
-        console.error(`❌ Could not find conversation with ID: ${conversationId}`);
-        return;
-      }
-      
-      console.log(`✅ Found conversation, sending response (length: ${response.length})...`);
-      
-      if (response && response.trim()) {
-        try {
-          console.log(`🚀 Attempting to send response...`);
-          await conversation.send(response);
-          console.log(`✅ Response sent successfully to ${senderInboxId}`);
-        } catch (sendError) {
-          console.error('❌ Failed to send response:', sendError);
-          console.error('❌ Send error details:', sendError instanceof Error ? sendError.message : String(sendError));
-          throw sendError;
-        }
-      } else {
-        console.warn('⚠️ No response generated for message (empty or null)');
-      }
-
-    } catch (error) {
-      console.error('❌ Error processing enhanced message:', error);
-      console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
-      
-      // Send error response
-      try {
-        console.log(`🔄 Attempting to send error response...`);
-        const conversation = await this.client!.conversations.getConversationById(message.conversationId);
-        if (conversation) {
-          await conversation.send('🤖 Sorry, I encountered an error processing your message. Please try again or type "help" for assistance.');
-          console.log('✅ Error response sent');
-        }
-      } catch (sendError) {
-        console.error('❌ Failed to send error response:', sendError);
-      }
-    }
+  // 🔥 NEW: Check if message is a specific invocation command
+  private isInvocationCommand(content: string): boolean {
+    const invocationPatterns = [
+      /^\/pay/i,
+      /^\/help/i,
+      /^\/balance/i,
+      /^\/links/i,
+      /^\/create/i,
+      /\$\d+/,  // Payment amount patterns
+      /create.*payment.*link/i,
+      /generate.*link/i
+      // Note: /scan is NOT included here - it's DM-only for privacy
+    ];
+    
+    return invocationPatterns.some(pattern => pattern.test(content.trim()));
   }
 
   private analyzeMessage(content: string, context: ConversationContext): {
@@ -1189,17 +1005,17 @@ export class DStealthAgent {
     }
 
     // For now, fall back to regular processing since we're not using actual AI workers yet
-    return await this.processMessage(analysis.data?.message || '', context.userId);
+    return await this.processMessage(analysis.data?.message || '', context.userId, false);
   }
 
-  // Keep all existing message processing logic intact
-  private async processMessage(messageContent: string, senderInboxId: string): Promise<string> {
+  // 🔥 ENHANCED: Message processing with group/DM context awareness
+  private async processMessage(messageContent: string, senderInboxId: string, isGroupChat: boolean = false): Promise<string> {
     try {
       const trimmed = messageContent.trim();
       
-      console.log(`🔍 Processing message: "${trimmed}"`);
+      console.log(`🔍 Processing message: "${trimmed}" (${isGroupChat ? 'GROUP' : 'DM'})`);
       
-      // Handle commands first
+      // Handle commands first (work the same in both contexts)
       if (trimmed.startsWith('/')) {
         console.log(`⚙️ Processing command: ${trimmed}`);
         const response = await this.processCommand(trimmed, senderInboxId);
@@ -1209,7 +1025,7 @@ export class DStealthAgent {
         }
       }
 
-      // Check for payment requests
+      // Check for payment requests (work the same in both contexts)
       const paymentMatch = this.extractPaymentAmount(trimmed);
       if (paymentMatch) {
         console.log(`💰 Payment request detected: $${paymentMatch.amount}`);
@@ -1219,7 +1035,7 @@ export class DStealthAgent {
         }
       }
 
-      // Check if this looks like a fkey.id
+      // Check if this looks like a fkey.id (work the same in both contexts)
       if (this.isFkeyIdPattern(trimmed)) {
         console.log(`🔑 fkey.id pattern detected`);
         const response = await this.handleFkeyIdSubmission(trimmed, senderInboxId);
@@ -1235,16 +1051,14 @@ export class DStealthAgent {
         return basicResponse;
       }
 
-      // For first-time users - simplified logic
-      console.log(`👋 Treating as first-time user`);
-      const firstTimeResponse = await this.handleFirstTimeUser(senderInboxId);
-      if (firstTimeResponse && firstTimeResponse.trim()) {
-        return firstTimeResponse;
+      // 🔥 GROUP vs DM BEHAVIOR SPLIT
+      if (isGroupChat) {
+        // In groups: Short, focused responses
+        return this.handleGroupMessage(trimmed, senderInboxId);
+      } else {
+        // In DMs: Full onboarding experience
+        return this.handleDMMessage(trimmed, senderInboxId);
       }
-
-      // GUARANTEED FALLBACK - this should never be reached but provides ultimate safety
-      console.warn(`⚠️ All processing failed, using guaranteed fallback for: "${trimmed}"`);
-      return this.getGuaranteedFallbackResponse();
       
     } catch (error) {
       console.error(`❌ Error in processMessage for "${messageContent}":`, error);
@@ -1253,402 +1067,61 @@ export class DStealthAgent {
     }
   }
 
-  // Guaranteed response that will always work - no async calls, no external dependencies
-  private getGuaranteedFallbackResponse(): string {
-    return `👋 **Hello! I'm the dStealth Agent**
+  // 🔥 NEW: Handle group chat messages (short and focused)
+  private async handleGroupMessage(content: string, senderInboxId: string): Promise<string> {
+    console.log(`👥 Processing group message`);
 
-🤖 I help with privacy-focused Web3 tools and rewards!
-
-**🔧 Available Commands:**
-• **/help** - Full command list
-• **/scan <address>** - Check address privacy
-• **"tantodefi"** - Set your fkey.id username
-• **"no"** - If you don't have a fkey.id yet
-
-**💡 Quick Start:**
-1. Tell me your fkey.id username (like "tantodefi")
-2. Or say "no" if you need to create one
-3. Type **/help** for all available commands
-
-**Need help?** Just type **/help** and I'll show you everything I can do!`;
-  }
-
-  private async handleFirstTimeUser(senderInboxId: string): Promise<string> {
-    try {
-      // TODO: Optimize logging - temporarily disabled to prevent Redis spam
-      // await agentDb.logUserInteraction(senderInboxId, 'first_contact', { timestamp: Date.now() });
-
-      return `👋 **Welcome to dStealth!**
-
-🥷 **I'm your privacy-focused Web3 agent that helps you earn rewards for using stealth addresses and privacy tools!**
-
-**💰 How Privacy = Rewards**
-- Earn points for every stealth transaction
-- Build your FluidKey Score for better rewards
-- Complete privacy challenges for bonus earnings
-- Anonymous payments that protect your identity
-
-**🔑 Quick Question: Do you have a fkey.id already?**
-
-**If YES**: Just tell me your username (e.g. "tantodefi" for tantodefi.fkey.id)
-
-**If NO**: Say "no" and I'll send you an invite link to create one and start earning privacy rewards immediately!
-
-**After setup, I can help you with:**
-🔒 Generate anonymous payment links
-🕵️ Scan addresses for privacy scores  
-📊 Track your privacy earnings
-💰 Create monetized content links
-🏆 Complete privacy challenges
-
-**Ready to start earning? Tell me your fkey.id username or say "no" to get started!**`;
-
-    } catch (error) {
-      return '👋 Welcome to dStealth! I help with stealth addresses, privacy rewards, and Web3 anonymity. Type `/help` to see what I can do!';
+    // Try GPT for complex questions first
+    const isComplexQuery = this.isComplexQuery(content);
+    if (openai && isComplexQuery) {
+      console.log(`🤖 Using GPT for group response`);
+      const gptResponse = await this.processWithGPT(content, senderInboxId);
+      if (gptResponse && gptResponse.trim()) {
+        return gptResponse;
+      }
     }
+
+    // Default group response: Short invite to dStealth
+    return this.getGroupInviteMessage();
   }
 
-  private isFkeyIdPattern(content: string): boolean {
-    // Match patterns like: "tantodefi", "my username is tantodefi", "set fkey tantodefi"
-    const patterns = [
-      /^[a-zA-Z0-9]{3,20}$/,  // Just username
-      /(?:my username is|username|fkey(?:\.id)?)\s+([a-zA-Z0-9]{3,20})/i,
-      /^set\s+(?:fkey|username)\s+([a-zA-Z0-9]{3,20})/i,
-    ];
+  // 🔥 NEW: Handle DM messages (full onboarding experience)
+  private async handleDMMessage(content: string, senderInboxId: string): Promise<string> {
+    console.log(`💬 Processing DM message`);
+
+    // Try GPT for complex queries or established users
+    const isComplexQuery = this.isComplexQuery(content);
+    const userHasSetup = await this.checkMiniAppRegistration(senderInboxId);
     
-    return patterns.some(pattern => pattern.test(content));
-  }
-
-  private async handleFkeyIdSubmission(content: string, senderInboxId: string): Promise<string> {
-    try {
-      let username = '';
-      
-      // Extract username from various patterns
-      if (/^[a-zA-Z0-9]{3,20}$/.test(content)) {
-        username = content;
-      } else {
-        const match = content.match(/(?:my username is|username|fkey(?:\.id)?|set\s+(?:fkey|username))\s+([a-zA-Z0-9]{3,20})/i);
-        if (match) {
-          username = match[1];
-        }
-      }
-
-      if (!username) {
-        return '❌ **Invalid username format**\nPlease provide a valid fkey.id username (3-20 characters, letters and numbers only)';
-      }
-
-      // Lookup the fkey.id to verify it exists
-      const lookupResult = await this.apiClient.lookupFkey(`${username}.fkey.id`);
-      
-      if (!lookupResult.success || !lookupResult.isRegistered) {
-        return `❌ **${username}.fkey.id not found**
-
-This fkey.id doesn't exist yet. You can:
-
-1️⃣ **Create it yourself**: ${this.getFluidKeyInviteLink()}
-2️⃣ **Try a different username**: Type another username
-3️⃣ **Get help**: Type /help for more options
-
-💡 Make sure you spell your username correctly!`;
-      }
-
-      // Store the user's fkey.id and stealth address (but mark as incomplete setup)
-      const stealthData: UserStealthData = {
-        userId: senderInboxId,
-        fkeyId: `${username}.fkey.id`,
-        stealthAddress: lookupResult.address,
-        zkProof: lookupResult.proof,
-        lastUpdated: Date.now(),
-        requestedBy: this.client!.inboxId,
-        miniAppRegistered: false // New field to track mini app completion
-      };
-
-      await agentDb.storeUserStealthData(stealthData);
-
-      return `✅ **Excellent! Your fkey.id is verified!**
-
-📍 **fkey.id**: ${username}.fkey.id
-🏠 **Stealth Address**: ${lookupResult.address}
-
-**🎯 Next Step: Complete Setup in dStealth Mini App**
-
-To unlock all features and start earning privacy rewards, please:
-
-**1. Open the dStealth Mini App:**
-${this.getDStealthMiniAppLink()}
-
-**2. Complete your profile setup**
-**3. Connect your fkey.id in the app**  
-**4. Come back and type: "/setup complete"**
-
-⚠️ **Limited Access**: I can only provide basic help until you complete the mini app setup.
-
-**Available now**: /help, /scan (basic)
-**After setup**: Payment links, rewards tracking, full privacy features
-
-**Ready to complete setup?** Visit the mini app link above!`;
-
-    } catch (error) {
-      return `❌ **Error setting fkey.id**\nPlease try again or type /help for assistance.`;
-    }
-  }
-
-  private async handleFkeyLookup(fkeyId: string, senderInboxId: string): Promise<string> {
-    try {
-      const cachedData = await agentDb.getStealthDataByFkey(fkeyId);
-      if (cachedData) {
-        return `🔑 **Stealth Address Found (cached)**\n📍 fkey.id: ${fkeyId}\n🏠 Address: ${cachedData.stealthAddress}`;
-      }
-
-      const lookupResult = await this.apiClient.lookupFkey(fkeyId);
-      
-      if (!lookupResult.success || !lookupResult.isRegistered) {
-        return `❌ **Fkey Lookup Failed**\n${lookupResult.error || 'Profile not found'}`;
-      }
-
-      const stealthData: UserStealthData = {
-        userId: senderInboxId,
-        fkeyId,
-        stealthAddress: lookupResult.address,
-        zkProof: lookupResult.proof,
-        lastUpdated: Date.now(),
-        requestedBy: this.client!.inboxId
-      };
-
-      await agentDb.storeUserStealthData(stealthData);
-
-      return `🔑 **Fkey Lookup Successful**
-📍 fkey.id: ${fkeyId}
-🏠 Address: ${lookupResult.address}`;
-
-    } catch (error) {
-      return `❌ **Error looking up fkey.id**\nPlease try again or type /help for assistance.`;
-    }
-  }
-
-  private handleNoFkeyId(): string {
-    return `🎁 **Perfect! Let's get you started with privacy rewards!**
-
-**Step 1: Create your FREE fkey.id**
-${this.getFluidKeyInviteLink()}
-
-**🌟 Why You Need FluidKey/fkey.id:**
-- **FREE stealth address** for anonymous payments  
-- **Privacy Score system** - earn rewards for being private
-- **Works on all chains** - Ethereum, Base, Polygon, etc.
-- **No KYC required** - fully decentralized and private
-- **Instant setup** - ready in under 2 minutes
-
-**💰 Start Earning Immediately:**
-✅ Get points for every stealth transaction
-✅ Build your FluidKey Score for bigger rewards  
-✅ Complete privacy challenges for bonus earnings
-✅ Earn fees from anonymous payment processing
-
-**🚀 Quick Setup Process:**
-1. **Click the link above** to create your fkey.id
-2. **Pick a username** (like "yourname" for yourname.fkey.id)
-3. **Come back here** and tell me your username
-4. **I'll unlock all features** and you start earning!
-
-**Ready to earn privacy rewards? Click the link and come back with your username!**
-
-**Questions?** Type /help anytime!`;
-  }
-
-  private getFluidKeyInviteLink(): string {
-    return `🎁 **Create your fkey.id here**: https://app.fluidkey.com/?ref=62YNSG`;
-  }
-
-  private getDStealthMiniAppLink(): string {
-    // Use production URL for dStealth mini app
-    const frontendURL = process.env.NEXT_PUBLIC_URL || process.env.FRONTEND_URL || 'https://dstealth.xyz';
-    return `🚀 **dStealth Mini App**: ${frontendURL}`;
-  }
-
-  private async checkMiniAppRegistration(senderInboxId: string): Promise<boolean> {
-    try {
-      const userData = await agentDb.getStealthDataByUser(senderInboxId);
-      return userData?.miniAppRegistered === true;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  private async handleSetupComplete(senderInboxId: string): Promise<string> {
-    try {
-      const userData = await agentDb.getStealthDataByUser(senderInboxId);
-      
-      if (!userData || !userData.fkeyId) {
-        return `❌ **Setup Incomplete**\n\nPlease set your fkey.id first by telling me your username!`;
-      }
-
-      // Mark user as having completed mini app setup
-      const updatedData: UserStealthData = {
-        ...userData,
-        miniAppRegistered: true,
-        lastUpdated: Date.now()
-      };
-
-      await agentDb.storeUserStealthData(updatedData);
-      await agentDb.logUserInteraction(senderInboxId, 'miniapp_setup_complete', { 
-        timestamp: Date.now() 
-      });
-
-      return `🎉 **Welcome to the full dStealth experience!**
-
-✅ **Setup Complete**: ${userData.fkeyId}
-🏠 **Stealth Address**: ${userData.stealthAddress}
-
-**🔓 All Features Unlocked:**
-💳 **Payment Links**: "create payment link for $5"
-🔍 **Advanced Scanning**: /scan <address>  
-📊 **Your Links**: /links
-💰 **Balance Tracking**: /balance
-🏆 **Privacy Rewards**: /rewards
-📡 **Proxy402 Content**: /create content
-
-**🎯 Start Earning Privacy Rewards:**
-- Generate anonymous payment links
-- Use stealth addresses for transactions
-- Complete privacy challenges
-- Build your FluidKey Score
-
-**Try this**: "create a payment link for $10" to get started!
-
-**Need help?** Type /help for full command list.`;
-
-    } catch (error) {
-      return `❌ **Error completing setup**\nPlease try again or contact support.`;
-    }
-  }
-
-  private async requireMiniAppSetup(feature: string): Promise<string> {
-    return `🔒 **${feature} requires complete setup**
-
-To access this feature, please:
-
-1. **Complete Mini App Setup**: ${this.getDStealthMiniAppLink()}
-2. **Come back and type**: "/setup complete"
-
-**Why setup is required:**
-- Enhanced privacy features need proper configuration
-- Rewards tracking requires account verification  
-- Payment links need secure stealth address setup
-
-**Available without setup:**
-- Basic help: /help
-- Simple address scanning: /scan <address>
-
-**Complete setup to unlock all privacy rewards!**`;
-  }
-
-  private isPaymentRequest(content: string): boolean {
-    const paymentPatterns = [
-      /create\s+(?:a\s+)?payment\s+link/i,
-      /generate\s+(?:a\s+)?payment\s+link/i,
-      /make\s+(?:a\s+)?payment\s+link/i,
-      /payment\s+link\s+for/i,
-      /pay\s+me\s+link/i,
-      /\$[\d,.]+/,  // Dollar amounts
-      /[\d,.]+\s*(?:usd|usdc|eth|dai)/i,
-    ];
-    
-    return paymentPatterns.some(pattern => pattern.test(content));
-  }
-
-  private async handlePaymentLinkRequest(amount: string, senderInboxId: string): Promise<string> {
-    try {
-      // Check if user has completed full setup
-      const hasMiniAppSetup = await this.checkMiniAppRegistration(senderInboxId);
-      
-      if (!hasMiniAppSetup) {
-        return this.requireMiniAppSetup("Payment Link Generation");
-      }
-
-      // Check if user has fkey.id set
-      const userData = await agentDb.getStealthDataByUser(senderInboxId);
-      
-      if (!userData || !userData.fkeyId || !userData.stealthAddress) {
-        return `❌ **fkey.id Required**
-
-To create payment links, I need your fkey.id first!
-
-Please tell me your fkey.id username, or if you don't have one:
-${this.getFluidKeyInviteLink()}`;
-      }
-
-      // Generate Daimo payment link
-      const paymentLink = this.generateDaimoPaymentLink(userData.stealthAddress, amount, userData.fkeyId);
-      
-      // Store the generated link
-      await agentDb.logUserInteraction(senderInboxId, 'payment_link_generated', {
-        amount,
-        address: userData.stealthAddress,
-        fkeyId: userData.fkeyId,
-        link: paymentLink,
-        timestamp: Date.now()
-      });
-
-      return `💳 **Anonymous Payment Link Generated!**
-
-💰 **Amount**: $${amount} USDC
-🏠 **To**: ${userData.stealthAddress}
-📍 **fkey.id**: ${userData.fkeyId}
-🏆 **Privacy Rewards**: ✅ Enabled
-
-🔗 **Payment Link**:
-${paymentLink}
-
-📱 **How it works**:
-- Anyone can pay you via this link
-- Works with any wallet (Daimo, MetaMask, etc.)
-- Funds go to your stealth address
-- Fully private and secure
-- **Earns you privacy rewards!**
-
-🎯 **Share this link to receive anonymous payments and boost your FluidKey Score!**
-
-Type "/links" to see all your payment links or "/rewards" to check your privacy earnings!`;
-
-    } catch (error) {
-      return `❌ **Error generating payment link**\nPlease try again or type /help for assistance.`;
-    }
-  }
-
-  private extractPaymentAmount(content: string): { amount: string } | null {
-    const patterns = [
-      /create.*payment.*link.*for.*\$(\d+(?:\.\d{2})?)/i,
-      /\$(\d+(?:\.\d{2})?).*payment.*link/i,
-      /generate.*link.*\$(\d+(?:\.\d{2})?)/i,
-      /make.*payment.*\$(\d+(?:\.\d{2})?)/i
-    ];
-
-    for (const pattern of patterns) {
-      const match = content.match(pattern);
-      if (match && match[1]) {
-        return { amount: match[1] };
+    if (openai && (isComplexQuery || userHasSetup)) {
+      console.log(`🤖 Using GPT for DM response`);
+      const gptResponse = await this.processWithGPT(content, senderInboxId);
+      if (gptResponse && gptResponse.trim()) {
+        return gptResponse;
       }
     }
-    return null;
+
+    // Default DM response: Full onboarding experience
+    const firstTimeResponse = await this.handleFirstTimeUser(senderInboxId);
+    if (firstTimeResponse && firstTimeResponse.trim()) {
+      return firstTimeResponse;
+    }
+
+    return this.getGuaranteedFallbackResponse();
   }
 
-  private generateDaimoPaymentLink(toAddress: string, amount: string, fkeyId: string): string {
-    // Create Daimo payment link (Base USDC)
-    const baseUSDC = {
-      token: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // Base USDC
-      chainId: 8453 // Base
-    };
-    
-    const params = new URLSearchParams({
-      to: toAddress,
-      token: baseUSDC.token,
-      amount: amount,
-      chain: baseUSDC.chainId.toString(),
-      memo: `ZK Stealth Payment to ${fkeyId}`,
-    });
+  // 🔥 NEW: Short invite message for group chats
+  private getGroupInviteMessage(): string {
+    return `👋 **Hi! I'm the dStealth Agent** 🥷
 
-    return `https://daimo.com/link/pay?${params.toString()}`;
+💰 **I help with privacy rewards & anonymous payments**
+
+🚀 **Try dStealth**: https://dstealth.xyz
+🔑 **Get FluidKey**: https://app.fluidkey.com/?ref=62YNSG
+
+**Group Commands**: /help, /pay $amount
+**Privacy Commands**: DM me for /scan, /balance, etc.
+**Questions?** DM me for full setup assistance!`;
   }
 
   private async processCommand(command: string, senderInboxId: string): Promise<string | null> {
@@ -1671,6 +1144,9 @@ Type "/links" to see all your payment links or "/rewards" to check your privacy 
     }
 
     if (cmd.startsWith('/scan ')) {
+      // 🔒 PRIVACY: /scan is DM-only to protect sensitive information
+      // We need to check if this is being called from group context
+      // For now, we'll handle this in the calling context
       const address = cmd.slice(6).trim();
       if (address) {
         return await this.handleStealthScan(address, senderInboxId);
@@ -1909,6 +1385,490 @@ Stay tuned for updates!`;
     } catch (error) {
       console.error('❌ Error during shutdown:', error);
     }
+  }
+
+  // 🔥 NEW: GPT-powered message processing
+  private async processWithGPT(content: string, senderInboxId: string): Promise<string> {
+    try {
+      if (!openai) {
+        console.log('⚠️ OpenAI not available, falling back to default response');
+        return '';
+      }
+
+      // Get user context
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      const userContext = userData ? `User has fkey.id: ${userData.fkeyId}` : 'New user';
+
+      const systemPrompt = `You are the dStealth Agent, a privacy-focused Web3 assistant that helps users with:
+
+🥷 **Core Functions:**
+- Stealth addresses and privacy tools
+- FluidKey/fkey.id setup and management  
+- Anonymous payment links and rewards
+- Privacy score tracking and challenges
+- Web3 anonymity best practices
+
+🔑 **Key Information:**
+- FluidKey referral code: 62YNSG
+- dStealth Mini App: https://dstealth.xyz
+- Users need fkey.id for full features
+- Focus on privacy, rewards, and Web3 anonymity
+
+**User Context:** ${userContext}
+
+**Guidelines:**
+- Be helpful, enthusiastic about privacy
+- Use emojis appropriately 
+- Keep responses concise but informative
+- Always mention relevant privacy/reward benefits
+- Encourage fkey.id setup if user doesn't have one
+- Maintain the dStealth brand voice
+
+Respond to the user's message in a helpful way while staying focused on privacy tools and rewards.`;
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content }
+        ],
+        max_tokens: 500,
+        temperature: 0.7
+      });
+
+      const gptResponse = completion.choices[0]?.message?.content;
+      
+      if (gptResponse) {
+        console.log(`✅ GPT generated response (${gptResponse.length} chars)`);
+        return gptResponse.trim();
+      }
+
+      return '';
+      
+    } catch (error) {
+      console.error('❌ GPT processing error:', error);
+      return '';
+    }
+  }
+
+  // 🔥 NEW: Handle payment link requests with stealth addresses and ZK receipts
+  private async handlePaymentLinkRequest(amount: string, senderInboxId: string): Promise<string> {
+    try {
+      console.log(`💰 Processing payment link request for $${amount} from ${senderInboxId}`);
+
+      // Get user data to personalize the payment link
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      
+      if (!userData || !userData.stealthAddress) {
+        // User doesn't have stealth address setup yet
+        const basicPaymentLink = await this.generateDaimoPaymentLink(amount);
+        return `💰 **Payment Link**: ${basicPaymentLink}\n\n` +
+               `🔗 **Setup FluidKey first**: https://app.fluidkey.com/?ref=62YNSG\n` +
+               `📱 Then register with: ${this.getDStealthMiniAppLink()}\n\n` +
+               `⚡ **Unlock stealth payments** after setup!`;
+      }
+
+      // 🔥 Generate stealth payment link with ZK receipt
+      const stealthPaymentLink = await this.generateDaimoPaymentLink(amount, userData.stealthAddress, {
+        contentId: `xmtp_payment_${Date.now()}`,
+        userStealthAddress: userData.stealthAddress,
+        fkeyId: userData.fkeyId,
+        zkProof: userData.zkProof,
+        senderInboxId: senderInboxId,
+        paymentIntent: `XMTP Payment $${amount}`,
+        privacyLevel: 'stealth'
+      });
+      
+      // Store ZK receipt for the payment
+      try {
+        const zkReceiptId = `zk_xmtp_${senderInboxId}_${Date.now()}`;
+        console.log(`🧾 ZK receipt prepared: ${zkReceiptId}`);
+        
+        // Could store in Redis or agentDb for tracking
+        await agentDb.logAgentInteraction(
+          this.client?.inboxId || 'unknown',
+          senderInboxId,
+          'payment_link_created_stealth',
+          {
+            amount,
+            stealthAddress: userData.stealthAddress,
+            fkeyId: userData.fkeyId,
+            zkReceiptId,
+            timestamp: Date.now()
+          }
+        );
+      } catch (receiptError) {
+        console.warn('⚠️ Failed to create ZK receipt:', receiptError);
+      }
+      
+      return `💰 **Your Stealth Payment Link**:\n${stealthPaymentLink}\n\n` +
+             `🥷 **Stealth Address**: \`${userData.stealthAddress?.slice(0, 6)}...${userData.stealthAddress?.slice(-4)}\`\n` +
+             `🔑 **FluidKey ID**: ${userData.fkeyId}\n` +
+             `🧾 **Privacy**: ZK receipt will be generated upon payment\n\n` +
+             `✅ Recipients will send payments privately to your stealth address!\n` +
+             this.getDStealthMiniAppLink();
+
+    } catch (error) {
+      console.error('❌ Error handling payment link request:', error);
+      const fallbackLink = await this.generateDaimoPaymentLink(amount);
+      return `💰 **Payment Link**: ${fallbackLink}\n\n` +
+             `🔗 **Get FluidKey**: https://app.fluidkey.com/?ref=62YNSG\n` +
+             `📱 **Setup**: ${this.getDStealthMiniAppLink()}`;
+    }
+  }
+
+  // 🔥 FIXED: Generate Daimo payment links using the proper API with correct amounts
+  private async generateDaimoPaymentLink(amount: string, stealthAddress?: string, zkReceiptData?: any): Promise<string> {
+    const recipient = stealthAddress || '0x706AfBE28b1e1CB40cd552Fa53A380f658e38332';
+    
+    // 🔥 FIXED: Daimo expects dollar amounts, not smallest units
+    const amountInDollars = parseFloat(amount).toFixed(2);
+    
+    console.log('💰 Agent amount conversion details:', {
+      originalAmount: amount,
+      finalAmountInDollars: amountInDollars,
+      daimoLimit: 4000,
+      withinLimit: parseFloat(amountInDollars) <= 4000,
+      recipient,
+      isStealthAddress: !!stealthAddress
+    });
+    
+    // Build metadata without null values (Daimo API rejects null values)
+    const metadata: Record<string, any> = {
+      type: 'xmtp-agent-payment',
+      service: 'dstealth-xmtp',
+      recipientType: stealthAddress ? 'stealth' : 'standard',
+    };
+    
+    // Only add zkReceiptId if it exists
+    if (zkReceiptData) {
+      metadata.zkReceiptId = `zk_${Date.now()}`;
+      // Add other zkReceiptData fields
+      Object.assign(metadata, zkReceiptData);
+    }
+    
+    // Use the new Daimo Pay API
+    const paymentLink = await daimoPayClient.createPaymentLink({
+      destinationAddress: recipient,
+      amountUnits: amountInDollars,
+      displayAmount: amountInDollars, // Send the same amount for display
+      tokenSymbol: 'USDC',
+      chainId: getDaimoChainId('base'),
+      externalId: zkReceiptData?.contentId || `agent_payment_${Date.now()}`,
+      intent: `ZK receipt for stealth payment at dstealth.xyz`,
+      metadata
+    });
+    
+    console.log(`✅ Agent created Daimo payment link via API: ${paymentLink.url}`);
+    console.log(`🎯 Payment recipient: ${recipient} (${stealthAddress ? 'stealth' : 'standard'})`);
+    
+    return paymentLink.url;
+  }
+
+  // Extract payment amount from message content
+  private extractPaymentAmount(content: string): { amount: string } | null {
+    const paymentPatterns = [
+      /create.*payment.*link.*for.*\$(\d+(?:\.\d{2})?)/i,
+      /\$(\d+(?:\.\d{2})?).*payment.*link/i,
+      /generate.*link.*\$(\d+(?:\.\d{2})?)/i,
+      /make.*payment.*\$(\d+(?:\.\d{2})?)/i,
+      /payment.*\$(\d+(?:\.\d{2})?)/i,
+      /\$(\d+(?:\.\d{2})?)/
+    ];
+
+    for (const pattern of paymentPatterns) {
+      const match = content.match(pattern);
+      if (match && match[1]) {
+        return { amount: match[1] };
+      }
+    }
+    return null;
+  }
+
+  // Check if content looks like a fkey.id pattern
+  private isFkeyIdPattern(content: string): boolean {
+    // Check for fkey.id patterns like "tantodefi.fkey.id" or just "tantodefi"
+    return /^[a-z0-9._-]+\.fkey\.id$/i.test(content) || 
+           /^[a-z0-9._-]+$/i.test(content.trim()) && 
+           content.length > 2 && content.length < 50 && 
+           !content.includes(' ');
+  }
+
+  // Handle fkey.id submission
+  private async handleFkeyIdSubmission(fkeyInput: string, senderInboxId: string): Promise<string> {
+    try {
+      // Normalize the fkey.id input
+      let fkeyId = fkeyInput.trim();
+      if (!fkeyId.endsWith('.fkey.id')) {
+        fkeyId = `${fkeyId}.fkey.id`;
+      }
+
+      console.log(`🔑 Processing fkey.id: ${fkeyId}`);
+      
+      // Look up the fkey.id
+      const lookupResult = await this.apiClient.lookupFkey(fkeyId);
+      
+      if (!lookupResult.success || !lookupResult.stealthAddress) {
+        return `❌ **FluidKey ID not found**: ${fkeyId}
+
+Please check the spelling or create one at:
+🔗 **FluidKey**: https://app.fluidkey.com/?ref=62YNSG
+
+Once you have a fkey.id, tell me your username and I'll help you set up stealth payments!`;
+      }
+
+      // Store user data
+      await agentDb.setStealthDataByUser(senderInboxId, {
+        fkeyId,
+        stealthAddress: lookupResult.stealthAddress,
+        zkProof: lookupResult.zkProof || null,
+        setupStatus: 'fkey_set',
+        lastUpdated: Date.now()
+      });
+
+      return `✅ **FluidKey ID verified**: ${fkeyId}
+🏠 **Stealth Address**: ${lookupResult.stealthAddress}
+
+🎯 **Next Step**: Complete setup in the dStealth Mini App
+📱 **Link**: ${this.getDStealthMiniAppLink()}
+
+After setup, return here and type "/setup complete" to unlock all features!`;
+
+    } catch (error) {
+      console.error('Error handling fkey.id submission:', error);
+      return `❌ **Error processing fkey.id**
+
+Please try again or create a new one at:
+🔗 **FluidKey**: https://app.fluidkey.com/?ref=62YNSG`;
+    }
+  }
+
+  // Check if query is complex (needs GPT)
+  private isComplexQuery(content: string): boolean {
+    const complexPatterns = [
+      /how.*(work|do|setup)/i,
+      /what.*(is|are|does)/i,
+      /why.*(should|would|do)/i,
+      /explain/i,
+      /difference/i,
+      /compare/i,
+      /help.*with/i,
+      /problem|issue|error/i,
+      /\?/,  // Contains question mark
+    ];
+
+    return complexPatterns.some(pattern => pattern.test(content)) || 
+           content.length > 50 ||
+           content.split(' ').length > 10;
+  }
+
+  // Guaranteed fallback response
+  private getGuaranteedFallbackResponse(): string {
+    return `👋 **Hi! I'm the dStealth Agent** 🥷
+
+💰 **I help with privacy & anonymous payments**
+
+**🚀 Get Started:**
+1. Tell me your **fkey.id username** (e.g., "tantodefi")
+2. Or say **"no"** if you don't have one yet
+
+**💳 Quick Actions:**
+• **"create payment link for $X"** - Generate payment links
+• **/help** - Full command list
+• **/scan <address>** - Check privacy score
+
+**🔗 Links:**
+• **dStealth Mini App**: ${this.getDStealthMiniAppLink()}
+• **Get FluidKey**: https://app.fluidkey.com/?ref=62YNSG
+
+Type **"help"** for complete instructions!`;
+  }
+
+  // Handle first time users
+  private async handleFirstTimeUser(senderInboxId: string): Promise<string> {
+    // Check if user already has data
+    const userData = await agentDb.getStealthDataByUser(senderInboxId);
+    
+    if (userData && userData.fkeyId) {
+      // User has fkey but maybe not complete setup
+      if (userData.setupStatus === 'complete') {
+        return this.getExistingUserWelcome(userData);
+      } else {
+        return this.requireMiniAppSetup("Full Features");
+      }
+    }
+
+    // New user - start onboarding
+    return `👋 **Welcome to dStealth!** 🥷
+
+I'm your **privacy & anonymous payment assistant**.
+
+**🔑 Do you have a FluidKey ID (fkey.id)?**
+
+**If YES**: Tell me your username (e.g., "tantodefi")
+**If NO**: Say "no" and I'll help you create one
+
+**💡 With FluidKey you get:**
+- Anonymous stealth addresses
+- Private payment links
+- Privacy rewards & challenges
+- Enhanced Web3 anonymity
+
+**Ready?** Tell me your fkey.id username or say "no" to get started!`;
+  }
+
+  // Handle "no" response (no fkey.id)
+  private handleNoFkeyId(): string {
+    return `🆕 **No problem! Let's get you set up** 
+
+**Step 1**: Create your FluidKey ID
+🔗 **Visit**: https://app.fluidkey.com/?ref=62YNSG
+🎯 **Referral Code**: 62YNSG (for bonus rewards!)
+
+**Step 2**: Choose your username  
+Example: "tantodefi" becomes "tantodefi.fkey.id"
+
+**Step 3**: Complete setup
+📱 **dStealth Mini App**: ${this.getDStealthMiniAppLink()}
+
+**Step 4**: Return here
+Tell me your new fkey.id username!
+
+**💡 Pro Tip**: FluidKey gives you stealth addresses for anonymous payments and privacy rewards!`;
+  }
+
+  // Check mini app registration
+  private async checkMiniAppRegistration(senderInboxId: string): Promise<boolean> {
+    try {
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      return userData && userData.setupStatus === 'complete';
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // Require mini app setup
+  private requireMiniAppSetup(feature: string): string {
+    return `🔒 **${feature} requires complete setup**
+
+**📱 Complete setup in the dStealth Mini App:**
+${this.getDStealthMiniAppLink()}
+
+**After setup, return here and type:**
+\`/setup complete\`
+
+**🎯 This unlocks:**
+- Anonymous payment links
+- Privacy rewards tracking  
+- Advanced stealth features
+- Balance & transaction history
+
+**Questions?** Type /help for assistance!`;
+  }
+
+  // Handle setup complete
+  private async handleSetupComplete(senderInboxId: string): Promise<string> {
+    try {
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      
+      if (!userData || !userData.fkeyId) {
+        return `❌ **Setup not found**
+
+Please tell me your fkey.id username first, then complete the mini app setup.
+
+Need help? Type "help" for instructions.`;
+      }
+
+      // Update setup status
+      await agentDb.updateStealthDataByUser(senderInboxId, {
+        setupStatus: 'complete',
+        lastUpdated: Date.now()
+      });
+
+      return this.getSetupCompleteMessage(userData);
+      
+    } catch (error) {
+      console.error('Error handling setup complete:', error);
+      return `❌ **Error updating setup status**
+
+Please try again or type /help for assistance.`;
+    }
+  }
+
+  // Handle fkey lookup command
+  private async handleFkeyLookup(fkeyId: string, senderInboxId: string): Promise<string> {
+    try {
+      const lookupResult = await this.apiClient.lookupFkey(fkeyId);
+      
+      if (!lookupResult.success) {
+        return `❌ **FluidKey ID not found**: ${fkeyId}
+
+Please check the spelling or try a different username.`;
+      }
+
+      return `🔍 **FluidKey Lookup Results**
+
+**🔑 fkey.id**: ${fkeyId}
+**🏠 Stealth Address**: ${lookupResult.stealthAddress || 'Not available'}
+**✅ Status**: Registered
+**🏆 Privacy Score**: ${lookupResult.privacyScore || 'Not analyzed'}
+
+Type "/scan ${lookupResult.stealthAddress}" to analyze this address!`;
+
+    } catch (error) {
+      return `❌ **Lookup failed**\nPlease try again or type /help for assistance.`;
+    }
+  }
+
+  // Get existing user welcome
+  private getExistingUserWelcome(userData: UserStealthData): string {
+    return `🎉 **Welcome back, ${userData.fkeyId}!** 🥷
+
+**🏠 Your Stealth Address**: ${userData.stealthAddress}
+**✅ Setup Status**: Complete
+
+**💳 Quick Actions:**
+• **"create payment link for $X"** - Generate anonymous payment links
+• **/balance** - Check your stealth address balance
+• **/links** - View your payment links
+• **/scan <address>** - Analyze any address
+
+**🎯 Ready to earn privacy rewards?**
+Try: "create payment link for $10"
+
+Type **/help** for all commands!`;
+  }
+
+  // Get setup complete message
+  private getSetupCompleteMessage(userData: UserStealthData): string {
+    return `🎉 **Welcome to the full dStealth experience!**
+
+✅ **Setup Complete**: ${userData.fkeyId}
+🏠 **Stealth Address**: ${userData.stealthAddress}
+
+**🔓 All Features Unlocked:**
+💳 **Payment Links**: "create payment link for $5"
+🔍 **Advanced Scanning**: /scan <address>  
+📊 **Your Links**: /links
+💰 **Balance Tracking**: /balance
+🏆 **Privacy Rewards**: /rewards
+📡 **Proxy402 Content**: /create content
+
+**🎯 Start Earning Privacy Rewards:**
+- Generate anonymous payment links
+- Use stealth addresses for transactions
+- Complete privacy challenges
+- Build your FluidKey Score
+
+**Try this**: "create a payment link for $10" to get started!
+
+**Need help?** Type /help for full command list.`;
+  }
+
+  // Get dStealth mini app link
+  private getDStealthMiniAppLink(): string {
+    const frontendURL = env.FRONTEND_URL || process.env.NEXT_PUBLIC_URL || 'https://dstealth.xyz';
+    return frontendURL;
   }
 }
 

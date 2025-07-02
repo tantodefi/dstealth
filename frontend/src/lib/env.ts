@@ -8,6 +8,9 @@ export const env = createEnv({
     JWT_SECRET: z.string().min(1).optional(),
     API_SECRET_KEY: z.string().min(1).optional(),
     BACKEND_URL: z.string().url().optional(),
+    // Daimo Pay API Configuration (server-side)
+    NEXT_DAIMO_API_KEY: z.string().min(1).optional(),
+    DAIMO_API_URL: z.string().url().default("https://pay.daimo.com"),
   },
   client: {
     NEXT_PUBLIC_URL: z.string().url().min(1).optional(),

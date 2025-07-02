@@ -42,6 +42,10 @@ const envSchema = z.object({
   REDIS_URL: z.string().optional(),
   UPSTASH_REDIS_REST_URL: z.string().optional(),
   UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
+
+  // Daimo Pay API Configuration
+  DAIMO_API_KEY: z.string().optional(),
+  DAIMO_API_URL: z.string().url().default("https://api.daimo.com"),
 });
 
 const env = envSchema.parse(process.env);

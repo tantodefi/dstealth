@@ -83,6 +83,31 @@ interface DaimoPayButtonProps {
   onLinkGenerated?: (linkData: any) => void;
 }
 
+// 🔥 NEW: Add Coinbase Wallet request link generation
+const generateCoinbaseWalletLink = (toAddress: string, amount: string, tokenSymbol: string = 'USDC') => {
+  try {
+    // USDC contract address on Base
+    const usdcContractBase = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+    
+    // Convert amount to smallest unit (USDC has 6 decimals)
+    const amountInSmallestUnit = Math.floor(parseFloat(amount) * 1000000).toString();
+    
+    // Construct EIP-681 URI for Base network
+    const eip681Uri = `ethereum:${usdcContractBase}@8453/transfer?address=${toAddress}&uint256=${amountInSmallestUnit}`;
+    
+    // URL encode the EIP-681 URI
+    const encodedUri = encodeURIComponent(eip681Uri);
+    
+    // Construct Coinbase Wallet request URL
+    const coinbaseWalletUrl = `https://go.cb-w.com/pay-request?EIP681Link=${encodedUri}`;
+    
+    return coinbaseWalletUrl;
+  } catch (error) {
+    console.error('Error generating Coinbase Wallet link:', error);
+    return '';
+  }
+};
+
 export default function DaimoPayButton({
   toAddress,
   onPaymentStarted,
@@ -100,6 +125,9 @@ export default function DaimoPayButton({
   const [customAmount, setCustomAmount] = useState('');
   const [generatedLink, setGeneratedLink] = useState('');
   const [linkCopied, setLinkCopied] = useState(false);
+  
+  // 🔥 NEW: Payment link type toggle
+  const [linkType, setLinkType] = useState<'daimo' | 'coinbase'>('daimo');
   
   // localStorage for generated payment links and completed payments
   const [generatedPaymentLinks, setGeneratedPaymentLinks] = useLocalStorage<GeneratedPaymentLink[]>('generated-payment-links', []);
@@ -304,24 +332,64 @@ export default function DaimoPayButton({
     onPaymentCompleted?.(event);
   };
 
-  const generateDaimoLink = () => {
+  const generatePaymentLink = async () => {
     if (!customAmount || parseFloat(customAmount) <= 0) {
       alert('Please enter a valid amount');
       return;
     }
 
-    // Generate Daimo web payment link (browsable URL)
-    // Format: https://daimo.com/link/pay?to=ADDRESS&token=TOKEN&amount=AMOUNT&chain=CHAIN&memo=MEMO
-    const params = new URLSearchParams({
-      to: getAddress(toAddress),
-      token: getAddress(baseUSDC.token),
-      amount: parseFloat(customAmount).toString(),
-      chain: baseUSDC.chainId.toString(),
-      memo: memo || 'ZK Stealth Payment via FluidKey',
-    });
+    let paymentLink = '';
+    
+    if (linkType === 'coinbase') {
+      // Generate Coinbase Wallet request link
+      paymentLink = generateCoinbaseWalletLink(toAddress, customAmount, 'USDC');
+    } else {
+      // 🔥 NEW: Use proper Daimo Pay API instead of deprecated deep links
+      try {
+        const contentId = `frontend_payment_${Date.now()}`;
+        const response = await fetch(`/api/content/pay?id=${contentId}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userAddress: toAddress, // This will trigger stealth address lookup
+            amount: customAmount,
+            currency: 'USDC',
+          }),
+        });
 
-    const daimoLink = `https://daimo.com/link/pay?${params.toString()}`;
-    setGeneratedLink(daimoLink);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.paymentUrl) {
+            paymentLink = data.paymentUrl;
+            console.log('✅ Generated proper Daimo Pay API link:', paymentLink);
+          } else {
+            throw new Error('No payment URL in response');
+          }
+        } else {
+          const errorText = await response.text();
+          console.error('❌ API Response Error:', {
+            status: response.status,
+            statusText: response.statusText,
+            errorText
+          });
+          throw new Error(`API error: ${response.status} - ${errorText}`);
+        }
+      } catch (error) {
+        console.error('❌ Daimo Pay API failed:', {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          type: typeof error
+        });
+        
+        // 🔥 NO MORE FALLBACK TO DEPRECATED LINKS - Force proper API usage
+        alert(`Payment link generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        return; // Exit early instead of generating deprecated link
+      }
+    }
+    
+    setGeneratedLink(paymentLink);
 
     // Create payment link record with ZK proof data
     const linkId = `link_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -331,7 +399,7 @@ export default function DaimoPayButton({
       amount: parseFloat(customAmount).toString(),
       token: 'USDC',
       recipientAddress: toAddress,
-      paymentUrl: daimoLink,
+      paymentUrl: paymentLink,
       memo: memo || 'ZK Stealth Payment via FluidKey',
       fkeyId: username ? `${username}.fkey.id` : `${toAddress.slice(0, 6)}...${toAddress.slice(-4)}`,
       isCompleted: false,
@@ -359,7 +427,7 @@ export default function DaimoPayButton({
       linkId,
       amount: paymentLinkData.amount,
       recipient: paymentLinkData.recipientAddress,
-      url: daimoLink,
+      url: paymentLink,
       hasZkProof: !!paymentLinkData.zkProof,
       zkProofDetails: paymentLinkData.zkProof ? {
         fkeyAvailable: !!paymentLinkData.zkProof.fkey,
@@ -557,12 +625,41 @@ export default function DaimoPayButton({
                     </div>
                     
                     {/* Generate Button */}
+                    {/* 🔥 NEW: Link Type Toggle */}
+                    <div className="mb-3">
+                      <label className="block text-gray-300 text-xs mb-2">
+                        Payment Link Type
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setLinkType('daimo')}
+                          className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                            linkType === 'daimo'
+                              ? 'bg-gradient-to-r from-green-600 to-teal-600 text-white'
+                              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                          }`}
+                        >
+                          Daimo Pay
+                        </button>
+                        <button
+                          onClick={() => setLinkType('coinbase')}
+                          className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                            linkType === 'coinbase'
+                              ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
+                              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                          }`}
+                        >
+                          Coinbase Wallet
+                        </button>
+                      </div>
+                    </div>
+                    
                     <button
-                      onClick={generateDaimoLink}
+                      onClick={() => generatePaymentLink()}
                       disabled={!customAmount || parseFloat(customAmount) <= 0}
                       className="w-full px-4 py-2 bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white rounded-lg font-medium text-sm transition-all duration-200"
                     >
-                      Generate Daimo Link
+                      Generate {linkType === 'coinbase' ? 'Coinbase Wallet' : 'Daimo'} Link
                     </button>
                   </div>
                 ) : (
@@ -585,7 +682,7 @@ export default function DaimoPayButton({
                         onClick={openLink}
                         className="flex-1 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg font-medium text-sm transition-all duration-200"
                       >
-                        Open in Daimo
+                        Open Payment Link
                       </button>
                       <button
                         onClick={copyLink}

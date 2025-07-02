@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Redis } from '@upstash/redis';
 import { randomBytes } from 'crypto';
+import { daimoPayClient, getDaimoChainId } from '@/lib/daimo-pay';
 
-// Redis client setup
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
+// Redis client setup - with safe initialization
+const redis = process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+  ? new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    })
+  : null;
 
 interface PaymentRequest {
   transactionHash?: string;
@@ -62,7 +65,7 @@ export async function POST(request: NextRequest) {
     }
 
     // If no transaction hash, return payment URL for user to complete payment
-    const paymentUrl = await generatePaymentUrl(contentId);
+    const paymentUrl = await generatePaymentUrl(contentId, userAddress, amount);
     
     const response: PaymentResponse = {
       success: false,
@@ -125,7 +128,9 @@ async function processBlockchainPayment(contentId: string, payment: PaymentReque
       paidAt: new Date().toISOString()
     };
 
-    await redis.set(paymentKey, JSON.stringify(paymentRecord), { ex: 86400 }); // 24 hours
+    if (redis) {
+      await redis.set(paymentKey, JSON.stringify(paymentRecord), { ex: 86400 }); // 24 hours
+    }
 
     // Update content access stats
     await updateContentStats(contentId, payment);
@@ -182,6 +187,11 @@ function generateAccessToken(contentId: string, userAddress: string): string {
 }
 
 async function updateContentStats(contentId: string, payment: PaymentRequest): Promise<void> {
+  if (!redis) {
+    console.warn('⚠️ Redis unavailable, skipping content stats update');
+    return;
+  }
+  
   try {
     const statsKey = `content:stats:${contentId}`;
     const stats = await redis.get(statsKey);
@@ -226,29 +236,124 @@ async function updateContentStats(contentId: string, payment: PaymentRequest): P
   }
 }
 
-async function generatePaymentUrl(contentId: string): Promise<string> {
-  try {
-    // Get content metadata
-    const contentData = await redis.get(`x402:content:${contentId}`);
-    
-    let price = '0.01';
-    let currency = 'USDC';
-    let recipient = '0x706AfBE28b1e1CB40cd552Fa53A380f658e38332';
-    
-    if (contentData) {
-      const content = typeof contentData === 'string' ? JSON.parse(contentData) : contentData;
-      price = content.pricing?.[0]?.amount?.toString() || price;
-      currency = content.pricing?.[0]?.currency || currency;
-      recipient = content.paymentRecipient || content.pricing?.[0]?.payTo || recipient;
+async function generatePaymentUrl(contentId: string, userAddress?: string, userAmount?: string): Promise<string> {
+  // Get content metadata safely - use user's amount if provided
+  let price = userAmount || '0.003'; // Use user's input amount or fallback
+  let currency = 'USDC';
+  let recipient = '0x706AfBE28b1e1CB40cd552Fa53A380f658e38332'; // Default fallback
+  
+  if (redis) {
+    try {
+      const contentData = await redis.get(`x402:content:${contentId}`);
+      if (contentData) {
+        const content = typeof contentData === 'string' ? JSON.parse(contentData) : contentData;
+        price = content.pricing?.[0]?.amount?.toString() || price;
+        currency = content.pricing?.[0]?.currency || currency;
+        recipient = content.paymentRecipient || content.pricing?.[0]?.payTo || recipient;
+      }
+    } catch (redisError) {
+      console.warn('⚠️ Redis unavailable, using default pricing:', redisError);
     }
-
-    // Generate payment URL
-    return `https://daimo.com/l/pay?amount=${price}&token=${currency}&chain=base&to=${recipient}&memo=X402%20Content%20${contentId}`;
-
-  } catch (error) {
-    console.error('Error generating payment URL:', error);
-    return `https://daimo.com/l/pay?amount=0.01&token=USDC&chain=base&memo=X402%20Payment`;
   }
+
+  // Try to get user's stealth address if userAddress is provided
+  let finalRecipient = recipient;
+  let zkReceiptData = null;
+  
+  if (userAddress && redis) {
+    try {
+      const userStealthKey = `dstealth_agent:stealth:${userAddress.toLowerCase()}`;
+      const stealthData = await redis.get(userStealthKey);
+      
+      if (stealthData) {
+        const userData = typeof stealthData === 'string' ? JSON.parse(stealthData) : stealthData;
+        
+        if (userData.stealthAddress) {
+          finalRecipient = userData.stealthAddress;
+          console.log(`🥷 Using stealth address for payment: ${userData.stealthAddress}`);
+          
+          zkReceiptData = {
+            contentId,
+            userStealthAddress: userData.stealthAddress,
+            fkeyId: userData.fkeyId,
+            zkProof: userData.zkProof,
+            timestamp: Date.now(),
+            paymentIntent: `X402 Content ${contentId}`,
+            privacyLevel: 'stealth'
+          };
+        }
+      }
+    } catch (stealthError) {
+      console.warn('⚠️ Could not retrieve stealth address, using default recipient:', stealthError);
+    }
+  }
+
+  // 🔥 FIXED: Daimo expects dollar amounts, not smallest units
+  const amountInDollars = parseFloat(price).toFixed(2);
+  
+  console.log('💰 Amount conversion details:', {
+    originalPrice: price,
+    parsedFloat: parseFloat(price),
+    finalAmountInDollars: amountInDollars,
+    daimoLimit: 4000,
+    withinLimit: parseFloat(amountInDollars) <= 4000
+  });
+  
+  console.log('🔗 Creating Daimo payment link with:', {
+    destinationAddress: finalRecipient,
+    amountUnits: amountInDollars,
+    originalAmount: price,
+    tokenSymbol: currency,
+    chainId: getDaimoChainId('base')
+  });
+  
+  // Build metadata without null values (Daimo API rejects null values)
+  const metadata: Record<string, any> = {
+    contentId,
+    type: 'x402-content',
+    service: 'dstealth-xmtp',
+    recipientType: finalRecipient !== recipient ? 'stealth' : 'standard',
+  };
+  
+  // Only add zkReceiptId if it exists
+  if (zkReceiptData) {
+    metadata.zkReceiptId = `zk_${contentId}_${Date.now()}`;
+    // Add other zkReceiptData fields
+    Object.assign(metadata, zkReceiptData);
+  }
+
+  const paymentLink = await daimoPayClient.createPaymentLink({
+    destinationAddress: finalRecipient,
+    amountUnits: amountInDollars,
+    displayAmount: price, // Send the original dollar amount for display
+    tokenSymbol: currency,
+    chainId: getDaimoChainId('base'),
+    externalId: contentId,
+    intent: `ZK receipt for stealth payment at dstealth.xyz`,
+    metadata
+  });
+  
+  // Store ZK receipt if we have stealth address data
+  if (zkReceiptData && redis) {
+    try {
+      const zkReceiptKey = `zk_receipt:${contentId}:${userAddress}:${Date.now()}`;
+      await redis.set(zkReceiptKey, JSON.stringify({
+        ...zkReceiptData,
+        paymentLinkId: paymentLink.id,
+        paymentUrl: paymentLink.url,
+        status: 'pending'
+      }), { ex: 86400 * 7 }); // 7 days
+      
+      console.log('🧾 ZK receipt created for stealth payment');
+    } catch (receiptError) {
+      console.warn('⚠️ Failed to create ZK receipt:', receiptError);
+    }
+  }
+  
+  console.log(`✅ Created Daimo payment link via API: ${paymentLink.url}`);
+  console.log(`🎯 Payment recipient: ${finalRecipient} (${finalRecipient !== recipient ? 'stealth' : 'standard'})`);
+  
+  return paymentLink.url;
 }
 
 export async function OPTIONS(request: NextRequest) {

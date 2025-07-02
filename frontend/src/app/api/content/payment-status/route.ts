@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Redis } from '@upstash/redis';
+import { daimoPayClient, getDaimoChainId } from '@/lib/daimo-pay';
 
 // Redis client setup
 const redis = new Redis({
@@ -97,17 +98,48 @@ async function generatePaymentUrl(contentId: string): Promise<string> {
       recipient = content.paymentRecipient || content.pricing?.[0]?.payTo || recipient;
     }
 
-    // Generate Daimo payment link for Base USDC
-    const daimoUrl = `https://daimo.com/l/pay?amount=${price}&token=${currency}&chain=base&to=${recipient}&memo=X402%20Content%20${contentId}`;
-    
-    console.log('💰 Generated payment URL:', { contentId, price, currency, recipient });
-    
-    return daimoUrl;
+    // 🔥 NEW: Use Daimo Pay API instead of deprecated deep links
+    try {
+      const paymentLink = await daimoPayClient.createPaymentLink({
+        destinationAddress: recipient,
+        amountUnits: price,
+        tokenSymbol: currency,
+        chainId: getDaimoChainId('base'),
+        externalId: contentId,
+        intent: `X402 Content ${contentId}`,
+        metadata: {
+          contentId,
+          type: 'x402-content',
+          service: 'dstealth-xmtp'
+        }
+      });
+      
+      console.log('💰 Generated payment URL via Daimo API:', { contentId, price, currency, recipient });
+      return paymentLink.url;
+      
+    } catch (apiError) {
+      console.warn('⚠️ Daimo API failed, falling back to legacy link:', apiError);
+      
+      // Fallback to legacy deep link if API fails
+      return daimoPayClient.generateLegacyLink({
+        amount: price,
+        token: currency,
+        chain: 'base',
+        to: recipient,
+        memo: `X402 Content ${contentId}`
+      });
+    }
 
   } catch (error) {
     console.error('Error generating payment URL:', error);
-    // Fallback payment URL
-    return `https://daimo.com/l/pay?amount=0.01&token=USDC&chain=base&memo=X402%20Content%20Payment`;
+    // Ultimate fallback payment URL
+    return daimoPayClient.generateLegacyLink({
+      amount: '0.01',
+      token: 'USDC',
+      chain: 'base',
+      to: '0x706AfBE28b1e1CB40cd552Fa53A380f658e38332',
+      memo: 'X402 Content Payment'
+    });
   }
 }
 
