@@ -98,48 +98,32 @@ async function generatePaymentUrl(contentId: string): Promise<string> {
       recipient = content.paymentRecipient || content.pricing?.[0]?.payTo || recipient;
     }
 
-    // 🔥 NEW: Use Daimo Pay API instead of deprecated deep links
-    try {
-      const paymentLink = await daimoPayClient.createPaymentLink({
-        destinationAddress: recipient,
-        amountUnits: price,
-        tokenSymbol: currency,
-        chainId: getDaimoChainId('base'),
-        externalId: contentId,
-        intent: `X402 Content ${contentId}`,
-        metadata: {
-          contentId,
-          type: 'x402-content',
-          service: 'dstealth-xmtp'
-        }
-      });
-      
-      console.log('💰 Generated payment URL via Daimo API:', { contentId, price, currency, recipient });
-      return paymentLink.url;
-      
-    } catch (apiError) {
-      console.warn('⚠️ Daimo API failed, falling back to legacy link:', apiError);
-      
-      // Fallback to legacy deep link if API fails
-      return daimoPayClient.generateLegacyLink({
-        amount: price,
-        token: currency,
-        chain: 'base',
-        to: recipient,
-        memo: `X402 Content ${contentId}`
-      });
-    }
+    // Convert price to proper dollar amount (not smallest units)
+    const amountInDollars = parseFloat(price).toFixed(2);
+
+    // 🔥 NEW: Use Daimo Pay API with required displayAmount property
+    const paymentLink = await daimoPayClient.createPaymentLink({
+      destinationAddress: recipient,
+      amountUnits: amountInDollars,
+      displayAmount: amountInDollars, // ✅ Required property added
+      tokenSymbol: currency,
+      chainId: getDaimoChainId('base'),
+      externalId: contentId,
+      intent: `X402 Content ${contentId}`,
+      metadata: {
+        contentId,
+        type: 'x402-content',
+        service: 'dstealth-xmtp'
+      }
+    });
+    
+    console.log('💰 Generated payment URL via Daimo API:', { contentId, price: amountInDollars, currency, recipient });
+    return paymentLink.url;
 
   } catch (error) {
     console.error('Error generating payment URL:', error);
-    // Ultimate fallback payment URL
-    return daimoPayClient.generateLegacyLink({
-      amount: '0.01',
-      token: 'USDC',
-      chain: 'base',
-      to: '0x706AfBE28b1e1CB40cd552Fa53A380f658e38332',
-      memo: 'X402 Content Payment'
-    });
+    // Return a basic URL fallback instead of trying non-existent methods
+    throw new Error(`Failed to generate payment URL: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 

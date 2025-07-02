@@ -129,7 +129,7 @@ async function processBlockchainPayment(contentId: string, payment: PaymentReque
     };
 
     if (redis) {
-      await redis.set(paymentKey, JSON.stringify(paymentRecord), { ex: 86400 }); // 24 hours
+    await redis.set(paymentKey, JSON.stringify(paymentRecord), { ex: 86400 }); // 24 hours
     }
 
     // Update content access stats
@@ -244,13 +244,13 @@ async function generatePaymentUrl(contentId: string, userAddress?: string, userA
   
   if (redis) {
     try {
-      const contentData = await redis.get(`x402:content:${contentId}`);
-      if (contentData) {
-        const content = typeof contentData === 'string' ? JSON.parse(contentData) : contentData;
-        price = content.pricing?.[0]?.amount?.toString() || price;
-        currency = content.pricing?.[0]?.currency || currency;
-        recipient = content.paymentRecipient || content.pricing?.[0]?.payTo || recipient;
-      }
+    const contentData = await redis.get(`x402:content:${contentId}`);
+    if (contentData) {
+      const content = typeof contentData === 'string' ? JSON.parse(contentData) : contentData;
+      price = content.pricing?.[0]?.amount?.toString() || price;
+      currency = content.pricing?.[0]?.currency || currency;
+      recipient = content.paymentRecipient || content.pricing?.[0]?.payTo || recipient;
+    }
     } catch (redisError) {
       console.warn('⚠️ Redis unavailable, using default pricing:', redisError);
     }
