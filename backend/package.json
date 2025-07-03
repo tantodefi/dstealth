@@ -20,7 +20,11 @@
     "db:test": "tsx scripts/db-sync.ts test",
     "db:export": "tsx scripts/db-sync.ts export",
     "db:sync": "tsx scripts/sync-databases.ts",
-    "restart:agent": "tsx scripts/restart-agent.ts"
+    "restart:agent": "tsx scripts/restart-agent.ts",
+    "fix:prod-db": "tsx scripts/production-db-reset.ts",
+    "extract:local": "tsx scripts/local-conversation-extract.ts",
+    "analyze:payment-links": "tsx scripts/payment-link-analyzer.ts",
+    "cleanup:payment-links": "tsx scripts/payment-link-cleanup.ts"
   },
   "dependencies": {
     "@coinbase/coinbase-sdk": "^0.25.0",

@@ -266,7 +266,7 @@ export default function ClientLayout({
           }}
         />
         
-        {/* Service Worker Registration */}
+        {/* Service Worker Registration with Payment Link Cleanup */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -279,6 +279,135 @@ export default function ClientLayout({
                     .catch(function(registrationError) {
                       console.log('SW registration failed: ', registrationError);
                     });
+                });
+                
+                // Listen for messages from service worker
+                navigator.serviceWorker.addEventListener('message', function(event) {
+                  if (event.data && event.data.type === 'CLEANUP_PAYMENT_LINKS') {
+                    console.log('🧹 SW: Received payment link cleanup request');
+                    let cleanupResults = {
+                      status: 'success',
+                      keysRemoved: 0,
+                      keysScanned: 0,
+                      removedKeys: [],
+                      errors: []
+                    };
+                    
+                    try {
+                      // Clean up payment link related data from localStorage
+                      const cleanupKeys = [];
+                      
+                      // Scan localStorage for payment link related keys
+                      const totalKeys = localStorage.length;
+                      cleanupResults.keysScanned = totalKeys;
+                      
+                      for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i);
+                        if (key && (
+                          key.includes('payment') || 
+                          key.includes('stealth') || 
+                          key.includes('dstealth') ||
+                          key.includes('fkey') ||
+                          key.includes('zkProof') ||
+                          key.includes('stealthAddress') ||
+                          key.includes('paymentLink')
+                        )) {
+                          cleanupKeys.push(key);
+                        }
+                      }
+                      
+                      // Remove identified keys
+                      cleanupKeys.forEach(key => {
+                        try {
+                          localStorage.removeItem(key);
+                          cleanupResults.removedKeys.push(key);
+                          console.log('🗑️ SW: Removed localStorage key:', key);
+                        } catch (err) {
+                          cleanupResults.errors.push(\`Failed to remove \${key}: \${err.message}\`);
+                        }
+                      });
+                      
+                      // Also clean up any dstealth-specific data
+                      const dstealthPattern = /dstealth|stealth|fkey|payment.*link/i;
+                      const additionalKeys = Object.keys(localStorage).filter(key => 
+                        dstealthPattern.test(key) && !cleanupKeys.includes(key)
+                      );
+                      
+                      additionalKeys.forEach(key => {
+                        try {
+                          localStorage.removeItem(key);
+                          cleanupResults.removedKeys.push(key);
+                          console.log('🗑️ SW: Removed dstealth key:', key);
+                        } catch (err) {
+                          cleanupResults.errors.push(\`Failed to remove \${key}: \${err.message}\`);
+                        }
+                      });
+                      
+                      cleanupResults.keysRemoved = cleanupResults.removedKeys.length;
+                      
+                      console.log('✅ SW: Payment link cleanup completed:', {
+                        keysScanned: cleanupResults.keysScanned,
+                        keysRemoved: cleanupResults.keysRemoved,
+                        errors: cleanupResults.errors.length
+                      });
+                      
+                      // Show user notification if we removed keys
+                      if (cleanupResults.keysRemoved > 0 && window.location.pathname !== '/') {
+                        // Create a subtle notification
+                        const notification = document.createElement('div');
+                        notification.style.cssText = \`
+                          position: fixed;
+                          top: 20px;
+                          right: 20px;
+                          background: #059669;
+                          color: white;
+                          padding: 12px 16px;
+                          border-radius: 8px;
+                          font-size: 14px;
+                          z-index: 10000;
+                          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+                          animation: slideIn 0.3s ease-out;
+                        \`;
+                        notification.innerHTML = \`🧹 Cleaned up \${cleanupResults.keysRemoved} payment links\`;
+                        
+                        // Add slide-in animation
+                        const style = document.createElement('style');
+                        style.textContent = \`
+                          @keyframes slideIn {
+                            from { transform: translateX(100%); opacity: 0; }
+                            to { transform: translateX(0); opacity: 1; }
+                          }
+                        \`;
+                        document.head.appendChild(style);
+                        
+                        document.body.appendChild(notification);
+                        
+                        // Remove notification after 4 seconds
+                        setTimeout(() => {
+                          notification.style.animation = 'slideIn 0.3s ease-out reverse';
+                          setTimeout(() => {
+                            if (notification.parentNode) {
+                              notification.parentNode.removeChild(notification);
+                            }
+                          }, 300);
+                        }, 4000);
+                      }
+                      
+                    } catch (error) {
+                      console.error('SW: Error during payment link cleanup:', error);
+                      cleanupResults.status = 'error';
+                      cleanupResults.errors.push(error.message || 'Unknown cleanup error');
+                    }
+                    
+                    // Send results back to service worker
+                    if (navigator.serviceWorker.controller) {
+                      navigator.serviceWorker.controller.postMessage({
+                        type: 'CLEANUP_RESULTS',
+                        results: cleanupResults,
+                        requestId: event.data.requestId
+                      });
+                    }
+                  }
                 });
               }
             `,

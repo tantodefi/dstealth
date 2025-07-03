@@ -1,7 +1,7 @@
 // X402 Protocol Service Worker
 // Handles x402:// URIs and redirects to our viewer
 
-const CACHE_NAME = 'x402-cache-v1';
+const CACHE_NAME = 'x402-cache-v2'; // Updated cache version to trigger cleanup
 const VIEWER_BASE_URL = '/viewer';
 
 // Install event - cache essential resources
@@ -23,18 +23,109 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   console.log('X402 Service Worker activating...');
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
+    Promise.all([
+      // Clean up old caches
+      caches.keys().then((cacheNames) => {
+        return Promise.all(
+          cacheNames.map((cacheName) => {
+            if (cacheName !== CACHE_NAME) {
+              return caches.delete(cacheName);
+            }
+          })
+        );
+      }),
+      // Clean up payment links from all clients
+      cleanupPaymentLinksFromAllClients()
+    ])
   );
   self.clients.claim();
 });
+
+// Function to clean up payment links from all client sessions
+async function cleanupPaymentLinksFromAllClients() {
+  try {
+    const clients = await self.clients.matchAll({ type: 'window' });
+    console.log(`SW: Cleaning up payment links from ${clients.length} client(s)`);
+    
+    // Send cleanup message to all clients and collect responses
+    const cleanupPromises = clients.map(client => {
+      return new Promise((resolve) => {
+        // Set up message listener for cleanup results
+        const messageHandler = (event) => {
+          if (event.data && event.data.type === 'CLEANUP_RESULTS') {
+            self.removeEventListener('message', messageHandler);
+            resolve(event.data.results);
+          }
+        };
+        self.addEventListener('message', messageHandler);
+        
+        // Send cleanup request
+        client.postMessage({
+          type: 'CLEANUP_PAYMENT_LINKS',
+          timestamp: Date.now(),
+          requestId: Date.now() + Math.random()
+        });
+        
+        // Timeout after 5 seconds
+        setTimeout(() => {
+          self.removeEventListener('message', messageHandler);
+          resolve({ status: 'timeout', keysRemoved: 0 });
+        }, 5000);
+      });
+    });
+    
+    const results = await Promise.all(cleanupPromises);
+    
+    // Log aggregated results
+    const totalKeysRemoved = results.reduce((sum, result) => {
+      return sum + (result?.keysRemoved || 0);
+    }, 0);
+    
+    const successfulCleanups = results.filter(r => r?.status === 'success').length;
+    
+    console.log(`SW: Payment link cleanup completed:`);
+    console.log(`   - Clients contacted: ${clients.length}`);
+    console.log(`   - Successful cleanups: ${successfulCleanups}`);
+    console.log(`   - Total keys removed: ${totalKeysRemoved}`);
+    
+    // Send analytics to backend
+    await sendCleanupMetrics({
+      timestamp: Date.now(),
+      clientsContacted: clients.length,
+      successfulCleanups: successfulCleanups,
+      totalKeysRemoved: totalKeysRemoved,
+      results: results
+    });
+    
+  } catch (error) {
+    console.error('SW: Error during payment link cleanup:', error);
+  }
+}
+
+// Send cleanup metrics to backend for monitoring
+async function sendCleanupMetrics(metrics) {
+  try {
+    // Only send metrics if we have a reasonable number of removals
+    if (metrics.totalKeysRemoved > 0) {
+      await fetch('/api/cleanup-metrics', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'sw_payment_cleanup',
+          metrics: metrics,
+          userAgent: navigator.userAgent,
+          url: self.location.origin
+        })
+      }).catch(err => {
+        console.log('SW: Could not send cleanup metrics (endpoint may not exist):', err.message);
+      });
+    }
+  } catch (error) {
+    console.log('SW: Error sending cleanup metrics:', error);
+  }
+}
 
 // Fetch event - intercept x402:// URIs
 self.addEventListener('fetch', (event) => {

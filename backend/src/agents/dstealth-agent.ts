@@ -544,7 +544,10 @@ export class DStealthAgent {
       let dbPath;
       try {
         if (process.env.RENDER) {
-          dbPath = `/data/xmtp/production-xmtp.db3`;
+          // 🔥 FORCE FRESH DATABASE: Add timestamp to avoid encryption key mismatches
+          const dbTimestamp = Date.now();
+          dbPath = `/data/xmtp/production-xmtp-${dbTimestamp}.db3`;
+          console.log(`🔄 Using fresh production database: ${dbPath}`);
         } else if (process.env.VERCEL) {
           dbPath = `/tmp/xmtp-${env.XMTP_ENV}.db3`;
         } else {
@@ -572,8 +575,8 @@ export class DStealthAgent {
           const currentDbPath = dbAttempt === 0 ? dbPath : `${dbPath}.recovery${dbAttempt}`;
           console.log(`📁 Attempting database path: ${currentDbPath}`);
           
-          this.client = await Client.create(signer, {
-            dbEncryptionKey: encryptionKey,
+      this.client = await Client.create(signer, {
+        dbEncryptionKey: encryptionKey,
             env: env.XMTP_ENV as XmtpEnv,
             dbPath: currentDbPath,
           });
@@ -682,8 +685,8 @@ export class DStealthAgent {
 
       // 🔧 Enhanced: Start listening with robust error handling
       try {
-        await this.startListening();
-        
+      await this.startListening();
+
         // 🔧 NEW: Start health monitoring
         this.startHealthMonitoring();
         
@@ -767,7 +770,7 @@ export class DStealthAgent {
         
         // Try to ping the client
         try {
-          await this.client.conversations.sync();
+      await this.client.conversations.sync();
           console.log('💓 Agent health check: OK');
         } catch (syncError) {
           console.warn('⚠️ Agent health check: Sync failed', syncError);
@@ -815,7 +818,7 @@ export class DStealthAgent {
       try {
         // The client will be recreated on restart
         this.client = null;
-      } catch (error) {
+              } catch (error) {
         console.warn('⚠️ Error during client cleanup:', error);
       }
     }
@@ -1024,22 +1027,22 @@ export class DStealthAgent {
               consecutiveErrors = 0; // Reset error counter on successful message
               
               console.log(`\n🔔 NEW MESSAGE STREAM EVENT #${messageCount}:`);
-              console.log('📨 RAW STREAM MESSAGE:', {
-                hasMessage: !!message,
-                content: message?.content || 'no-content',
-                senderInboxId: message?.senderInboxId || 'no-sender',
+          console.log('📨 RAW STREAM MESSAGE:', {
+            hasMessage: !!message,
+            content: message?.content || 'no-content',
+            senderInboxId: message?.senderInboxId || 'no-sender',
                 agentInboxId: this.client?.inboxId || 'no-agent-id',
-                contentType: message?.contentType?.typeId || 'no-type',
+            contentType: message?.contentType?.typeId || 'no-type',
                 conversationId: message?.conversationId || 'no-conversation-id',
                 messageId: message?.id || 'no-message-id',
-                sentAt: message?.sentAt || 'no-timestamp'
-              });
+            sentAt: message?.sentAt || 'no-timestamp'
+          });
 
               // Enhanced message validation
               if (!message || !message.content || !message.senderInboxId || !message.conversationId) {
                 console.log('⚠️ Invalid message structure, skipping...');
-                continue;
-              }
+            continue;
+          }
 
               // Content type validation
               if (message.contentType?.typeId !== 'text') {
@@ -1047,41 +1050,41 @@ export class DStealthAgent {
                 continue;
               }
 
-              console.log('📧 VALID MESSAGE DETAILS:', {
+          console.log('📧 VALID MESSAGE DETAILS:', {
                 content: JSON.stringify(message.content),
                 contentLength: (message.content as string).length,
-                contentType: typeof message.content,
-                senderInboxId: message.senderInboxId,
+            contentType: typeof message.content,
+            senderInboxId: message.senderInboxId,
                 agentInboxId: this.client?.inboxId || 'no-agent-id',
                 isOwnMessage: message.senderInboxId.toLowerCase() === (this.client?.inboxId || '').toLowerCase(),
-                messageContentType: message.contentType?.typeId,
-                conversationId: message.conversationId
-              });
+            messageContentType: message.contentType?.typeId,
+            conversationId: message.conversationId
+          });
 
               // Skip own messages
               if (message.senderInboxId.toLowerCase() === (this.client?.inboxId || '').toLowerCase()) {
-                console.log('⏭️ Skipping own message');
-                continue;
-              }
+            console.log('⏭️ Skipping own message');
+            continue;
+          }
 
               // 🔧 NEW: Skip if message already processed
               if (message.id && this.processedMessages.has(message.id)) {
                 console.log('⏭️ Skipping already processed message');
-                continue;
-              }
+            continue;
+          }
 
-              console.log(`🚀 PROCESSING NEW MESSAGE from ${message.senderInboxId}: "${message.content}"`);
-              
+          console.log(`🚀 PROCESSING NEW MESSAGE from ${message.senderInboxId}: "${message.content}"`);
+          
               // Add to processed messages
               if (message.id) {
-                this.processedMessages.add(message.id);
-                
-                // Keep processed messages list manageable
-                if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
-                  const firstItem = this.processedMessages.values().next().value;
+          this.processedMessages.add(message.id);
+          
+          // Keep processed messages list manageable
+          if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
+            const firstItem = this.processedMessages.values().next().value;
                   if (firstItem) {
-                    this.processedMessages.delete(firstItem);
-                  }
+            this.processedMessages.delete(firstItem);
+          }
                 }
               }
 

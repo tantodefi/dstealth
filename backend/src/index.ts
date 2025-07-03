@@ -44,6 +44,10 @@ let dStealthAgent: DStealthAgent;
 // Track XMTP initialization errors for better error reporting
 let xmtpInitError: Error | null = null;
 
+// Add a timestamp-based database path to force fresh database creation
+const DB_TIMESTAMP = Date.now();
+console.log(`🔄 Database reset timestamp: ${DB_TIMESTAMP}`);
+
 // Initialize XMTP client with retry logic
 const initializeXmtpClient = async (retryCount = 0, maxRetries = 3) => {
   try {
