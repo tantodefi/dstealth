@@ -204,8 +204,8 @@ const initializeDStealthAgent = async () => {
     console.log(`   📊 Agent Status: active`);
     
       } catch (error: unknown) {
-      console.error("❌ Failed to initialize dStealth Agent:", error);
-      xmtpInitError = error instanceof Error ? error : new Error(String(error));
+    console.error("❌ Failed to initialize dStealth Agent:", error);
+    xmtpInitError = error instanceof Error ? error : new Error(String(error));
     // Don't throw - let the server continue without the agent
   }
 };
@@ -896,7 +896,7 @@ app.post("/api/admin/sync-conversations", async (req, res) => {
     const syncResult = await dStealthAgent.forceConversationSync();
     
     console.log('✅ Admin-triggered conversation sync completed');
-    
+
     res.json({
       success: true,
       message: 'Conversation sync completed',

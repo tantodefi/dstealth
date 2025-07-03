@@ -7,6 +7,7 @@ import { Providers } from "@/providers/index";
 import "./config";
 import { Toaster } from "react-hot-toast";
 import dynamic from "next/dynamic";
+import React from "react";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -304,15 +305,28 @@ export default function ClientLayout({
                       for (let i = 0; i < localStorage.length; i++) {
                         const key = localStorage.key(i);
                         if (key && (
-                          key.includes('payment') || 
-                          key.includes('stealth') || 
-                          key.includes('dstealth') ||
-                          key.includes('fkey') ||
-                          key.includes('zkProof') ||
-                          key.includes('stealthAddress') ||
-                          key.includes('paymentLink')
+                          key.includes('payment_link_') || // Only old payment links
+                          key.includes('expired_') || // Only expired data  
+                          key.includes('_cache_') || // Only cached data
+                          key.includes('temp_payment') || // Only temporary payment data
+                          key.includes('old_stealth') // Only old stealth data
                         )) {
-                          cleanupKeys.push(key);
+                          // Check if it's actually old data (older than 7 days)
+                          try {
+                            const value = localStorage.getItem(key);
+                            if (value) {
+                              const data = JSON.parse(value);
+                              const age = Date.now() - (data.timestamp || data.createdAt || 0);
+                              const sevenDays = 7 * 24 * 60 * 60 * 1000;
+                              
+                              if (age > sevenDays) {
+                                cleanupKeys.push(key);
+                              }
+                            }
+                          } catch (e) {
+                            // If we can't parse it, it's probably old/corrupted
+                            cleanupKeys.push(key);
+                          }
                         }
                       }
                       
@@ -321,23 +335,7 @@ export default function ClientLayout({
                         try {
                           localStorage.removeItem(key);
                           cleanupResults.removedKeys.push(key);
-                          console.log('🗑️ SW: Removed localStorage key:', key);
-                        } catch (err) {
-                          cleanupResults.errors.push(\`Failed to remove \${key}: \${err.message}\`);
-                        }
-                      });
-                      
-                      // Also clean up any dstealth-specific data
-                      const dstealthPattern = /dstealth|stealth|fkey|payment.*link/i;
-                      const additionalKeys = Object.keys(localStorage).filter(key => 
-                        dstealthPattern.test(key) && !cleanupKeys.includes(key)
-                      );
-                      
-                      additionalKeys.forEach(key => {
-                        try {
-                          localStorage.removeItem(key);
-                          cleanupResults.removedKeys.push(key);
-                          console.log('🗑️ SW: Removed dstealth key:', key);
+                          console.log('🗑️ SW: Removed old localStorage key:', key);
                         } catch (err) {
                           cleanupResults.errors.push(\`Failed to remove \${key}: \${err.message}\`);
                         }
