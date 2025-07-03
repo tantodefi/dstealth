@@ -540,22 +540,16 @@ export class DStealthAgent {
       
       console.log('📱 Creating XMTP client...');
       
-      // 🔧 Enhanced: Database path with error recovery
+      // 🔧 Enhanced: Use same database path as main client to ensure conversation sync
       let dbPath;
       try {
-        if (process.env.RENDER) {
-          // 🔥 FORCE FRESH DATABASE: Add timestamp to avoid encryption key mismatches
-          const dbTimestamp = Date.now();
-          dbPath = `/data/xmtp/production-xmtp-${dbTimestamp}.db3`;
-          console.log(`🔄 Using fresh production database: ${dbPath}`);
-        } else if (process.env.VERCEL) {
-          dbPath = `/tmp/xmtp-${env.XMTP_ENV}.db3`;
-        } else {
-          dbPath = `.data/xmtp/${env.XMTP_ENV}-xmtp.db3`;
-        }
+        // Import getDbPath to use the same logic as main client
+        const { getDbPath } = await import('../helper.js');
+        dbPath = getDbPath(env.XMTP_ENV);
         
-        console.log(`📁 Database path: ${dbPath}`);
+        console.log(`🔄 Using shared database path: ${dbPath}`);
         console.log(`🌍 Environment: ${env.XMTP_ENV}`);
+        console.log(`🔗 This matches the main XMTP client database`);
       } catch (pathError) {
         console.warn('⚠️ Database path setup failed, using fallback:', pathError);
         dbPath = `.data/xmtp/fallback-xmtp.db3`;
