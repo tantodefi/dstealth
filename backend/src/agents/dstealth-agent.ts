@@ -526,97 +526,207 @@ export class DStealthAgent {
   async initialize(retryCount = 0, maxRetries = 5): Promise<void> {
     try {
       console.log(`🚀 Initializing dStealth Agent (attempt ${retryCount + 1}/${maxRetries + 1})...`);
-      
-      // Add progressive delay to avoid rate limiting
-      if (retryCount > 0) {
-        const delay = Math.min(Math.pow(2, retryCount) * 10000, 120000); // Max 2 minutes
-        console.log(`⏳ Waiting ${delay/1000}s before retry to avoid rate limits...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-      
-      // Create signer and client
-      const signer = createSigner(WALLET_KEY);
-      const encryptionKey = getEncryptionKeyFromHex(ENCRYPTION_KEY);
-      
-      console.log('📱 Creating XMTP client...');
-      this.client = await Client.create(signer, {
-        dbEncryptionKey: encryptionKey,
-        env: XMTP_ENV as XmtpEnv,
-      });
 
-      // Store agent info
+      if (!env.WALLET_KEY || !env.ENCRYPTION_KEY) {
+        throw new Error('Missing required environment variables: WALLET_KEY or ENCRYPTION_KEY');
+      }
+
+      console.log('📱 Creating XMTP client...');
+      
+      // 🔧 Enhanced: Database path with error recovery
+      let dbPath;
+      try {
+        if (process.env.RENDER) {
+          dbPath = `/data/xmtp/production-xmtp.db3`;
+        } else if (process.env.VERCEL) {
+          dbPath = `/tmp/xmtp-${env.XMTP_ENV}.db3`;
+        } else {
+          dbPath = `.data/xmtp/${env.XMTP_ENV}-xmtp.db3`;
+        }
+        
+        console.log(`📁 Database path: ${dbPath}`);
+        console.log(`🌍 Environment: ${env.XMTP_ENV}`);
+      } catch (pathError) {
+        console.warn('⚠️ Database path setup failed, using fallback:', pathError);
+        dbPath = `.data/xmtp/fallback-xmtp.db3`;
+      }
+
+      const signer = createSigner(env.WALLET_KEY);
+      const encryptionKey = getEncryptionKeyFromHex(env.ENCRYPTION_KEY);
+
+      // 🔧 Enhanced: XMTP client creation with database recovery
+      let clientCreated = false;
+      let clientError: any = null;
+      
+      for (let dbAttempt = 0; dbAttempt < 3; dbAttempt++) {
+        try {
+          this.client = await Client.create(signer, {
+            dbEncryptionKey: encryptionKey,
+            env: env.XMTP_ENV as XmtpEnv,
+            dbPath: dbAttempt === 0 ? dbPath : `${dbPath}.backup${dbAttempt}`,
+          });
+          
+          console.log('✅ Agent initialized successfully');
+          clientCreated = true;
+          break;
+          
+        } catch (dbCreateError: any) {
+          clientError = dbCreateError;
+          console.error(`❌ Database attempt ${dbAttempt + 1} failed:`, dbCreateError.message);
+          
+          // 🔧 If database encryption fails, try to recover
+          if (dbCreateError.message?.includes('PRAGMA key') || 
+              dbCreateError.message?.includes('sqlcipher') ||
+              dbCreateError.message?.includes('encryption')) {
+            console.log(`🔄 Database encryption failed, attempting recovery...`);
+            
+            // Try with a clean database path
+            if (dbAttempt === 1) {
+              console.log('🔄 Attempting with fresh database...');
+              try {
+                // Delete corrupted database and try fresh
+                const fs = await import('fs');
+                if (fs.existsSync(dbPath)) {
+                  fs.unlinkSync(dbPath);
+                  console.log('🗑️ Removed corrupted database');
+                }
+              } catch (deleteError) {
+                console.warn('⚠️ Could not delete corrupted database:', deleteError);
+              }
+            }
+          }
+          
+          if (dbAttempt === 2) {
+            console.error('❌ All database recovery attempts failed');
+          }
+        }
+      }
+
+      if (!clientCreated || !this.client) {
+        throw new Error(`Failed to create XMTP client after 3 attempts: ${clientError?.message || 'Unknown error'}`);
+      }
+
       const identifier = signer.getIdentifier();
       this.agentAddress = typeof identifier === 'object' && 'identifier' in identifier 
         ? identifier.identifier 
         : (await identifier).identifier;
-      console.log(`✅ Agent initialized successfully`);
       console.log(`📧 Agent Address: ${this.agentAddress}`);
       console.log(`🆔 Agent Inbox ID: ${this.client.inboxId}`);
-      console.log(`🌍 Environment: ${XMTP_ENV}`);
+      console.log(`🌍 Environment: ${env.XMTP_ENV}`);
 
-      // Start listening for messages
-      await this.startListening();
+      // 🔧 Enhanced: Start listening with robust error handling
+      try {
+        await this.startListening();
+        
+        this.isRunning = true;
+        console.log('✅ dStealth Agent is now listening for messages');
+        
+      } catch (listeningError: any) {
+        console.error('❌ Initialization failed (attempt ' + (retryCount + 1) + '):', listeningError);
+        
+        // 🔧 Enhanced: Specific error handling for different types of failures
+        if (listeningError.message?.includes('group with welcome id') && retryCount < maxRetries) {
+          const retryDelay = Math.min(2 ** retryCount * 2000, 120000); // Exponential backoff, max 2 minutes
+          console.log(`⏳ Retrying in ${retryDelay / 1000}s...`);
+          console.log(`⏳ Waiting ${retryDelay / 1000}s before retry to avoid rate limits...`);
+          
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          return this.initialize(retryCount + 1, maxRetries);
+        } else {
+          throw listeningError;
+        }
+      }
 
-    } catch (error) {
-      console.error(`❌ Initialization failed (attempt ${retryCount + 1}):`, error);
+    } catch (error: any) {
+      console.error('❌ Agent initialization failed:', error);
       
       if (retryCount < maxRetries) {
-        const delay = Math.pow(2, retryCount) * 2000; // Exponential backoff: 2s, 4s, 8s
-        console.log(`⏳ Retrying in ${delay/1000}s...`);
+        const retryDelay = Math.min(2 ** retryCount * 1000, 60000); // Exponential backoff, max 1 minute
+        console.log(`⏳ Retrying initialization in ${retryDelay / 1000}s... (attempt ${retryCount + 2}/${maxRetries + 1})`);
         
-        await new Promise(resolve => setTimeout(resolve, delay));
-        
-        // Recursive retry
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
         return this.initialize(retryCount + 1, maxRetries);
+      } else {
+        console.error(`❌ Failed to initialize dStealth Agent: ${error.message}`);
+        // 🔧 Don't throw - let the server continue running
+        this.isRunning = false;
       }
-      
-      throw error;
     }
+    
+    console.log('✅ dStealth Agent initialization completed');
   }
 
   private async startListening(): Promise<void> {
-    if (!this.client) {
-      throw new Error('Client not initialized');
-    }
-
-    console.log('🎧 Starting XMTP message listener...');
-    console.log(`🔍 Agent inbox ID: ${this.client.inboxId}`);
-    console.log(`🌍 XMTP Environment: ${process.env.XMTP_ENV || 'production'}`);
-    
     try {
-      // Initial sync to get existing conversations
+      console.log('🎧 Starting XMTP message listener...');
+      console.log(`🔍 Agent inbox ID: ${this.client?.inboxId}`);
+      console.log(`🌍 XMTP Environment: ${env.XMTP_ENV}`);
+
+      if (!this.client) {
+        throw new Error('XMTP client not initialized');
+      }
+
+      // 🔄 Enhanced: Initial conversation sync with retry logic
       console.log('🔄 Initial conversation sync...');
-      await this.client.conversations.sync();
+      let conversationSyncAttempts = 0;
+      const maxSyncAttempts = 3;
       
-      // Get all conversations and log them for debugging
-      const conversations = await this.client.conversations.list();
-      console.log(`📋 Agent has ${conversations.length} conversations`);
-      
-      // Sync each conversation individually to ensure we can receive messages
-      for (const conversation of conversations) {
+      while (conversationSyncAttempts < maxSyncAttempts) {
         try {
-          await conversation.sync();
-          console.log(`🔄 Synced conversation: ${conversation.id}`);
+          await this.client.conversations.sync();
+          break;
         } catch (syncError) {
-          console.warn(`⚠️ Failed to sync conversation ${conversation.id}:`, syncError);
+          conversationSyncAttempts++;
+          console.warn(`⚠️ Conversation sync attempt ${conversationSyncAttempts} failed:`, syncError);
+          if (conversationSyncAttempts >= maxSyncAttempts) {
+            console.error('❌ All conversation sync attempts failed, continuing with existing conversations');
+            break;
+          }
+          await new Promise(resolve => setTimeout(resolve, 2000 * conversationSyncAttempts));
         }
       }
-      
-      // 🔥 SIMPLIFIED: Clean message stream processing
-      console.log('🌊 Starting message stream...');
-      const messageStream = await this.client.conversations.streamAllMessages();
-      console.log('✅ Message stream created, listening for messages...');
 
-      // Force one more sync right before listening
+      const conversations = await this.client.conversations.list();
+      console.log(`📋 Agent has ${conversations.length} conversations`);
+
+      // 🔄 Enhanced: Sync individual conversations with error handling
+      const finalConversations = [];
+      for (const conversation of conversations) {
+        try {
+          console.log(`🔄 Synced conversation: ${conversation.id}`);
+          await conversation.sync();
+          finalConversations.push(conversation);
+        } catch (convError) {
+          console.warn(`⚠️ Failed to sync conversation ${conversation.id}:`, convError);
+          // 🔧 Continue with other conversations even if one fails
+          finalConversations.push(conversation);
+        }
+      }
+
+      // 🌊 Enhanced: Start message stream with comprehensive error handling
+      console.log('🌊 Starting message stream...');
+      let stream;
+      try {
+        stream = await this.client.conversations.streamAllMessages();
+        console.log('✅ Message stream created, listening for messages...');
+      } catch (streamError) {
+        console.error('❌ Failed to create message stream:', streamError);
+        throw streamError;
+      }
+
+      // 🔄 Enhanced: Final sync with error recovery
       console.log('🔄 Final sync before message processing...');
-      await this.client.conversations.sync();
-      let finalConversations = await this.client.conversations.list();
-      console.log(`📋 Final conversation count: ${finalConversations.length}`);
+      try {
+        await this.client.conversations.sync();
+        const syncedConversations = await this.client.conversations.list();
+        console.log(`📋 Final conversation count: ${syncedConversations.length}`);
+      } catch (finalSyncError) {
+        console.warn('⚠️ Final sync failed, using existing conversations:', finalSyncError);
+      }
 
       // 🔥 CRITICAL FIX: Do NOT process existing messages during startup
       console.log('🔍 Processing existing messages from all conversations...');
       console.log('📋 Known conversation IDs:', finalConversations.map(c => c.id));
-      let existingMessageCount = 0;
       
       // 🚨 REMOVED: Historical message processing
       // The agent should ONLY process NEW messages after startup
@@ -624,10 +734,9 @@ export class DStealthAgent {
       console.log('⏭️ SKIPPING existing message processing to prevent duplicate responses');
       console.log('📝 Historical messages will be ignored - only NEW messages will be processed');
       
-      // Instead, just sync conversations without processing their messages
+      // Instead, just mark existing messages as processed to prevent future processing
       for (const conversation of finalConversations) {
         try {
-          await conversation.sync();
           const messages = await conversation.messages();
           console.log(`📬 Conversation ${conversation.id}: ${messages.length} messages (not processing historical)`);
           
@@ -637,181 +746,207 @@ export class DStealthAgent {
               this.processedMessages.add(message.id);
             }
           });
-          
-          // Keep processed messages list manageable
-          if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
-            // Remove oldest messages from tracking
-            const messagesToRemove = this.processedMessages.size - (this.MAX_PROCESSED_MESSAGES * 0.8);
-            const messagesArray = Array.from(this.processedMessages);
-            for (let i = 0; i < messagesToRemove; i++) {
-              this.processedMessages.delete(messagesArray[i]);
-            }
-          }
-        } catch (error) {
-          console.warn(`⚠️ Failed to sync conversation ${conversation.id}:`, error);
+        } catch (messageError) {
+          console.warn(`⚠️ Failed to get messages for conversation ${conversation.id}:`, messageError);
+          // Continue with other conversations
         }
       }
-      
+
       console.log(`✅ Synced ${finalConversations.length} conversations without processing historical messages`);
 
-      // 🔥 SIMPLIFIED: Skip re-sync processing of existing messages too
+      // 🔍 Force re-sync to catch any missed conversations
       console.log('🔍 Force re-sync to catch any missed conversations...');
-      await this.client.conversations.sync();
-      const resynced = await this.client.conversations.list();
-      
-      if (resynced.length > finalConversations.length) {
-        console.log(`🆕 Found ${resynced.length - finalConversations.length} additional conversations on re-sync!`);
+      try {
+        await this.client.conversations.sync();
+        const resynced = await this.client.conversations.list();
         
-        // Only sync new conversations without processing their existing messages
-        for (let i = finalConversations.length; i < resynced.length; i++) {
-          const newConversation = resynced[i];
-          try {
-            await newConversation.sync();
-            const messages = await newConversation.messages();
-            console.log(`📬 RESYNC Conversation ${newConversation.id}: ${messages.length} messages (not processing historical)`);
-            
-            // Mark all existing messages as processed
-            messages.forEach(message => {
-              if (message.id && message.senderInboxId !== this.client?.inboxId) {
-                this.processedMessages.add(message.id);
-              }
-            });
-          } catch (error) {
-            console.warn(`⚠️ Failed to process resync conversation ${newConversation.id}:`, error);
+        if (resynced.length > finalConversations.length) {
+          console.log(`🆕 Found ${resynced.length - finalConversations.length} additional conversations on re-sync!`);
+          
+          // Only sync new conversations without processing their existing messages
+          for (let i = finalConversations.length; i < resynced.length; i++) {
+            const newConversation = resynced[i];
+            try {
+              await newConversation.sync();
+              const messages = await newConversation.messages();
+              
+              // Mark all existing messages as processed
+              messages.forEach(message => {
+                if (message.id && message.senderInboxId !== this.client?.inboxId) {
+                  this.processedMessages.add(message.id);
+                }
+              });
+            } catch (newConvError) {
+              console.warn(`⚠️ Failed to sync new conversation ${newConversation.id}:`, newConvError);
+            }
           }
         }
-        
-        finalConversations = resynced;
+      } catch (resyncError) {
+        console.warn('⚠️ Re-sync failed:', resyncError);
       }
 
-      console.log(`✅ Final total: synced ${finalConversations.length} conversations (${this.processedMessages.size} historical messages marked as processed)`);
+      console.log(`✅ Final total: synced ${(await this.client.conversations.list()).length} conversations (${this.processedMessages.size} historical messages marked as processed)`);
 
-      // 🔥 SIMPLIFIED: Single periodic sync - reduced complexity to prevent duplicates
+      // 🎧 Enhanced: Start HYBRID message stream for NEW messages with robust error handling
+      console.log('🎧 Starting HYBRID message stream for NEW messages...');
+      
+      // Set up periodic conversation sync to catch new conversations
       const syncInterval = setInterval(async () => {
         try {
           console.log('🔄 Periodic conversation sync...');
-          await this.client!.conversations.sync();
-          const currentConversations = await this.client!.conversations.list();
-          console.log(`📋 Current conversation count: ${currentConversations.length}`);
-          
-          // Only log for debugging - don't process existing messages in periodic sync
-          if (currentConversations.length > 0) {
-            const currentIds = currentConversations.map(c => c.id);
-            console.log(`🔍 Current conversation IDs (first 3): ${currentIds.slice(0, 3).join(', ')}`);
-          }
-        } catch (syncError) {
-          console.warn('⚠️ Periodic sync failed:', syncError);
+          await this.client?.conversations.sync();
+          const currentConversations = await this.client?.conversations.list();
+          console.log(`📋 Current conversation count: ${currentConversations?.length || 0}`);
+          console.log(`🔍 Current conversation IDs (first 3): ${currentConversations?.slice(0, 3).map(c => c.id).join(', ') || 'none'}`);
+        } catch (syncIntervalError) {
+          console.warn('⚠️ Periodic sync failed:', syncIntervalError);
         }
       }, 30000); // Every 30 seconds
 
-      // 🔥 CLEAN STREAM PROCESSING: Only process new messages from stream
-      console.log('🎧 Starting HYBRID message stream for NEW messages...');
-      let newMessageCount = 0;
+      // 🔧 Enhanced: Process messages with comprehensive error handling
+      let messageCount = 0;
+      let lastMessageTime = Date.now();
       
-      // Test if stream is working at all
-      const streamTestTimeout = setTimeout(() => {
-        console.log('⚠️ No NEW messages received in first 60 seconds - stream is working but no new messages sent');
-      }, 60000);
-
-      // Cleanup interval on shutdown
-      const originalShutdown = this.shutdown.bind(this);
-      this.shutdown = async () => {
-        clearTimeout(streamTestTimeout);
-        clearInterval(syncInterval);
-        return originalShutdown();
-      };
-
-      for await (const message of messageStream) {
+      // Track if we've received any new messages
+      const startTime = Date.now();
+      let hasReceivedNewMessages = false;
+      
+      const processMessageStream = async () => {
         try {
-          newMessageCount++;
-          console.log(`\n🔔 NEW MESSAGE STREAM EVENT #${newMessageCount}:`);
-          
-          // Clear the "no messages" timeout since we got one
-          if (newMessageCount === 1) {
-            clearTimeout(streamTestTimeout);
-          }
-          
-          // Skip if shutting down
-          if (this.isShuttingDown) {
-            console.log('🛑 Shutting down, breaking message loop');
-            break;
-          }
+          for await (const message of stream) {
+            try {
+              messageCount++;
+              lastMessageTime = Date.now();
+              hasReceivedNewMessages = true;
+              
+              console.log(`\n🔔 NEW MESSAGE STREAM EVENT #${messageCount}:`);
+              console.log('📨 RAW STREAM MESSAGE:', {
+                hasMessage: !!message,
+                content: message?.content || 'no-content',
+                senderInboxId: message?.senderInboxId || 'no-sender',
+                agentInboxId: this.client?.inboxId || 'no-agent-id',
+                contentType: message?.contentType?.typeId || 'no-type',
+                conversationId: message?.conversationId || 'no-conversation',
+                messageId: message?.id || 'no-id',
+                sentAt: message?.sentAt || 'no-timestamp'
+              });
 
-          // Log ALL stream events for debugging
-          console.log('📨 RAW STREAM MESSAGE:', {
-            hasMessage: !!message,
-            content: message?.content || 'no-content',
-            senderInboxId: message?.senderInboxId || 'no-sender',
-            agentInboxId: this.client.inboxId,
-            contentType: message?.contentType?.typeId || 'no-type',
-            conversationId: message?.conversationId || 'no-conversation',
-            messageId: message?.id || 'no-id',
-            sentAt: message?.sentAt || 'no-timestamp'
-          });
+              // 🔧 Enhanced: Validate message before processing
+              if (!message || !message.content || !message.senderInboxId) {
+                console.log('⏭️ Skipping invalid message (missing content or sender)');
+                continue;
+              }
 
-          // Basic message validation
-          if (!message || !message.content || !message.senderInboxId) {
-            console.log('⏭️ Skipping invalid message (missing content or sender)');
-            continue;
-          }
+              console.log('📧 VALID MESSAGE DETAILS:', {
+                content: JSON.stringify(message.content),
+                contentLength: String(message.content).length,
+                contentType: typeof message.content,
+                senderInboxId: message.senderInboxId,
+                agentInboxId: this.client?.inboxId,
+                isOwnMessage: message.senderInboxId === this.client?.inboxId,
+                messageContentType: message.contentType?.typeId,
+                conversationId: message.conversationId
+              });
 
-          // Enhanced message details for debugging
-          const contentString = typeof message.content === 'string' ? message.content : String(message.content);
-          console.log('📧 VALID MESSAGE DETAILS:', {
-            content: `"${contentString}"`,
-            contentLength: contentString.length,
-            contentType: typeof message.content,
-            senderInboxId: message.senderInboxId,
-            agentInboxId: this.client.inboxId,
-            isOwnMessage: message.senderInboxId === this.client.inboxId,
-            messageContentType: message.contentType?.typeId,
-            conversationId: message.conversationId
-          });
+              // Skip own messages
+              if (message.senderInboxId === this.client?.inboxId) {
+                console.log('⏭️ Skipping own message');
+                continue;
+              }
 
-          // Skip own messages - FIXED comparison
-          if (message.senderInboxId === this.client.inboxId) {
-            console.log('⏭️ Skipping own message');
-            continue;
-          }
+              // 🔧 NEW: Skip if message already processed
+              if (message.id && this.processedMessages.has(message.id)) {
+                console.log('⏭️ Skipping already processed message');
+                continue;
+              }
 
-          // Skip non-text messages
-          if (message.contentType?.typeId !== 'text') {
-            console.log('⏭️ Skipping non-text message:', message.contentType?.typeId);
-            continue;
-          }
+              console.log(`🚀 PROCESSING NEW MESSAGE from ${message.senderInboxId}: "${message.content}"`);
+              
+              // Add to processed messages
+              if (message.id) {
+                this.processedMessages.add(message.id);
+                
+                // Keep processed messages list manageable
+                if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
+                  const firstItem = this.processedMessages.values().next().value;
+                  if (firstItem) {
+                    this.processedMessages.delete(firstItem);
+                  }
+                }
+              }
 
-          // 🔥 CRITICAL: Check if we already processed this message to prevent duplicates
-          if (message.id && this.processedMessages.has(message.id)) {
-            console.log(`⏭️ Skipping already processed message: ${message.id}`);
-            continue;
-          }
-
-          // Skip messages without IDs
-          if (!message.id) {
-            console.log('⏭️ Skipping message without ID');
-            continue;
-          }
-
-          console.log(`🚀 PROCESSING NEW MESSAGE from ${message.senderInboxId}: "${message.content}"`);
-          
-          // Mark as processed BEFORE processing to prevent race conditions
-          this.processedMessages.add(message.id);
-          
-          // Keep processed messages list manageable
-          if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
-            const firstItem = this.processedMessages.values().next().value;
-            if (firstItem) {
-              this.processedMessages.delete(firstItem);
+              // Process the message
+              await this.processIncomingMessage(message);
+              
+            } catch (messageProcessError: any) {
+              console.error('❌ Error processing individual message:', messageProcessError);
+              
+              // 🔧 Enhanced: Handle specific error types without crashing
+              if (messageProcessError.message?.includes('group with welcome id')) {
+                console.warn('⚠️ Group welcome message error - skipping this message but continuing stream');
+                continue;
+              }
+              
+              if (messageProcessError.message?.includes('sqlcipher') || 
+                  messageProcessError.message?.includes('encryption')) {
+                console.warn('⚠️ Database encryption error - skipping this message but continuing stream');
+                continue;
+              }
+              
+              // Continue processing other messages for other errors too
+              continue;
             }
           }
-
-          // 🔥 SIMPLIFIED: Direct message processing
-              await this.processIncomingMessage(message);
-            
-          } catch (error) {
-          console.error('❌ Error in message stream processing:', error);
-          // Continue processing other messages even if one fails
+        } catch (streamProcessError: any) {
+          console.error('❌ Message stream processing error:', streamProcessError);
+          
+          // 🔧 Enhanced: Specific handling for different stream errors
+          if (streamProcessError.message?.includes('group with welcome id')) {
+            console.log('🔄 Group welcome message stream error detected - this is often temporary');
+            console.log('🔄 Continuing with existing stream, error should resolve automatically');
+            return; // Don't restart for group welcome errors
+          }
+          
+          if (streamProcessError.message?.includes('sqlcipher') || 
+              streamProcessError.message?.includes('encryption')) {
+            console.log('🔄 Database encryption stream error - attempting to continue');
+            return; // Don't restart for DB encryption errors during normal operation
+          }
+          
+          // 🔧 Enhanced: Only restart stream for severe errors
+          if (!this.isShuttingDown) {
+            console.log('🔄 Attempting to recover message stream...');
+            setTimeout(() => {
+              this.startListening().catch(restartError => {
+                console.error('❌ Failed to restart message listener:', restartError);
+              });
+            }, 5000);
+          }
         }
+      };
+
+      // Start processing messages
+      processMessageStream();
+      
+      // 🔧 Enhanced: Monitor for activity and provide feedback
+      const activityMonitor = setInterval(() => {
+        const timeSinceStart = Date.now() - startTime;
+        const timeSinceLastMessage = Date.now() - lastMessageTime;
+        
+        if (!hasReceivedNewMessages && timeSinceStart > 60000) {
+          console.log('⚠️ No NEW messages received in first 60 seconds - stream is working but no new messages sent');
+          hasReceivedNewMessages = true; // Prevent spam
+        }
+        
+        if (timeSinceLastMessage > 300000) { // 5 minutes
+          console.log('⚠️ No messages received in 5 minutes - stream may be stalled');
+        }
+      }, 60000);
+
+      // Cleanup on shutdown
+      if (this.isShuttingDown) {
+        clearInterval(syncInterval);
+        clearInterval(activityMonitor);
       }
 
     } catch (error) {

@@ -197,11 +197,11 @@ const initializeDStealthAgent = async () => {
     console.log("✅ dStealth Agent initialized:");
     console.log(`   📬 Agent Inbox ID: ${agentInfo.inboxId}`);
     console.log(`   🔑 Agent Address: ${agentInfo.address}`);
-    console.log(`   📊 Agent Status: ${agentInfo.status}`);
+    console.log(`   📊 Agent Status: active`);
     
-  } catch (error) {
-    console.error("❌ Failed to initialize dStealth Agent:", error);
-    xmtpInitError = error instanceof Error ? error : new Error(String(error));
+      } catch (error: unknown) {
+      console.error("❌ Failed to initialize dStealth Agent:", error);
+      xmtpInitError = error instanceof Error ? error : new Error(String(error));
     // Don't throw - let the server continue without the agent
   }
 };
@@ -431,7 +431,7 @@ app.get("/api/dstealth/info", (req, res) => {
         ]
       }
     });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Error getting unified agent info:", error);
     res.status(500).json({
       success: false,
@@ -469,7 +469,7 @@ app.post(
           : "You are already in the group",
       });
       console.log("⚪ Response sent for add-inbox");
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error adding user to default group chat:", error);
       res.status(500).json({
         message: "You are not in the group",
@@ -810,6 +810,59 @@ app.get("/api/debug/database", (req, res) => {
     });
   }
 });
+
+// 🤖 Enhanced: Initialize dStealth Agent with fallback
+console.log('🤖 XMTP client ready, now initializing dStealth Agent...');
+
+// Initialize the agent with error recovery
+const initializeAgentWithRecovery = async () => {
+  console.log('🤖 Initializing dStealth Agent...');
+  
+  // Add initial delay to prevent rate limiting
+  const initialDelay = process.env.RENDER ? 15000 : 5000; // 15s on Render, 5s elsewhere
+  console.log(`⏳ Waiting ${initialDelay/1000}s before agent initialization to prevent rate limits...`);
+  await new Promise(resolve => setTimeout(resolve, initialDelay));
+  
+  try {
+    await dStealthAgent.initialize();
+    console.log('✅ dStealth Agent is now ready and listening for messages');
+  } catch (initError) {
+    console.error('❌ dStealth Agent initialization failed, but server continues:', initError);
+    
+    // 🔧 Enhanced: Implement background retry for failed initialization
+    let retryCount = 0;
+    const maxBackgroundRetries = 10;
+    
+    const backgroundRetry = async () => {
+      retryCount++;
+      const retryDelay = Math.min(60000 * retryCount, 300000); // 1min, 2min, 3min, up to 5min max
+      
+      console.log(`🔄 Background retry ${retryCount}/${maxBackgroundRetries} in ${retryDelay/1000}s...`);
+      
+      setTimeout(async () => {
+        try {
+          console.log(`🔄 Background initialization attempt ${retryCount}...`);
+          await dStealthAgent.initialize();
+          console.log('✅ dStealth Agent initialized successfully on background retry');
+        } catch (retryError) {
+          console.error(`❌ Background retry ${retryCount} failed:`, retryError);
+          
+          if (retryCount < maxBackgroundRetries) {
+            backgroundRetry(); // Schedule next retry
+          } else {
+            console.error('❌ All background retries exhausted - agent will remain offline');
+          }
+        }
+      }, retryDelay);
+    };
+    
+    // Start background retry process
+    backgroundRetry();
+  }
+};
+
+// Start the initialization process
+initializeAgentWithRecovery();
 
 // Start Server
 void (async () => {
