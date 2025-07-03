@@ -237,6 +237,12 @@ async function updateContentStats(contentId: string, payment: PaymentRequest): P
 }
 
 async function generatePaymentUrl(contentId: string, userAddress?: string, userAmount?: string): Promise<string> {
+  // 🚨 SECURITY: Require userAddress for all payment link generation
+  if (!userAddress) {
+    console.log(`❌ Frontend payment creation BLOCKED - no userAddress provided for content: ${contentId}`);
+    throw new Error(`USER_REQUIRED: Payment link creation requires verified user identity. Please connect wallet and complete fkey.id setup at https://dstealth.xyz`);
+  }
+
   // Get content metadata safely - use user's amount if provided
   let price = userAmount || '0.003'; // Use user's input amount or fallback
   let currency = 'USDC';
@@ -256,36 +262,54 @@ async function generatePaymentUrl(contentId: string, userAddress?: string, userA
     }
   }
 
-  // Try to get user's stealth address if userAddress is provided
+  // 🔥 CRITICAL: Get user's stealth address - FAIL if no fkey.id found
   let finalRecipient = recipient;
   let zkReceiptData = null;
+  let userFkeyId = null;
   
-  if (userAddress && redis) {
-    try {
-      const userStealthKey = `dstealth_agent:stealth:${userAddress.toLowerCase()}`;
-      const stealthData = await redis.get(userStealthKey);
+  if (!redis) {
+    console.log(`❌ Frontend payment creation BLOCKED - Redis unavailable for user verification`);
+    throw new Error(`SYSTEM_ERROR: User verification system unavailable. Please try again later.`);
+  }
+
+  try {
+    const userStealthKey = `dstealth_agent:stealth:${userAddress.toLowerCase()}`;
+    const stealthData = await redis.get(userStealthKey);
+    
+    if (stealthData) {
+      const userData = typeof stealthData === 'string' ? JSON.parse(stealthData) : stealthData;
       
-      if (stealthData) {
-        const userData = typeof stealthData === 'string' ? JSON.parse(stealthData) : stealthData;
+      if (userData.stealthAddress && userData.fkeyId) {
+        finalRecipient = userData.stealthAddress;
+        userFkeyId = userData.fkeyId;
+        console.log(`🥷 Using stealth address for payment: ${userData.stealthAddress} (${userData.fkeyId})`);
         
-        if (userData.stealthAddress) {
-          finalRecipient = userData.stealthAddress;
-          console.log(`🥷 Using stealth address for payment: ${userData.stealthAddress}`);
-          
-          zkReceiptData = {
-            contentId,
-            userStealthAddress: userData.stealthAddress,
-            fkeyId: userData.fkeyId,
-            zkProof: userData.zkProof,
-            timestamp: Date.now(),
-            paymentIntent: `X402 Content ${contentId}`,
-            privacyLevel: 'stealth'
-          };
-        }
+        zkReceiptData = {
+          contentId,
+          userStealthAddress: userData.stealthAddress,
+          fkeyId: userData.fkeyId,
+          zkProof: userData.zkProof,
+          timestamp: Date.now(),
+          paymentIntent: `X402 Content ${contentId}`,
+          privacyLevel: 'stealth'
+        };
+      } else {
+        // 🚨 HARD FAIL: User has data but missing fkey.id
+        console.log(`❌ Frontend payment creation BLOCKED - incomplete setup for user: ${userAddress}`);
+        throw new Error(`SETUP_REQUIRED: User ${userAddress} missing fkey.id or stealth address. Complete setup at https://dstealth.xyz first.`);
       }
-    } catch (stealthError) {
-      console.warn('⚠️ Could not retrieve stealth address, using default recipient:', stealthError);
+    } else {
+      // 🚨 HARD FAIL: User address provided but no stealth data found
+      console.log(`❌ Frontend payment creation BLOCKED - no fkey.id for user: ${userAddress}`);
+      throw new Error(`FKEY_REQUIRED: No FluidKey ID found for ${userAddress}. Get one at https://app.fluidkey.com/?ref=62YNSG then complete setup at https://dstealth.xyz`);
     }
+  } catch (stealthError) {
+    // Re-throw setup/fkey errors, catch other technical errors
+    if (stealthError.message.startsWith('SETUP_REQUIRED') || stealthError.message.startsWith('FKEY_REQUIRED')) {
+      throw stealthError;
+    }
+    console.warn('⚠️ Technical error retrieving stealth address:', stealthError);
+    throw new Error(`TECHNICAL_ERROR: Could not retrieve user data for ${userAddress}. Please try again.`);
   }
 
   // 🔥 FIXED: Daimo expects dollar amounts, not smallest units
@@ -304,7 +328,8 @@ async function generatePaymentUrl(contentId: string, userAddress?: string, userA
     amountUnits: amountInDollars,
     originalAmount: price,
     tokenSymbol: currency,
-    chainId: getDaimoChainId('base')
+    chainId: getDaimoChainId('base'),
+    userFkeyId: userFkeyId || 'none' // 🔥 Include fkey.id in logs for verification
   });
   
   // Build metadata without null values (Daimo API rejects null values)
@@ -312,8 +337,12 @@ async function generatePaymentUrl(contentId: string, userAddress?: string, userA
     contentId,
     type: 'x402-content',
     service: 'dstealth-xmtp',
-    recipientType: finalRecipient !== recipient ? 'stealth' : 'standard',
+    recipientType: 'stealth', // 🔥 Always stealth now since we require fkey.id
   };
+  
+  // 🔥 ENHANCED: Always include fkey.id in metadata for trust verification
+  metadata.verifiedFkeyId = userFkeyId;
+  metadata.trustedIdentity = true;
   
   // Only add zkReceiptId if it exists
   if (zkReceiptData) {
@@ -329,7 +358,7 @@ async function generatePaymentUrl(contentId: string, userAddress?: string, userA
     tokenSymbol: currency,
     chainId: getDaimoChainId('base'),
     externalId: contentId,
-    intent: `ZK receipt for stealth payment at dstealth.xyz`,
+    intent: `ZK receipt for stealth payment to ${userFkeyId} at dstealth.xyz`,
     metadata
   });
   
@@ -341,17 +370,24 @@ async function generatePaymentUrl(contentId: string, userAddress?: string, userA
         ...zkReceiptData,
         paymentLinkId: paymentLink.id,
         paymentUrl: paymentLink.url,
-        status: 'pending'
+        status: 'pending',
+        // 🔥 ENHANCED: Include verification details
+        verification: {
+          fkeyId: userFkeyId,
+          stealthAddress: finalRecipient,
+          timestamp: Date.now(),
+          source: 'frontend-api'
+        }
       }), { ex: 86400 * 7 }); // 7 days
       
-      console.log('🧾 ZK receipt created for stealth payment');
+      console.log(`🧾 ZK receipt created for stealth payment to ${userFkeyId}`);
     } catch (receiptError) {
       console.warn('⚠️ Failed to create ZK receipt:', receiptError);
     }
   }
   
   console.log(`✅ Created Daimo payment link via API: ${paymentLink.url}`);
-  console.log(`🎯 Payment recipient: ${finalRecipient} (${finalRecipient !== recipient ? 'stealth' : 'standard'})`);
+  console.log(`🎯 Payment recipient: ${finalRecipient} (stealth-${userFkeyId})`);
   
   return paymentLink.url;
 }

@@ -1456,19 +1456,24 @@ Respond to the user's message in a helpful way while staying focused on privacy 
     try {
       console.log(`💰 Processing payment link request for $${amount} from ${senderInboxId}`);
 
-      // Get user data to personalize the payment link
+      // 🔥 CRITICAL: Get user data - FAIL if no fkey.id found
       const userData = await agentDb.getStealthDataByUser(senderInboxId);
       
-      if (!userData || !userData.stealthAddress) {
-        // User doesn't have stealth address setup yet
-        const basicPaymentLink = await this.generateDaimoPaymentLink(amount);
-        return `💰 **Payment Link**: ${basicPaymentLink}\n\n` +
-               `🔗 **Setup FluidKey first**: https://app.fluidkey.com/?ref=62YNSG\n` +
-               `📱 Then register with: ${this.getDStealthMiniAppLink()}\n\n` +
-               `⚡ **Unlock stealth payments** after setup!`;
+      if (!userData || !userData.fkeyId || !userData.stealthAddress) {
+        // 🚨 HARD FAIL: No payment link creation without fkey.id
+        console.log(`❌ Payment link creation BLOCKED - no fkey.id for user: ${senderInboxId}`);
+        
+        return `🚫 **Payment Link Creation Failed**\n\n` +
+               `❌ **Reason**: No FluidKey ID found for your account\n\n` +
+               `🔑 **Required Setup**:\n` +
+               `1. Get FluidKey: https://app.fluidkey.com/?ref=62YNSG\n` +
+               `2. Tell me your username (e.g., "tantodefi")\n` +
+               `3. Complete setup: ${this.getDStealthMiniAppLink()}\n\n` +
+               `⚡ **Only users with verified fkey.id can create stealth payment links**\n\n` +
+               `💡 **Why?** This ensures all payments go to YOUR stealth address for maximum privacy!`;
       }
 
-      // 🔥 Generate stealth payment link with ZK receipt
+      // 🔥 Generate stealth payment link with user's verified data
       const stealthPaymentLink = await this.generateDaimoPaymentLink(amount, userData.stealthAddress, {
         contentId: `xmtp_payment_${Date.now()}`,
         userStealthAddress: userData.stealthAddress,
@@ -1484,7 +1489,6 @@ Respond to the user's message in a helpful way while staying focused on privacy 
         const zkReceiptId = `zk_xmtp_${senderInboxId}_${Date.now()}`;
         console.log(`🧾 ZK receipt prepared: ${zkReceiptId}`);
         
-        // Could store in Redis or agentDb for tracking
         await agentDb.logAgentInteraction(
           this.client?.inboxId || 'unknown',
           senderInboxId,
@@ -1501,19 +1505,26 @@ Respond to the user's message in a helpful way while staying focused on privacy 
         console.warn('⚠️ Failed to create ZK receipt:', receiptError);
       }
       
+      // 🔥 ENHANCED: Include fkey.id for trust verification  
       return `💰 **Your Stealth Payment Link**:\n${stealthPaymentLink}\n\n` +
+             `🔐 **Verified Identity**: ${userData.fkeyId}\n` +
              `🥷 **Stealth Address**: \`${userData.stealthAddress?.slice(0, 6)}...${userData.stealthAddress?.slice(-4)}\`\n` +
-             `🔑 **FluidKey ID**: ${userData.fkeyId}\n` +
-             `🧾 **Privacy**: ZK receipt will be generated upon payment\n\n` +
+             `🧾 **Privacy**: ZK receipt will be generated upon payment\n` +
+             `⚡ **Trust**: This link uses YOUR verified stealth address\n\n` +
              `✅ Recipients will send payments privately to your stealth address!\n` +
-             this.getDStealthMiniAppLink();
+             `📱 **Manage**: ${this.getDStealthMiniAppLink()}`;
 
     } catch (error) {
       console.error('❌ Error handling payment link request:', error);
-      const fallbackLink = await this.generateDaimoPaymentLink(amount);
-      return `💰 **Payment Link**: ${fallbackLink}\n\n` +
-             `🔗 **Get FluidKey**: https://app.fluidkey.com/?ref=62YNSG\n` +
-             `📱 **Setup**: ${this.getDStealthMiniAppLink()}`;
+      
+      // 🔥 ENHANCED: Even error responses require fkey.id setup
+      return `❌ **Payment Link Creation Failed**\n\n` +
+             `🔧 **Technical Error**: ${error instanceof Error ? error.message : 'Unknown error'}\n\n` +
+             `🔑 **Ensure Setup Complete**:\n` +
+             `1. FluidKey: https://app.fluidkey.com/?ref=62YNSG\n` +
+             `2. Tell me your fkey.id username\n` +
+             `3. Complete: ${this.getDStealthMiniAppLink()}\n\n` +
+             `💡 **Only verified users can create stealth payment links**`;
     }
   }
 
@@ -1822,7 +1833,7 @@ Type "/scan ${lookupResult.stealthAddress}" to analyze this address!`;
 
   // Get existing user welcome
   private getExistingUserWelcome(userData: UserStealthData): string {
-    return `🎉 **Welcome back, ${userData.fkeyId}!** 🥷
+    return `🎉 **Welcome back, ${userData.fkeyId}!** ��
 
 **🏠 Your Stealth Address**: ${userData.stealthAddress}
 **✅ Setup Status**: Complete
