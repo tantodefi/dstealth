@@ -464,6 +464,13 @@ export class DStealthAgent {
   // 🔥 NEW: Message deduplication to prevent infinite loops
   private processedMessages: Set<string> = new Set();
   private readonly MAX_PROCESSED_MESSAGES = 1000; // Keep last 1000 message IDs
+  
+  // 🔧 NEW: Health monitoring
+  private lastHealthCheck = Date.now();
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private autoRestartEnabled = true;
+  private restartAttempts = 0;
+  private readonly maxRestartAttempts = 3;
 
   // Enhanced trigger patterns with better categorization
   private readonly triggerPatterns = {
@@ -560,13 +567,18 @@ export class DStealthAgent {
       
       for (let dbAttempt = 0; dbAttempt < 3; dbAttempt++) {
         try {
-      this.client = await Client.create(signer, {
-        dbEncryptionKey: encryptionKey,
+          console.log(`🔄 Database initialization attempt ${dbAttempt + 1}/3...`);
+          
+          const currentDbPath = dbAttempt === 0 ? dbPath : `${dbPath}.recovery${dbAttempt}`;
+          console.log(`📁 Attempting database path: ${currentDbPath}`);
+          
+          this.client = await Client.create(signer, {
+            dbEncryptionKey: encryptionKey,
             env: env.XMTP_ENV as XmtpEnv,
-            dbPath: dbAttempt === 0 ? dbPath : `${dbPath}.backup${dbAttempt}`,
+            dbPath: currentDbPath,
           });
           
-          console.log('✅ Agent initialized successfully');
+          console.log('✅ XMTP client created successfully');
           clientCreated = true;
           break;
           
@@ -574,36 +586,90 @@ export class DStealthAgent {
           clientError = dbCreateError;
           console.error(`❌ Database attempt ${dbAttempt + 1} failed:`, dbCreateError.message);
           
-          // 🔧 If database encryption fails, try to recover
+          // 🔧 Enhanced: Handle specific database encryption errors
           if (dbCreateError.message?.includes('PRAGMA key') || 
               dbCreateError.message?.includes('sqlcipher') ||
-              dbCreateError.message?.includes('encryption')) {
+              dbCreateError.message?.includes('encryption') ||
+              dbCreateError.message?.includes('hmac check failed')) {
+            
             console.log(`🔄 Database encryption failed, attempting recovery...`);
             
-            // Try with a clean database path
-            if (dbAttempt === 1) {
-              console.log('🔄 Attempting with fresh database...');
+            if (dbAttempt === 0) {
+              // First attempt failed - try to backup and create fresh database
+              console.log('🔄 First attempt failed - backing up existing database...');
               try {
-                // Delete corrupted database and try fresh
                 const fs = await import('fs');
+                const path = await import('path');
+                
                 if (fs.existsSync(dbPath)) {
+                  const backupPath = `${dbPath}.backup.${Date.now()}`;
+                  fs.copyFileSync(dbPath, backupPath);
+                  console.log(`💾 Database backed up to: ${backupPath}`);
+                  
+                  // Remove original corrupted database
                   fs.unlinkSync(dbPath);
                   console.log('🗑️ Removed corrupted database');
+                  
+                  // Try to create the directory if it doesn't exist
+                  const dbDir = path.dirname(dbPath);
+                  if (!fs.existsSync(dbDir)) {
+                    fs.mkdirSync(dbDir, { recursive: true });
+                    console.log(`📁 Created database directory: ${dbDir}`);
+                  }
                 }
-              } catch (deleteError) {
-                console.warn('⚠️ Could not delete corrupted database:', deleteError);
+              } catch (backupError) {
+                console.warn('⚠️ Could not backup/remove corrupted database:', backupError);
+              }
+            } else if (dbAttempt === 1) {
+              // Second attempt - try with a completely different path
+              console.log('🔄 Second attempt - trying with temporary database path...');
+              try {
+                const fs = await import('fs');
+                const tempDbPath = `/tmp/xmtp-recovery-${Date.now()}.db3`;
+                console.log(`📁 Using temporary database: ${tempDbPath}`);
+                
+                // Ensure temp directory exists
+                const tempDir = '/tmp';
+                if (!fs.existsSync(tempDir)) {
+                  fs.mkdirSync(tempDir, { recursive: true });
+                }
+              } catch (tempError) {
+                console.warn('⚠️ Could not set up temporary database:', tempError);
               }
             }
-          }
-          
-          if (dbAttempt === 2) {
-            console.error('❌ All database recovery attempts failed');
+            
+            // Add a small delay before retry
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+          } else {
+            // For non-encryption errors, don't retry
+            console.error('❌ Non-encryption database error, not retrying');
+            break;
           }
         }
       }
 
       if (!clientCreated || !this.client) {
-        throw new Error(`Failed to create XMTP client after 3 attempts: ${clientError?.message || 'Unknown error'}`);
+        // 🔧 Enhanced: Try one final attempt with in-memory database
+        console.log('🔄 Final attempt with in-memory database...');
+        try {
+          this.client = await Client.create(signer, {
+            dbEncryptionKey: encryptionKey,
+            env: env.XMTP_ENV as XmtpEnv,
+            // Don't specify dbPath - let it use default/in-memory
+          });
+          
+          console.log('✅ XMTP client created with in-memory database');
+          clientCreated = true;
+          
+        } catch (finalError: any) {
+          console.error('❌ Final database attempt failed:', finalError.message);
+          throw new Error(`Failed to create XMTP client after all attempts: ${clientError?.message || finalError?.message || 'Unknown error'}`);
+        }
+      }
+
+      if (!clientCreated || !this.client) {
+        throw new Error(`Failed to create XMTP client after all recovery attempts: ${clientError?.message || 'Unknown error'}`);
       }
 
       const identifier = signer.getIdentifier();
@@ -616,8 +682,11 @@ export class DStealthAgent {
 
       // 🔧 Enhanced: Start listening with robust error handling
       try {
-      await this.startListening();
-
+        await this.startListening();
+        
+        // 🔧 NEW: Start health monitoring
+        this.startHealthMonitoring();
+        
         this.isRunning = true;
         console.log('✅ dStealth Agent is now listening for messages');
         
@@ -654,6 +723,104 @@ export class DStealthAgent {
     }
     
     console.log('✅ dStealth Agent initialization completed');
+  }
+
+  // 🔧 NEW: Health monitoring system
+  private startHealthMonitoring(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+    }
+    
+    console.log('🔧 Starting agent health monitoring...');
+    
+    this.healthCheckInterval = setInterval(async () => {
+      try {
+        const now = Date.now();
+        const timeSinceLastHealth = now - this.lastHealthCheck;
+        
+        // Update health check timestamp
+        this.lastHealthCheck = now;
+        
+        // Check if client is still connected
+        if (!this.client || !this.isRunning) {
+          console.log('⚠️ Agent health check: Client not connected or not running');
+          
+          if (this.autoRestartEnabled && this.restartAttempts < this.maxRestartAttempts) {
+            console.log(`🔄 Attempting automatic restart (${this.restartAttempts + 1}/${this.maxRestartAttempts})...`);
+            this.restartAttempts++;
+            
+            try {
+              await this.restart();
+              console.log('✅ Agent automatically restarted successfully');
+              this.restartAttempts = 0; // Reset on successful restart
+            } catch (restartError) {
+              console.error('❌ Automatic restart failed:', restartError);
+              
+              if (this.restartAttempts >= this.maxRestartAttempts) {
+                console.error('🚨 Maximum restart attempts reached - disabling auto-restart');
+                this.autoRestartEnabled = false;
+              }
+            }
+          }
+          return;
+        }
+        
+        // Try to ping the client
+        try {
+          await this.client.conversations.sync();
+          console.log('💓 Agent health check: OK');
+        } catch (syncError) {
+          console.warn('⚠️ Agent health check: Sync failed', syncError);
+        }
+        
+      } catch (healthError) {
+        console.error('❌ Health check error:', healthError);
+      }
+    }, 5 * 60 * 1000); // Check every 5 minutes
+  }
+
+  // 🔧 NEW: Restart the agent
+  private async restart(): Promise<void> {
+    console.log('🔄 Restarting dStealth Agent...');
+    
+    try {
+      // Stop current instance
+      await this.stop();
+      
+      // Wait a bit before restarting
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Restart
+      await this.initialize();
+      
+    } catch (error) {
+      console.error('❌ Agent restart failed:', error);
+      throw error;
+    }
+  }
+
+  // 🔧 NEW: Stop the agent gracefully
+  private async stop(): Promise<void> {
+    console.log('🛑 Stopping dStealth Agent...');
+    
+    this.isShuttingDown = true;
+    this.isRunning = false;
+    
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+    
+    if (this.client) {
+      try {
+        // The client will be recreated on restart
+        this.client = null;
+      } catch (error) {
+        console.warn('⚠️ Error during client cleanup:', error);
+      }
+    }
+    
+    console.log('✅ Agent stopped');
   }
 
   private async startListening(): Promise<void> {
@@ -811,67 +978,110 @@ export class DStealthAgent {
       const startTime = Date.now();
       let hasReceivedNewMessages = false;
       
+      // 🔧 Enhanced: Process message stream with improved error handling
       const processMessageStream = async () => {
+        let consecutiveErrors = 0;
+        const maxConsecutiveErrors = 5;
+        let lastSuccessfulMessage = Date.now();
+        const staleStreamTimeout = 10 * 60 * 1000; // 10 minutes
+        
+        // Set up stream health monitoring
+        const streamHealthCheck = setInterval(async () => {
+          const timeSinceLastMessage = Date.now() - lastSuccessfulMessage;
+          
+          if (timeSinceLastMessage > staleStreamTimeout && !this.isShuttingDown) {
+            console.log('🚨 Stream appears completely stalled - forcing restart');
+            clearInterval(streamHealthCheck);
+            
+            try {
+              if (stream && typeof stream.return === 'function') {
+                stream.return(undefined);
+              }
+            } catch (cleanupError) {
+              console.warn('⚠️ Stream cleanup warning:', cleanupError);
+            }
+            
+            // Restart the entire listening process
+            setTimeout(() => {
+              if (!this.isShuttingDown) {
+                console.log('🔄 Restarting message stream due to staleness...');
+                this.startListening().catch(restartError => {
+                  console.error('❌ Failed to restart stalled stream:', restartError);
+                });
+              }
+            }, 5000);
+            return;
+          }
+        }, 60000); // Check every minute
+        
         try {
           for await (const message of stream) {
             try {
               messageCount++;
               lastMessageTime = Date.now();
+              lastSuccessfulMessage = Date.now(); // Update successful message time
               hasReceivedNewMessages = true;
+              consecutiveErrors = 0; // Reset error counter on successful message
               
               console.log(`\n🔔 NEW MESSAGE STREAM EVENT #${messageCount}:`);
-          console.log('📨 RAW STREAM MESSAGE:', {
-            hasMessage: !!message,
-            content: message?.content || 'no-content',
-            senderInboxId: message?.senderInboxId || 'no-sender',
+              console.log('📨 RAW STREAM MESSAGE:', {
+                hasMessage: !!message,
+                content: message?.content || 'no-content',
+                senderInboxId: message?.senderInboxId || 'no-sender',
                 agentInboxId: this.client?.inboxId || 'no-agent-id',
-            contentType: message?.contentType?.typeId || 'no-type',
-            conversationId: message?.conversationId || 'no-conversation',
-            messageId: message?.id || 'no-id',
-            sentAt: message?.sentAt || 'no-timestamp'
-          });
+                contentType: message?.contentType?.typeId || 'no-type',
+                conversationId: message?.conversationId || 'no-conversation-id',
+                messageId: message?.id || 'no-message-id',
+                sentAt: message?.sentAt || 'no-timestamp'
+              });
 
-              // 🔧 Enhanced: Validate message before processing
-          if (!message || !message.content || !message.senderInboxId) {
-            console.log('⏭️ Skipping invalid message (missing content or sender)');
-            continue;
-          }
+              // Enhanced message validation
+              if (!message || !message.content || !message.senderInboxId || !message.conversationId) {
+                console.log('⚠️ Invalid message structure, skipping...');
+                continue;
+              }
 
-          console.log('📧 VALID MESSAGE DETAILS:', {
+              // Content type validation
+              if (message.contentType?.typeId !== 'text') {
+                console.log('⚠️ Non-text message type, skipping...');
+                continue;
+              }
+
+              console.log('📧 VALID MESSAGE DETAILS:', {
                 content: JSON.stringify(message.content),
-                contentLength: String(message.content).length,
-            contentType: typeof message.content,
-            senderInboxId: message.senderInboxId,
-                agentInboxId: this.client?.inboxId,
-                isOwnMessage: message.senderInboxId === this.client?.inboxId,
-            messageContentType: message.contentType?.typeId,
-            conversationId: message.conversationId
-          });
+                contentLength: (message.content as string).length,
+                contentType: typeof message.content,
+                senderInboxId: message.senderInboxId,
+                agentInboxId: this.client?.inboxId || 'no-agent-id',
+                isOwnMessage: message.senderInboxId.toLowerCase() === (this.client?.inboxId || '').toLowerCase(),
+                messageContentType: message.contentType?.typeId,
+                conversationId: message.conversationId
+              });
 
               // Skip own messages
-              if (message.senderInboxId === this.client?.inboxId) {
-            console.log('⏭️ Skipping own message');
-            continue;
-          }
+              if (message.senderInboxId.toLowerCase() === (this.client?.inboxId || '').toLowerCase()) {
+                console.log('⏭️ Skipping own message');
+                continue;
+              }
 
               // 🔧 NEW: Skip if message already processed
               if (message.id && this.processedMessages.has(message.id)) {
                 console.log('⏭️ Skipping already processed message');
-            continue;
-          }
+                continue;
+              }
 
-          console.log(`🚀 PROCESSING NEW MESSAGE from ${message.senderInboxId}: "${message.content}"`);
-          
+              console.log(`🚀 PROCESSING NEW MESSAGE from ${message.senderInboxId}: "${message.content}"`);
+              
               // Add to processed messages
               if (message.id) {
-          this.processedMessages.add(message.id);
-          
-          // Keep processed messages list manageable
-          if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
-            const firstItem = this.processedMessages.values().next().value;
+                this.processedMessages.add(message.id);
+                
+                // Keep processed messages list manageable
+                if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
+                  const firstItem = this.processedMessages.values().next().value;
                   if (firstItem) {
-            this.processedMessages.delete(firstItem);
-          }
+                    this.processedMessages.delete(firstItem);
+                  }
                 }
               }
 
@@ -879,18 +1089,27 @@ export class DStealthAgent {
               await this.processIncomingMessage(message);
               
             } catch (messageProcessError: any) {
-              console.error('❌ Error processing individual message:', messageProcessError);
+              consecutiveErrors++;
+              console.error(`❌ Error processing individual message (${consecutiveErrors}/${maxConsecutiveErrors}):`, messageProcessError);
               
               // 🔧 Enhanced: Handle specific error types without crashing
               if (messageProcessError.message?.includes('group with welcome id')) {
-                console.warn('⚠️ Group welcome message error - skipping this message but continuing stream');
+                console.warn('⚠️ Group welcome message error - this is usually temporary and will resolve');
+                // Don't count group welcome errors toward consecutive error limit
+                consecutiveErrors--;
                 continue;
               }
               
               if (messageProcessError.message?.includes('sqlcipher') || 
                   messageProcessError.message?.includes('encryption')) {
-                console.warn('⚠️ Database encryption error - skipping this message but continuing stream');
+                console.warn('⚠️ Database encryption error during message processing - continuing with stream');
                 continue;
+              }
+              
+              // Check if we've hit too many consecutive errors
+              if (consecutiveErrors >= maxConsecutiveErrors) {
+                console.error(`🚨 Too many consecutive message processing errors (${consecutiveErrors}), restarting stream...`);
+                throw new Error(`Consecutive message processing failures: ${messageProcessError.message}`);
               }
               
               // Continue processing other messages for other errors too
@@ -898,6 +1117,7 @@ export class DStealthAgent {
             }
           }
         } catch (streamProcessError: any) {
+          clearInterval(streamHealthCheck); // Clean up health check
           console.error('❌ Message stream processing error:', streamProcessError);
           
           // 🔧 Enhanced: Specific handling for different stream errors
@@ -917,9 +1137,11 @@ export class DStealthAgent {
           if (!this.isShuttingDown) {
             console.log('🔄 Attempting to recover message stream...');
             setTimeout(() => {
-              this.startListening().catch(restartError => {
-                console.error('❌ Failed to restart message listener:', restartError);
-              });
+              if (!this.isShuttingDown) {
+                this.startListening().catch(restartError => {
+                  console.error('❌ Failed to restart message listener:', restartError);
+                });
+              }
             }, 5000);
           }
         }

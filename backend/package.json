@@ -14,7 +14,13 @@
     "start": "tsx src/index.ts",
     "dstealth:dev": "tsx --watch src/agents/dstealth-agent.ts",
     "dstealth:start": "tsx src/agents/dstealth-agent.ts",
-    "test:dstealth": "tsx scripts/test-dstealth.ts"
+    "test:dstealth": "tsx scripts/test-dstealth.ts",
+    "audit:conversations": "tsx scripts/simple-conversation-check.ts",
+    "db:stats": "tsx scripts/db-sync.ts stats",
+    "db:test": "tsx scripts/db-sync.ts test",
+    "db:export": "tsx scripts/db-sync.ts export",
+    "db:sync": "tsx scripts/sync-databases.ts",
+    "restart:agent": "tsx scripts/restart-agent.ts"
   },
   "dependencies": {
     "@coinbase/coinbase-sdk": "^0.25.0",
