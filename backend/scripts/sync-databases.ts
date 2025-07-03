@@ -179,8 +179,9 @@ async function main() {
   }
 }
 
-// Run if called directly
-if (require.main === module) {
+// Run if called directly (ES module compatible)
+const isMainModule = process.argv[1] && process.argv[1].endsWith('sync-databases.ts');
+if (isMainModule) {
   main().catch(console.error);
 }
 

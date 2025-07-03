@@ -24,7 +24,8 @@
     "fix:prod-db": "tsx scripts/production-db-reset.ts",
     "extract:local": "tsx scripts/local-conversation-extract.ts",
     "analyze:payment-links": "tsx scripts/payment-link-analyzer.ts",
-    "cleanup:payment-links": "tsx scripts/payment-link-cleanup.ts"
+    "cleanup:payment-links": "tsx scripts/payment-link-cleanup.ts",
+    "sync:xmtp": "tsx scripts/xmtp-conversation-sync.ts"
   },
   "dependencies": {
     "@coinbase/coinbase-sdk": "^0.25.0",

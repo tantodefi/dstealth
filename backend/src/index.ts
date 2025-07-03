@@ -868,6 +868,50 @@ const initializeAgentWithRecovery = async () => {
 // Start the initialization process
 initializeAgentWithRecovery();
 
+// Add admin sync endpoint after the other endpoints
+
+// Admin endpoint to force conversation sync
+app.post("/api/admin/sync-conversations", async (req, res) => {
+  try {
+    const { adminKey } = req.body;
+    
+    // Simple admin key check
+    if (adminKey !== process.env.ADMIN_KEY && adminKey !== 'sync-conversations-2025') {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized - admin key required'
+      });
+    }
+
+    if (!dStealthAgent) {
+      return res.status(503).json({
+        success: false,
+        error: 'Agent not available'
+      });
+    }
+
+    console.log('🔄 Admin-triggered conversation sync starting...');
+    
+    // Force conversation sync
+    const syncResult = await dStealthAgent.forceConversationSync();
+    
+    console.log('✅ Admin-triggered conversation sync completed');
+    
+    res.json({
+      success: true,
+      message: 'Conversation sync completed',
+      result: syncResult
+    });
+
+  } catch (error: unknown) {
+    console.error('❌ Admin sync failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Sync failed'
+    });
+  }
+});
+
 // Start Server
 void (async () => {
   try {

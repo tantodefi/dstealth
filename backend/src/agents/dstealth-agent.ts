@@ -1812,6 +1812,56 @@ Stay tuned for updates!`;
     };
   }
 
+  // 🔄 Force conversation sync for admin purposes
+  async forceConversationSync(): Promise<{ 
+    conversationsFound: number; 
+    conversationIds: string[];
+    syncDuration: number;
+  }> {
+    if (!this.client) {
+      throw new Error('XMTP client not initialized');
+    }
+
+    console.log('🔄 Force syncing conversations from XMTP network...');
+    const startTime = Date.now();
+
+    try {
+      // Force full sync from network
+      await this.client.conversations.sync();
+      
+      // Get all conversations
+      const conversations = await this.client.conversations.list();
+      
+      console.log(`📊 Found ${conversations.length} conversations after forced sync`);
+      
+      // Sync each conversation individually
+      const conversationIds: string[] = [];
+      for (const conversation of conversations) {
+        try {
+          await conversation.sync();
+          conversationIds.push(conversation.id);
+          console.log(`✅ Synced conversation: ${conversation.id.substring(0, 8)}...`);
+        } catch (convError) {
+          console.warn(`⚠️ Failed to sync conversation ${conversation.id}:`, convError);
+          conversationIds.push(conversation.id); // Still add to list
+        }
+      }
+
+      const syncDuration = Date.now() - startTime;
+      console.log(`✅ Force sync completed in ${syncDuration}ms`);
+
+      return {
+        conversationsFound: conversations.length,
+        conversationIds,
+        syncDuration
+      };
+
+    } catch (error) {
+      console.error('❌ Force conversation sync failed:', error);
+      throw error;
+    }
+  }
+
   // Graceful shutdown
   async shutdown(): Promise<void> {
     if (this.isShuttingDown) return;
