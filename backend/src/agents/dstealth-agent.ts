@@ -1240,7 +1240,8 @@ export class DStealthAgent {
   private async sendMessageWithUrlSeparation(conversation: any, response: string): Promise<void> {
     try {
       // Regular expression to find URLs (specifically dstealth.xyz and app.fluidkey.com)
-      const urlRegex = /(https?:\/\/(?:dstealth\.xyz|app\.fluidkey\.com|dstealth\.vercel\.app)[^\s]*)/gi;
+      // 🔧 FIXED: Exclude common markdown delimiters (parentheses, brackets, etc.)
+      const urlRegex = /(https?:\/\/(?:dstealth\.xyz|app\.fluidkey\.com|dstealth\.vercel\.app)[^\s\)\]\>\,\;]*)/gi;
       const urls = response.match(urlRegex) || [];
       
       if (urls.length === 0) {
@@ -2006,7 +2007,7 @@ Respond to the user's message in a helpful way while staying focused on privacy 
         
         return `🚫 **Payment Link Creation Failed**\n\n` +
                `❌ **Reason**: No verified FluidKey ID found for your account\n\n` +
-               `🔑 **Required Setup** (DM me privately):\n` +
+               `�� **Required Setup** (DM me privately):\n` +
                `1. Get FluidKey: https://app.fluidkey.com/?ref=62YNSG\n` +
                `2. Tell me your username (e.g., "tantodefi")\n` +
                `3. Complete setup: ${this.getDStealthMiniAppLink()}\n\n` +
