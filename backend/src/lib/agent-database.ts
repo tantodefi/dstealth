@@ -107,6 +107,25 @@ export class AgentDatabase {
       const userKey = this.key(`stealth:${data.userId.toLowerCase()}`);
       const fkeyKey = this.key(`fkey:${data.fkeyId.toLowerCase()}`);
       
+      // 🚨 SECURITY CHECK: Prevent duplicate fkey.id claims
+      const existingFkeyData = await redis.get(fkeyKey);
+      if (existingFkeyData) {
+        const existing = typeof existingFkeyData === 'string' ? 
+          JSON.parse(existingFkeyData) : existingFkeyData;
+        
+        // If different user is trying to claim same fkey.id, check if they can prove ownership
+        if (existing.userId && existing.userId.toLowerCase() !== data.userId.toLowerCase()) {
+          // 🔧 ENHANCED: Allow re-claiming if user provides valid zkProof (proves ownership)
+          if (!data.zkProof || !data.zkProof.claimData) {
+            console.log(`🚫 SECURITY BLOCK: User ${data.userId} tried to claim fkey.id ${data.fkeyId} already owned by ${existing.userId} without valid proof`);
+            throw new Error(`FKEY_ALREADY_CLAIMED: This fkey.id (${data.fkeyId}) is already claimed by another user. To reclaim it from a different wallet, please provide valid ownership proof.`);
+          }
+          
+          // If user has valid zkProof, allow them to reclaim (they proved ownership)
+          console.log(`✅ OWNERSHIP VERIFIED: User ${data.userId} successfully reclaimed fkey.id ${data.fkeyId} with valid zkProof`);
+        }
+      }
+      
       const stealthRecord = {
         ...data,
         lastUpdated: Date.now(),

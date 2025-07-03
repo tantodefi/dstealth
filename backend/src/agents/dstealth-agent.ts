@@ -110,7 +110,11 @@ class UnifiedApiClient {
   async lookupFkey(fkeyId: string) {
     try {
       // Extract username from fkey.id (e.g., "tantodefi.fkey.id" -> "tantodefi")
-      const username = fkeyId.replace('.fkey.id', '');
+      let username = fkeyId.replace('.fkey.id', '');
+      
+      // 🔧 FIX: Normalize username to lowercase for fkey.id lookup
+      username = username.toLowerCase();
+      
       const response = await this.client.get(`/api/fkey/lookup/${username}`);
       return { success: true, ...response.data };
     } catch (error) {
@@ -609,58 +613,48 @@ export class DStealthAgent {
       let finalConversations = await this.client.conversations.list();
       console.log(`📋 Final conversation count: ${finalConversations.length}`);
 
-      // 🔥 CRITICAL FIX: Process existing messages ONCE to avoid duplicates
+      // 🔥 CRITICAL FIX: Do NOT process existing messages during startup
       console.log('🔍 Processing existing messages from all conversations...');
       console.log('📋 Known conversation IDs:', finalConversations.map(c => c.id));
       let existingMessageCount = 0;
       
+      // 🚨 REMOVED: Historical message processing
+      // The agent should ONLY process NEW messages after startup
+      // Processing existing messages causes responses to old messages
+      console.log('⏭️ SKIPPING existing message processing to prevent duplicate responses');
+      console.log('📝 Historical messages will be ignored - only NEW messages will be processed');
+      
+      // Instead, just sync conversations without processing their messages
       for (const conversation of finalConversations) {
         try {
           await conversation.sync();
           const messages = await conversation.messages();
-          console.log(`📬 Conversation ${conversation.id}: ${messages.length} messages`);
+          console.log(`📬 Conversation ${conversation.id}: ${messages.length} messages (not processing historical)`);
           
-          // Find the most recent message from a user (not the agent)
-          if (messages.length > 0) {
-            // Look backwards through messages to find the latest user message
-            let latestUserMessage = null;
-            for (let j = messages.length - 1; j >= 0; j--) {
-              const message = messages[j];
-              if (message.senderInboxId !== this.client.inboxId) {
-                latestUserMessage = message;
-                break;
-              }
+          // 🔥 OPTIONAL: Mark all existing messages as processed to prevent future processing
+          messages.forEach(message => {
+            if (message.id && message.senderInboxId !== this.client?.inboxId) {
+              this.processedMessages.add(message.id);
             }
-            
-            if (latestUserMessage && latestUserMessage.id && !this.processedMessages.has(latestUserMessage.id)) {
-              console.log(`🔄 Processing latest user message: "${latestUserMessage.content}" from ${latestUserMessage.senderInboxId}`);
-              existingMessageCount++;
-              
-              // Mark as processed BEFORE processing to prevent duplicates
-              this.processedMessages.add(latestUserMessage.id);
-              
-              // Keep processed messages list manageable
-              if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
-                const firstItem = this.processedMessages.values().next().value;
-                this.processedMessages.delete(firstItem);
-              }
-              
-              // Process this user message
-              await this.processIncomingMessage(latestUserMessage);
-            } else if (latestUserMessage && latestUserMessage.id) {
-              console.log(`⏭️ Skipping already processed existing message: ${latestUserMessage.id}`);
-            } else {
-              console.log(`📭 No user messages found in conversation (all ${messages.length} messages from agent)`);
+          });
+          
+          // Keep processed messages list manageable
+          if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
+            // Remove oldest messages from tracking
+            const messagesToRemove = this.processedMessages.size - (this.MAX_PROCESSED_MESSAGES * 0.8);
+            const messagesArray = Array.from(this.processedMessages);
+            for (let i = 0; i < messagesToRemove; i++) {
+              this.processedMessages.delete(messagesArray[i]);
             }
           }
         } catch (error) {
-          console.warn(`⚠️ Failed to process existing messages from conversation ${conversation.id}:`, error);
+          console.warn(`⚠️ Failed to sync conversation ${conversation.id}:`, error);
         }
       }
       
-      console.log(`✅ Processed ${existingMessageCount} existing messages`);
+      console.log(`✅ Synced ${finalConversations.length} conversations without processing historical messages`);
 
-      // 🔥 SIMPLIFIED: Single sync check for missed conversations
+      // 🔥 SIMPLIFIED: Skip re-sync processing of existing messages too
       console.log('🔍 Force re-sync to catch any missed conversations...');
       await this.client.conversations.sync();
       const resynced = await this.client.conversations.list();
@@ -668,43 +662,20 @@ export class DStealthAgent {
       if (resynced.length > finalConversations.length) {
         console.log(`🆕 Found ${resynced.length - finalConversations.length} additional conversations on re-sync!`);
         
-        // Process messages from newly found conversations
+        // Only sync new conversations without processing their existing messages
         for (let i = finalConversations.length; i < resynced.length; i++) {
           const newConversation = resynced[i];
           try {
             await newConversation.sync();
             const messages = await newConversation.messages();
-            console.log(`📬 RESYNC Conversation ${newConversation.id}: ${messages.length} messages`);
+            console.log(`📬 RESYNC Conversation ${newConversation.id}: ${messages.length} messages (not processing historical)`);
             
-            // Find the most recent user message (not from agent)
-            if (messages.length > 0) {
-              let latestUserMessage = null;
-              for (let j = messages.length - 1; j >= 0; j--) {
-                const message = messages[j];
-                if (message.senderInboxId !== this.client.inboxId) {
-                  latestUserMessage = message;
-                  break;
-                }
+            // Mark all existing messages as processed
+            messages.forEach(message => {
+              if (message.id && message.senderInboxId !== this.client?.inboxId) {
+                this.processedMessages.add(message.id);
               }
-              
-              if (latestUserMessage && latestUserMessage.id && !this.processedMessages.has(latestUserMessage.id)) {
-                console.log(`🔄 Processing message from resync conversation: "${latestUserMessage.content}"`);
-                
-                // Mark as processed BEFORE processing to prevent duplicates
-                this.processedMessages.add(latestUserMessage.id);
-                
-                // Keep processed messages list manageable
-                if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
-                  const firstItem = this.processedMessages.values().next().value;
-                  this.processedMessages.delete(firstItem);
-                }
-                
-                await this.processIncomingMessage(latestUserMessage);
-                existingMessageCount++;
-              } else if (latestUserMessage && latestUserMessage.id) {
-                console.log(`⏭️ Skipping already processed resync message: ${latestUserMessage.id}`);
-              }
-            }
+            });
           } catch (error) {
             console.warn(`⚠️ Failed to process resync conversation ${newConversation.id}:`, error);
           }
@@ -713,7 +684,7 @@ export class DStealthAgent {
         finalConversations = resynced;
       }
 
-      console.log(`✅ Final total: processed ${existingMessageCount} existing messages from ${finalConversations.length} conversations`);
+      console.log(`✅ Final total: synced ${finalConversations.length} conversations (${this.processedMessages.size} historical messages marked as processed)`);
 
       // 🔥 SIMPLIFIED: Single periodic sync - reduced complexity to prevent duplicates
       const syncInterval = setInterval(async () => {
@@ -829,7 +800,9 @@ export class DStealthAgent {
           // Keep processed messages list manageable
           if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
             const firstItem = this.processedMessages.values().next().value;
-            this.processedMessages.delete(firstItem);
+            if (firstItem) {
+              this.processedMessages.delete(firstItem);
+            }
           }
 
           // 🔥 SIMPLIFIED: Direct message processing
@@ -1018,26 +991,69 @@ export class DStealthAgent {
       // Handle commands first (work the same in both contexts)
       if (trimmed.startsWith('/')) {
         console.log(`⚙️ Processing command: ${trimmed}`);
-        const response = await this.processCommand(trimmed, senderInboxId);
+        const response = await this.processCommand(trimmed, senderInboxId, isGroupChat);
         if (response && response.trim()) {
           console.log(`✅ Command response generated`);
           return response;
         }
       }
 
-      // Check for payment requests (work the same in both contexts)
+      // 🔥 NEW: Check for payment requests - now allowed in groups for verified users
       const paymentMatch = this.extractPaymentAmount(trimmed);
       if (paymentMatch) {
         console.log(`💰 Payment request detected: $${paymentMatch.amount}`);
+        
+        if (isGroupChat) {
+          // In group chat: Check if user has completed onboarding
+          const userData = await agentDb.getStealthDataByUser(senderInboxId);
+          if (!userData || !userData.fkeyId || !userData.stealthAddress) {
+            return `🔒 **Payment Link Creation - Setup Required**
+
+💬 **For privacy & security, please DM me first to set up your fkey.id**
+
+**Steps:**
+1. 💬 **Send me a DM** 
+2. 🔑 **Tell me your fkey.id username** (e.g., "tantodefi")
+3. ✅ **Complete setup** in the dStealth Mini App
+4. 🎉 **Return here** - payment links will work in groups!
+
+**Why DM first?** Your fkey.id setup involves sensitive stealth address info that should be shared privately.
+
+**🔗 Get FluidKey**: https://app.fluidkey.com/?ref=62YNSG`;
+          }
+        }
+        
         const response = await this.handlePaymentLinkRequest(paymentMatch.amount, senderInboxId);
         if (response && response.trim()) {
           return response;
         }
       }
 
-      // Check if this looks like a fkey.id (work the same in both contexts)
+      // 🔥 RESTRICTED: fkey.id submission only allowed in DMs (onboarding security)
       if (this.isFkeyIdPattern(trimmed)) {
         console.log(`🔑 fkey.id pattern detected`);
+        
+        if (isGroupChat) {
+          return `🔒 **FluidKey Setup - DM Required for Privacy**
+
+💬 **Please DM me directly to set up your fkey.id**
+
+**Why?** Setting up your fkey.id involves:
+- 🥷 **Stealth address generation** 
+- 🔐 **Private key verification**
+- 🧾 **ZK proof handling**
+
+**These should be shared privately, not in a group!**
+
+**Steps:**
+1. 💬 **Send me a DM**
+2. 🔑 **Tell me**: "${trimmed}"
+3. ✅ **Complete setup**
+4. 🎉 **Return here** for payment features!
+
+**🔗 Get FluidKey**: https://app.fluidkey.com/?ref=62YNSG`;
+        }
+        
         const response = await this.handleFkeyIdSubmission(trimmed, senderInboxId);
         if (response && response.trim()) {
           return response;
@@ -1053,7 +1069,7 @@ export class DStealthAgent {
 
       // 🔥 GROUP vs DM BEHAVIOR SPLIT
       if (isGroupChat) {
-        // In groups: Short, focused responses
+        // In groups: Enhanced responses for verified users, invites for new users
         return this.handleGroupMessage(trimmed, senderInboxId);
       } else {
         // In DMs: Full onboarding experience
@@ -1067,22 +1083,30 @@ export class DStealthAgent {
     }
   }
 
-  // 🔥 NEW: Handle group chat messages (short and focused)
+  // 🔥 ENHANCED: Handle group chat messages with verified user features
   private async handleGroupMessage(content: string, senderInboxId: string): Promise<string> {
     console.log(`👥 Processing group message`);
 
-    // Try GPT for complex questions first
+    // Check if user has completed onboarding (has fkey.id)
+    const userData = await agentDb.getStealthDataByUser(senderInboxId);
+    const isVerifiedUser = userData && userData.fkeyId && userData.stealthAddress;
+
+    // Try GPT for complex questions first (for verified users)
     const isComplexQuery = this.isComplexQuery(content);
-    if (openai && isComplexQuery) {
-      console.log(`🤖 Using GPT for group response`);
+    if (openai && isComplexQuery && isVerifiedUser) {
+      console.log(`🤖 Using GPT for verified user group response`);
       const gptResponse = await this.processWithGPT(content, senderInboxId);
       if (gptResponse && gptResponse.trim()) {
         return gptResponse;
       }
     }
 
-    // Default group response: Short invite to dStealth
-    return this.getGroupInviteMessage();
+    // Enhanced response for verified users, basic invite for new users
+    if (isVerifiedUser) {
+      return this.getVerifiedUserGroupMessage(userData);
+    } else {
+      return this.getGroupInviteMessage();
+    }
   }
 
   // 🔥 NEW: Handle DM messages (full onboarding experience)
@@ -1110,6 +1134,27 @@ export class DStealthAgent {
     return this.getGuaranteedFallbackResponse();
   }
 
+  // 🔥 NEW: Enhanced group message for verified users
+  private getVerifiedUserGroupMessage(userData: UserStealthData): string {
+    return `👋 **Hey ${userData.fkeyId}!** 🥷
+
+✅ **You're verified** - full group features unlocked!
+
+**💳 Quick Group Actions:**
+• **"create payment link for $X"** - Generate stealth payment links
+• **/fkey <username>** - Look up any fkey.id  
+• **/help** - Full command list
+
+**🏠 Your Stealth Address**: \`${userData.stealthAddress?.slice(0, 6)}...${userData.stealthAddress?.slice(-4)}\`
+
+**🔒 Private Commands** (DM me for):
+• **/balance** - Check balance privately
+• **/scan <address>** - Privacy analysis  
+• **/links** - Manage your links
+
+**🎯 Ready to earn privacy rewards!**`;
+  }
+
   // 🔥 NEW: Short invite message for group chats
   private getGroupInviteMessage(): string {
     return `👋 **Hi! I'm the dStealth Agent** 🥷
@@ -1124,7 +1169,7 @@ export class DStealthAgent {
 **Questions?** DM me for full setup assistance!`;
   }
 
-  private async processCommand(command: string, senderInboxId: string): Promise<string | null> {
+  private async processCommand(command: string, senderInboxId: string, isGroupChat: boolean = false): Promise<string | null> {
     const cmd = command.trim().toLowerCase();
 
     if (cmd === '/help') {
@@ -1132,12 +1177,32 @@ export class DStealthAgent {
     }
 
     if (cmd === '/setup complete') {
+      // Setup completion should be done in DMs for privacy
+      if (isGroupChat) {
+        return `🔒 **Setup completion should be done privately**
+
+💬 **Please DM me** to complete your setup securely.
+
+**Why?** Setup involves sensitive information that should be shared privately.`;
+      }
       return await this.handleSetupComplete(senderInboxId);
     }
 
     if (cmd.startsWith('/fkey ')) {
+      // fkey lookup is allowed in groups for verified users
       const fkeyId = cmd.slice(6).trim();
       if (fkeyId) {
+        if (isGroupChat) {
+          // In groups: Only allow if user is verified
+          const userData = await agentDb.getStealthDataByUser(senderInboxId);
+          if (!userData || !userData.fkeyId) {
+            return `🔒 **fkey.id lookup requires setup**
+
+💬 **Please DM me first** to set up your own fkey.id, then you can look up others in groups!
+
+**🔗 Get FluidKey**: https://app.fluidkey.com/?ref=62YNSG`;
+          }
+        }
         return await this.handleFkeyLookup(fkeyId, senderInboxId);
       }
       return 'Please provide a fkey.id to lookup (e.g., `/fkey tantodefi.fkey.id`)';
@@ -1145,8 +1210,14 @@ export class DStealthAgent {
 
     if (cmd.startsWith('/scan ')) {
       // 🔒 PRIVACY: /scan is DM-only to protect sensitive information
-      // We need to check if this is being called from group context
-      // For now, we'll handle this in the calling context
+      if (isGroupChat) {
+        return `🔒 **Address scanning is DM-only for privacy**
+
+💬 **Please DM me** to scan addresses privately.
+
+**Why?** Address analysis reveals sensitive privacy information that shouldn't be shared in groups.`;
+      }
+      
       const address = cmd.slice(6).trim();
       if (address) {
         return await this.handleStealthScan(address, senderInboxId);
@@ -1155,14 +1226,34 @@ export class DStealthAgent {
     }
 
     if (cmd === '/links') {
+      // Links management is DM-only for privacy
+      if (isGroupChat) {
+        return `🔒 **Link management is DM-only for privacy**
+
+💬 **Please DM me** to view and manage your payment links privately.`;
+      }
       return await this.handleProxy402Links(senderInboxId);
     }
 
     if (cmd === '/balance') {
+      // Balance checking is DM-only for privacy
+      if (isGroupChat) {
+        return `🔒 **Balance checking is DM-only for privacy**
+
+💬 **Please DM me** to check your balance privately.
+
+**Why?** Financial information should never be shared in groups.`;
+      }
       return await this.handleCheckBalance(senderInboxId);
     }
 
     if (cmd.startsWith('/create ')) {
+      // Content creation is DM-only for now
+      if (isGroupChat) {
+        return `🔒 **Content creation is DM-only**
+
+💬 **Please DM me** for content creation features.`;
+      }
       return await this.handleCreateContent(cmd, senderInboxId);
     }
 
@@ -1456,33 +1547,62 @@ Respond to the user's message in a helpful way while staying focused on privacy 
     try {
       console.log(`💰 Processing payment link request for $${amount} from ${senderInboxId}`);
 
-      // 🔥 CRITICAL: Get user data - FAIL if no fkey.id found
+      // 🚨 SECURITY: Get user data - STRICT validation required
       const userData = await agentDb.getStealthDataByUser(senderInboxId);
       
-      if (!userData || !userData.fkeyId || !userData.stealthAddress) {
-        // 🚨 HARD FAIL: No payment link creation without fkey.id
-        console.log(`❌ Payment link creation BLOCKED - no fkey.id for user: ${senderInboxId}`);
+      // 🚨 SECURITY: Triple-check all required fields exist
+      if (!userData || 
+          !userData.fkeyId || 
+          !userData.stealthAddress || 
+          userData.fkeyId.trim() === '' || 
+          userData.stealthAddress.trim() === '') {
+        
+        console.log(`❌ Payment link creation BLOCKED - missing verified data for user: ${senderInboxId}`, {
+          hasUserData: !!userData,
+          hasFkeyId: !!userData?.fkeyId,
+          hasStealthAddress: !!userData?.stealthAddress,
+          fkeyIdValid: userData?.fkeyId ? userData.fkeyId.trim() !== '' : false,
+          stealthAddressValid: userData?.stealthAddress ? userData.stealthAddress.trim() !== '' : false
+        });
         
         return `🚫 **Payment Link Creation Failed**\n\n` +
-               `❌ **Reason**: No FluidKey ID found for your account\n\n` +
-               `🔑 **Required Setup**:\n` +
+               `❌ **Reason**: No verified FluidKey ID found for your account\n\n` +
+               `🔑 **Required Setup** (DM me privately):\n` +
                `1. Get FluidKey: https://app.fluidkey.com/?ref=62YNSG\n` +
                `2. Tell me your username (e.g., "tantodefi")\n` +
                `3. Complete setup: ${this.getDStealthMiniAppLink()}\n\n` +
                `⚡ **Only users with verified fkey.id can create stealth payment links**\n\n` +
-               `💡 **Why?** This ensures all payments go to YOUR stealth address for maximum privacy!`;
+               `💡 **Why?** This ensures all payments go to YOUR verified stealth address for maximum privacy!\n\n` +
+               `🔒 **Security**: No payment links without verified identity - no exceptions!`;
       }
 
-      // 🔥 Generate stealth payment link with user's verified data
-      const stealthPaymentLink = await this.generateDaimoPaymentLink(amount, userData.stealthAddress, {
-        contentId: `xmtp_payment_${Date.now()}`,
-        userStealthAddress: userData.stealthAddress,
-        fkeyId: userData.fkeyId,
-        zkProof: userData.zkProof,
-        senderInboxId: senderInboxId,
-        paymentIntent: `XMTP Payment $${amount}`,
-        privacyLevel: 'stealth'
-      });
+      // 🚨 SECURITY: Ensure zkProof exists (proves authenticity)
+      if (!userData.zkProof) {
+        console.log(`❌ Payment link creation BLOCKED - no zk proof for user: ${senderInboxId}`);
+        return `🚫 **Payment Link Creation Failed**\n\n` +
+               `❌ **Reason**: Missing ZK proof for your fkey.id verification\n\n` +
+               `🔑 **Please re-setup your fkey.id**:\n` +
+               `1. DM me your fkey.id username again\n` +
+               `2. Complete verification process\n\n` +
+               `🔒 **Security**: ZK proof required for authenticity verification!`;
+      }
+
+      console.log(`✅ Payment link authorized for verified user: ${userData.fkeyId} -> ${userData.stealthAddress}`);
+
+      // 🔥 Generate stealth payment link with user's verified data - NOW REQUIRES ALL PARAMS
+      const stealthPaymentLink = await this.generateDaimoPaymentLink(
+        amount, 
+        userData.stealthAddress, // Required - no fallbacks
+        {
+          contentId: `xmtp_payment_${Date.now()}`,
+          userStealthAddress: userData.stealthAddress,
+          fkeyId: userData.fkeyId, // Required for verification
+          zkProof: userData.zkProof, // Required for authenticity
+          senderInboxId: senderInboxId,
+          paymentIntent: `XMTP Payment $${amount}`,
+          privacyLevel: 'stealth'
+        }
+      );
       
       // Store ZK receipt for the payment
       try {
@@ -1522,15 +1642,26 @@ Respond to the user's message in a helpful way while staying focused on privacy 
              `🔧 **Technical Error**: ${error instanceof Error ? error.message : 'Unknown error'}\n\n` +
              `🔑 **Ensure Setup Complete**:\n` +
              `1. FluidKey: https://app.fluidkey.com/?ref=62YNSG\n` +
-             `2. Tell me your fkey.id username\n` +
+             `2. Tell me your fkey.id username (DM me privately)\n` +
              `3. Complete: ${this.getDStealthMiniAppLink()}\n\n` +
-             `💡 **Only verified users can create stealth payment links**`;
+             `💡 **Only verified users can create stealth payment links**\n\n` +
+             `🔒 **Security**: No payment links without complete verification!`;
     }
   }
 
-  // 🔥 FIXED: Generate Daimo payment links using the proper API with correct amounts
-  private async generateDaimoPaymentLink(amount: string, stealthAddress?: string, zkReceiptData?: any): Promise<string> {
-    const recipient = stealthAddress || '0x706AfBE28b1e1CB40cd552Fa53A380f658e38332';
+  // 🔥 SECURED: Generate Daimo payment links ONLY with verified user data - NO FALLBACKS
+  private async generateDaimoPaymentLink(amount: string, stealthAddress: string, zkReceiptData: any): Promise<string> {
+    // 🚨 SECURITY: NO fallback addresses - must have verified stealth address
+    if (!stealthAddress || stealthAddress.trim() === '') {
+      throw new Error('Payment link creation requires verified stealth address from fkey.id - no fallbacks allowed');
+    }
+
+    // 🚨 SECURITY: Must have valid zkReceiptData with fkey.id
+    if (!zkReceiptData || !zkReceiptData.fkeyId) {
+      throw new Error('Payment link creation requires verified fkey.id data - no anonymous links allowed');
+    }
+
+    const recipient = stealthAddress; // NO FALLBACK - use verified address only
     
     // 🔥 FIXED: Daimo expects dollar amounts, not smallest units
     const amountInDollars = parseFloat(amount).toFixed(2);
@@ -1541,22 +1672,44 @@ Respond to the user's message in a helpful way while staying focused on privacy 
       daimoLimit: 4000,
       withinLimit: parseFloat(amountInDollars) <= 4000,
       recipient,
-      isStealthAddress: !!stealthAddress
+      verifiedStealthAddress: true,
+      fkeyId: zkReceiptData.fkeyId
     });
     
-    // Build metadata without null values (Daimo API rejects null values)
+    // 🔥 SYNC WITH FRONTEND: Build metadata to match working frontend pattern
     const metadata: Record<string, any> = {
-      type: 'xmtp-agent-payment',
+      type: 'x402-content',                    // ✅ Match frontend type  
       service: 'dstealth-xmtp',
-      recipientType: stealthAddress ? 'stealth' : 'standard',
+      recipientType: 'stealth',                // ✅ Always stealth since we require fkey.id
     };
     
-    // Only add zkReceiptId if it exists
-    if (zkReceiptData) {
-      metadata.zkReceiptId = `zk_${Date.now()}`;
-      // Add other zkReceiptData fields
-      Object.assign(metadata, zkReceiptData);
+    // 🔥 ENHANCED: Add trust verification fields (required for security)
+    metadata.verifiedFkeyId = zkReceiptData.fkeyId;
+    metadata.trustedIdentity = 'true';
+    
+    // Add receipt ID and content ID
+    metadata.zkReceiptId = `zk_${zkReceiptData.contentId || 'xmtp'}_${Date.now()}`;
+    metadata.contentId = zkReceiptData.contentId || `xmtp_payment_${Date.now()}`;
+    
+    // 🔥 CRITICAL: Add zkReceiptData fields but EXCLUDE zkProof (frontend approach)
+    Object.entries(zkReceiptData).forEach(([key, value]) => {
+      if (key !== 'zkProof' && value !== null && value !== undefined) {
+        // Only add safe, small fields
+        if (typeof value !== 'object' && String(value).length < 100) {
+          metadata[key] = value;
+        }
+      }
+    });
+    
+    // Instead of full zkProof, just indicate we have it
+    if (zkReceiptData.zkProof) {
+      metadata.hasZkProof = 'true';
+      metadata.zkProofTimestamp = Date.now();
     }
+    
+    // 🔥 SYNC WITH FRONTEND: Enhanced intent with verified user fkey.id  
+    const userFkeyId = zkReceiptData.fkeyId; // Required, no fallback
+    const intent = `ZK receipt for stealth payment to ${userFkeyId} at dstealth.xyz`;
     
     // Use the new Daimo Pay API
     const paymentLink = await daimoPayClient.createPaymentLink({
@@ -1565,13 +1718,13 @@ Respond to the user's message in a helpful way while staying focused on privacy 
       displayAmount: amountInDollars, // Send the same amount for display
       tokenSymbol: 'USDC',
       chainId: getDaimoChainId('base'),
-      externalId: zkReceiptData?.contentId || `agent_payment_${Date.now()}`,
-      intent: `ZK receipt for stealth payment at dstealth.xyz`,
+      externalId: zkReceiptData.contentId || `agent_payment_${Date.now()}`,
+      intent,
       metadata
     });
     
     console.log(`✅ Agent created Daimo payment link via API: ${paymentLink.url}`);
-    console.log(`🎯 Payment recipient: ${recipient} (${stealthAddress ? 'stealth' : 'standard'})`);
+    console.log(`🎯 Payment recipient: ${recipient} (verified-stealth-${userFkeyId})`);
     
     return paymentLink.url;
   }
@@ -1605,21 +1758,29 @@ Respond to the user's message in a helpful way while staying focused on privacy 
            !content.includes(' ');
   }
 
-  // Handle fkey.id submission
+  // 🔥 SECURED: Handle fkey.id submission - ONLY with explicit user consent
   private async handleFkeyIdSubmission(fkeyInput: string, senderInboxId: string): Promise<string> {
     try {
+      // 🚨 SECURITY: Only process fkey.id if explicitly provided by user
+      if (!fkeyInput || fkeyInput.trim() === '') {
+        throw new Error('fkey.id submission requires explicit user input - no automatic lookups');
+      }
+
       // Normalize the fkey.id input
       let fkeyId = fkeyInput.trim();
       if (!fkeyId.endsWith('.fkey.id')) {
         fkeyId = `${fkeyId}.fkey.id`;
       }
 
-      console.log(`🔑 Processing fkey.id: ${fkeyId}`);
+      console.log(`🔑 Processing fkey.id: ${fkeyId} (user-initiated: ${senderInboxId})`);
       
-      // Look up the fkey.id
+      // 🚨 SECURITY: Only perform zkfetch with explicit user-provided fkey.id
+      // This ensures we never automatically fetch address/proof data without consent
       const lookupResult = await this.apiClient.lookupFkey(fkeyId);
       
-      if (!lookupResult.success || !lookupResult.stealthAddress) {
+      // 🔧 SECURITY: Strict validation - must have both address and proof
+      if (!lookupResult.success || !lookupResult.address) {
+        console.log(`❌ fkey.id lookup failed for: ${fkeyId} - no valid address found`);
         return `❌ **FluidKey ID not found**: ${fkeyId}
 
 Please check the spelling or create one at:
@@ -1628,17 +1789,31 @@ Please check the spelling or create one at:
 Once you have a fkey.id, tell me your username and I'll help you set up stealth payments!`;
       }
 
-      // Store user data
-      await agentDb.setStealthDataByUser(senderInboxId, {
+      // 🚨 SECURITY: Only store data if we have verified proof from zkfetch
+      if (!lookupResult.proof) {
+        console.log(`❌ fkey.id missing zk proof for: ${fkeyId} - cannot verify authenticity`);
+        return `❌ **FluidKey ID verification failed**: ${fkeyId}
+
+The fkey.id exists but couldn't be verified with a ZK proof. Please try again or contact support if this persists.
+
+🔗 **FluidKey**: https://app.fluidkey.com/?ref=62YNSG`;
+      }
+
+      console.log(`✅ fkey.id verified with proof: ${fkeyId} -> ${lookupResult.address}`);
+
+      // Store user data (map 'address' to 'stealthAddress') - ONLY after full verification
+      await agentDb.storeUserStealthData({
+        userId: senderInboxId,
         fkeyId,
-        stealthAddress: lookupResult.stealthAddress,
-        zkProof: lookupResult.zkProof || null,
+        stealthAddress: lookupResult.address, // Use 'address' from backend
+        zkProof: lookupResult.proof, // Use 'proof' from backend  
+        requestedBy: senderInboxId,
         setupStatus: 'fkey_set',
         lastUpdated: Date.now()
       });
 
       return `✅ **FluidKey ID verified**: ${fkeyId}
-🏠 **Stealth Address**: ${lookupResult.stealthAddress}
+🏠 **Stealth Address**: ${lookupResult.address}
 
 🎯 **Next Step**: Complete setup in the dStealth Mini App
 📱 **Link**: ${this.getDStealthMiniAppLink()}
@@ -1752,7 +1927,7 @@ Tell me your new fkey.id username!
   private async checkMiniAppRegistration(senderInboxId: string): Promise<boolean> {
     try {
       const userData = await agentDb.getStealthDataByUser(senderInboxId);
-      return userData && userData.setupStatus === 'complete';
+      return Boolean(userData && userData.setupStatus === 'complete');
     } catch (error) {
       return false;
     }
@@ -1833,7 +2008,7 @@ Type "/scan ${lookupResult.stealthAddress}" to analyze this address!`;
 
   // Get existing user welcome
   private getExistingUserWelcome(userData: UserStealthData): string {
-    return `🎉 **Welcome back, ${userData.fkeyId}!** ��
+    return `🎉 **Welcome back, ${userData.fkeyId}!** 
 
 **🏠 Your Stealth Address**: ${userData.stealthAddress}
 **✅ Setup Status**: Complete

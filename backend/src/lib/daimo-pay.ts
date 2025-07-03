@@ -82,6 +82,42 @@ export class DaimoPayClient {
 
       const tokenAddress = getTokenAddress(request.tokenSymbol, request.chainId);
       
+      // Clean and prepare metadata - convert objects to strings for Daimo API
+      const cleanMetadata: Record<string, string> = {};
+      
+      if (request.metadata) {
+        Object.entries(request.metadata).forEach(([key, value]) => {
+          if (value !== null && value !== undefined) {
+            // 🔧 FIX: Skip large objects that exceed Daimo's 500 char limit
+            if (key === 'zkProof' && typeof value === 'object') {
+              // Store only a reference/hash instead of full zkProof
+              cleanMetadata['zkProofId'] = `proof_${Date.now()}`;
+              cleanMetadata['hasZkProof'] = 'true';
+              return; // Skip the full zkProof object
+            }
+            
+            // Convert remaining objects to JSON strings for Daimo API
+            if (typeof value === 'object') {
+              const jsonString = JSON.stringify(value);
+              // Only include if under 500 char limit
+              if (jsonString.length <= 450) { // Leave buffer for safety
+                cleanMetadata[key] = jsonString;
+              } else {
+                console.warn(`⚠️ Skipping metadata.${key} - too large for Daimo (${jsonString.length} chars)`);
+              }
+            } else {
+              const stringValue = String(value);
+              if (stringValue.length <= 450) {
+                cleanMetadata[key] = stringValue;
+              } else {
+                console.warn(`⚠️ Truncating metadata.${key} - too large for Daimo`);
+                cleanMetadata[key] = stringValue.substring(0, 450) + '...';
+              }
+            }
+          }
+        });
+      }
+
       const requestBody = {
         display: {
           intent: request.intent || 'ZK Stealth Payment',
@@ -96,7 +132,7 @@ export class DaimoPayClient {
           tokenAddress: tokenAddress,
         },
         ...(request.externalId && { externalId: request.externalId }),
-        ...(request.metadata && { metadata: request.metadata }),
+        ...(cleanMetadata && { metadata: cleanMetadata }),
       };
 
       console.log('📤 Backend sending request to Daimo API:', requestBody);

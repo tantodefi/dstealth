@@ -757,42 +757,56 @@ app.get("/api/agent/user-settings/:userInboxId", async (req, res) => {
   }
 });
 
-// Agent settings endpoint - allows agent to access user preferences
-app.get("/api/agent/user-settings/:userInboxId", async (req, res) => {
+// Add debug endpoint to check database status
+app.get("/api/debug/database", (req, res) => {
   try {
-    const { userInboxId } = req.params;
+    const fs = require('fs');
+    const path = require('path');
     
-    if (!userInboxId) {
-      return res.status(400).json({ success: false, error: 'User inbox ID required' });
-    }
-
-    // Get user settings from Redis database
-    const userData = await agentDb.getStealthDataByUser(userInboxId);
+    const currentDbPath = getDbPath(XMTP_ENV);
+    const allPossiblePaths = [
+      '/data/xmtp/dev-xmtp.db3',
+      '/data/xmtp/production-xmtp.db3',
+      '/data/xmtp/local-xmtp.db3'
+    ];
     
-    // Mock user preferences (in production, this would come from a user preferences store)
-    const userSettings = {
-      inboxId: userInboxId,
-      fkeyId: userData?.fkeyId || null,
-      stealthAddress: userData?.stealthAddress || null,
-      preferences: {
-        enableAI: true,
-        privacyMode: 'standard',
-        notifications: true,
-        language: 'en'
-      },
-      lastInteraction: userData?.lastUpdated || null
-    };
-
+    const dbStatus = allPossiblePaths.map(dbPath => {
+      try {
+        const exists = fs.existsSync(dbPath);
+        const stats = exists ? fs.statSync(dbPath) : null;
+        return {
+          path: dbPath,
+          exists,
+          size: stats ? stats.size : 0,
+          modified: stats ? stats.mtime.toISOString() : null,
+          isCurrent: dbPath === currentDbPath
+        };
+      } catch (error) {
+        return {
+          path: dbPath,
+          exists: false,
+          error: error.message,
+          isCurrent: dbPath === currentDbPath
+        };
+      }
+    });
+    
     res.json({
       success: true,
-      settings: userSettings
+      currentEnv: XMTP_ENV,
+      currentDbPath,
+      agentInboxId: xmtpClient ? xmtpClient.inboxId : "not-initialized",
+      conversationCount: xmtpClient ? "check-via-sync" : 0,
+      databases: dbStatus,
+      suggestion: dbStatus.find(db => db.exists && !db.isCurrent && db.size > 1000) ? 
+        "Found existing database with different environment - consider switching XMTP_ENV" : 
+        "No other databases found"
     });
-
+    
   } catch (error) {
-    console.error('Error fetching user settings:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch user settings'
+      error: error.message
     });
   }
 });
