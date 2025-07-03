@@ -1995,4 +1995,555 @@ Respond to the user's message in a helpful way while staying focused on privacy 
   // 🔥 SECURED: Handle payment link requests with FRESH stealth addresses and ZK receipts
   private async handlePaymentLinkRequest(amount: string, senderInboxId: string): Promise<string> {
     try {
-      console.log(`
+      console.log(`💰 Processing payment link request for $${amount} from ${senderInboxId}`);
+
+      // 🚨 SECURITY: Get user data for initial validation
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      
+      // 🚨 SECURITY: Must have fkey.id in database to proceed
+      if (!userData || !userData.fkeyId || userData.fkeyId.trim() === '') {
+        console.log(`❌ Payment link creation BLOCKED - no fkey.id found for user: ${senderInboxId}`);
+        
+        return `🚫 **Payment Link Creation Failed**\n\n` +
+               `❌ **Reason**: No verified FluidKey ID found for your account\n\n` +
+               `🔑 **Required Setup** (DM me privately):\n` +
+               `1. Get FluidKey: https://app.fluidkey.com/?ref=62YNSG\n` +
+               `2. Tell me your username (e.g., "tantodefi")\n` +
+               `3. Complete setup: ${this.getDStealthMiniAppLink()}\n\n` +
+               `⚡ **Only users with verified fkey.id can create stealth payment links**\n\n` +
+               `💡 **Why?** This ensures all payments go to YOUR verified stealth address for maximum privacy!\n\n` +
+               `🔒 **Security**: No payment links without verified identity - no exceptions!`;
+      }
+
+      // 🔥 CRITICAL SECURITY FIX: Always fetch FRESH fkey.id data for payment links
+      console.log(`🔄 Fetching FRESH fkey.id data for: ${userData.fkeyId}`);
+      const freshLookupResult = await this.apiClient.lookupFkey(userData.fkeyId);
+      
+      if (!freshLookupResult.success || !freshLookupResult.address) {
+        console.log(`❌ Fresh fkey.id lookup failed for: ${userData.fkeyId}`);
+        return `❌ **Fresh Verification Failed**\n\n` +
+               `🔄 **Could not verify current fkey.id data**: ${userData.fkeyId}\n\n` +
+               `⚠️ **Possible causes:**\n` +
+               `• fkey.id temporarily unavailable\n` +
+               `• Network connectivity issues\n` +
+               `• FluidKey service maintenance\n\n` +
+               `🔑 **Please try again in a few moments**\n\n` +
+               `💡 **Security**: We always fetch fresh data for payment links to ensure accuracy!`;
+      }
+
+      // 🚨 SECURITY: Ensure fresh zkProof exists (proves current authenticity)
+      if (!freshLookupResult.proof) {
+        console.log(`❌ Fresh fkey.id missing zk proof for: ${userData.fkeyId}`);
+        return `❌ **Fresh Verification Failed**\n\n` +
+               `🔄 **Current fkey.id lacks ZK proof**: ${userData.fkeyId}\n\n` +
+               `🔑 **Please re-setup your fkey.id**:\n` +
+               `1. Visit: https://app.fluidkey.com/?ref=62YNSG\n` +
+               `2. Re-verify your account\n` +
+               `3. Tell me your fkey.id username again\n\n` +
+               `🔒 **Security**: Fresh ZK proof required for payment link authenticity!`;
+      }
+
+      // 🔥 ENHANCED: Use FRESH data, update database with latest info
+      const freshStealthAddress = freshLookupResult.address;
+      const freshZkProof = freshLookupResult.proof;
+      
+      console.log(`✅ Payment link authorized with FRESH data: ${userData.fkeyId} -> ${freshStealthAddress}`);
+      
+      // 🔄 Update database with fresh data for future reference
+      try {
+        await agentDb.updateStealthDataByUser(senderInboxId, {
+          stealthAddress: freshStealthAddress,
+          zkProof: freshZkProof,
+          lastUpdated: Date.now()
+        });
+        console.log(`📊 Database updated with fresh fkey.id data for: ${userData.fkeyId}`);
+      } catch (updateError) {
+        console.warn('⚠️ Failed to update database with fresh data:', updateError);
+        // Continue with payment link creation even if database update fails
+      }
+
+      // 🔥 Generate stealth payment link with FRESH verified data - NO STALE DATA
+      const stealthPaymentLink = await this.generateDaimoPaymentLink(
+        amount, 
+        freshStealthAddress, // Using FRESH address, never cached
+        {
+          contentId: `xmtp_payment_${Date.now()}`,
+          userStealthAddress: freshStealthAddress, // Fresh address
+          fkeyId: userData.fkeyId, // Required for verification
+          zkProof: freshZkProof, // Fresh proof
+          senderInboxId: senderInboxId,
+          paymentIntent: `XMTP Payment $${amount}`,
+          privacyLevel: 'stealth',
+          dataFreshness: 'live' // Indicate this is fresh data
+        }
+      );
+      
+      // Store ZK receipt for the payment with fresh data
+      try {
+        const zkReceiptId = `zk_xmtp_${senderInboxId}_${Date.now()}`;
+        console.log(`🧾 ZK receipt prepared with fresh data: ${zkReceiptId}`);
+        
+        await agentDb.logAgentInteraction(
+          this.client?.inboxId || 'unknown',
+          senderInboxId,
+          'payment_link_created_stealth_fresh',
+          {
+            amount,
+            stealthAddress: freshStealthAddress, // Fresh address
+            fkeyId: userData.fkeyId,
+            zkReceiptId,
+            dataFreshness: 'live',
+            timestamp: Date.now()
+          }
+        );
+      } catch (receiptError) {
+        console.warn('⚠️ Failed to create ZK receipt:', receiptError);
+      }
+      
+      // 🔥 ENHANCED: Include fresh data verification in response
+      return `💰 **Your Stealth Payment Link** (Fresh Data ✅):\n${stealthPaymentLink}\n\n` +
+             `🔐 **Verified Identity**: ${userData.fkeyId}\n` +
+             `🥷 **Live Stealth Address**: \`${freshStealthAddress?.slice(0, 6)}...${freshStealthAddress?.slice(-4)}\`\n` +
+             `🔄 **Data Freshness**: Live (just fetched)\n` +
+             `🧾 **Privacy**: ZK receipt will be generated upon payment\n` +
+             `⚡ **Trust**: This link uses your CURRENT verified stealth address\n\n` +
+             `✅ Recipients will send payments privately to your latest stealth address!\n` +
+             `📱 **Manage**: ${this.getDStealthMiniAppLink()}`;
+
+    } catch (error) {
+      console.error('❌ Error handling payment link request:', error);
+      
+      // 🔥 ENHANCED: Even error responses require fresh verification
+      return `❌ **Payment Link Creation Failed**\n\n` +
+             `🔧 **Technical Error**: ${error instanceof Error ? error.message : 'Unknown error'}\n\n` +
+             `🔑 **Ensure Fresh Setup**:\n` +
+             `1. FluidKey: https://app.fluidkey.com/?ref=62YNSG\n` +
+             `2. Tell me your fkey.id username (DM me privately)\n` +
+             `3. Complete: ${this.getDStealthMiniAppLink()}\n\n` +
+             `💡 **Security**: We always verify fresh data for payment links\n\n` +
+             `🔒 **No stale data**: Payment links use live verification only!`;
+    }
+  }
+
+  // 🔥 SECURED: Generate Daimo payment links ONLY with verified user data - NO FALLBACKS
+  private async generateDaimoPaymentLink(amount: string, stealthAddress: string, zkReceiptData: any): Promise<string> {
+    // 🚨 SECURITY: NO fallback addresses - must have verified stealth address
+    if (!stealthAddress || stealthAddress.trim() === '') {
+      throw new Error('Payment link creation requires verified stealth address from fkey.id - no fallbacks allowed');
+    }
+
+    // 🚨 SECURITY: Must have valid zkReceiptData with fkey.id
+    if (!zkReceiptData || !zkReceiptData.fkeyId) {
+      throw new Error('Payment link creation requires verified fkey.id data - no anonymous links allowed');
+    }
+
+    const recipient = stealthAddress; // NO FALLBACK - use verified address only
+    
+    // 🔥 FIXED: Daimo expects dollar amounts, not smallest units
+    const amountInDollars = parseFloat(amount).toFixed(2);
+    
+    console.log('💰 Agent amount conversion details:', {
+      originalAmount: amount,
+      finalAmountInDollars: amountInDollars,
+      daimoLimit: 4000,
+      withinLimit: parseFloat(amountInDollars) <= 4000,
+      recipient,
+      verifiedStealthAddress: true,
+      fkeyId: zkReceiptData.fkeyId
+    });
+    
+    // 🔥 SYNC WITH FRONTEND: Build metadata to match working frontend pattern
+    const metadata: Record<string, any> = {
+      type: 'x402-content',                    // ✅ Match frontend type  
+      service: 'dstealth-xmtp',
+      recipientType: 'stealth',                // ✅ Always stealth since we require fkey.id
+    };
+    
+    // 🔥 ENHANCED: Add trust verification fields (required for security)
+    metadata.verifiedFkeyId = zkReceiptData.fkeyId;
+    metadata.trustedIdentity = 'true';
+    
+    // Add receipt ID and content ID
+    metadata.zkReceiptId = `zk_${zkReceiptData.contentId || 'xmtp'}_${Date.now()}`;
+    metadata.contentId = zkReceiptData.contentId || `xmtp_payment_${Date.now()}`;
+    
+    // 🔥 CRITICAL: Add zkReceiptData fields but EXCLUDE zkProof (frontend approach)
+    Object.entries(zkReceiptData).forEach(([key, value]) => {
+      if (key !== 'zkProof' && value !== null && value !== undefined) {
+        // Only add safe, small fields
+        if (typeof value !== 'object' && String(value).length < 100) {
+          metadata[key] = value;
+        }
+      }
+    });
+    
+    // Instead of full zkProof, just indicate we have it
+    if (zkReceiptData.zkProof) {
+      metadata.hasZkProof = 'true';
+      metadata.zkProofTimestamp = Date.now();
+    }
+    
+    // 🔥 SYNC WITH FRONTEND: Enhanced intent with verified user fkey.id  
+    const userFkeyId = zkReceiptData.fkeyId; // Required, no fallback
+    const intent = `ZK receipt for stealth payment to ${userFkeyId} at dstealth.xyz`;
+    
+    // Use the new Daimo Pay API
+    const paymentLink = await daimoPayClient.createPaymentLink({
+      destinationAddress: recipient,
+      amountUnits: amountInDollars,
+      displayAmount: amountInDollars, // Send the same amount for display
+      tokenSymbol: 'USDC',
+      chainId: getDaimoChainId('base'),
+      externalId: zkReceiptData.contentId || `agent_payment_${Date.now()}`,
+      intent,
+      metadata
+    });
+    
+    console.log(`✅ Agent created Daimo payment link via API: ${paymentLink.url}`);
+    console.log(`🎯 Payment recipient: ${recipient} (verified-stealth-${userFkeyId})`);
+    
+    return paymentLink.url;
+  }
+
+  // Extract payment amount from message content
+  private extractPaymentAmount(content: string): { amount: string } | null {
+    const paymentPatterns = [
+      /create.*payment.*link.*for.*\$(\d+(?:\.\d{2})?)/i,
+      /\$(\d+(?:\.\d{2})?).*payment.*link/i,
+      /generate.*link.*\$(\d+(?:\.\d{2})?)/i,
+      /make.*payment.*\$(\d+(?:\.\d{2})?)/i,
+      /payment.*\$(\d+(?:\.\d{2})?)/i,
+      /\$(\d+(?:\.\d{2})?)/
+    ];
+
+    for (const pattern of paymentPatterns) {
+      const match = content.match(pattern);
+      if (match && match[1]) {
+        return { amount: match[1] };
+      }
+    }
+    return null;
+  }
+
+  // Check if content looks like a fkey.id pattern
+  private isFkeyIdPattern(content: string): boolean {
+    // Check for fkey.id patterns like "tantodefi.fkey.id" or just "tantodefi"
+    return /^[a-z0-9._-]+\.fkey\.id$/i.test(content) || 
+           /^[a-z0-9._-]+$/i.test(content.trim()) && 
+           content.length > 2 && content.length < 50 && 
+           !content.includes(' ');
+  }
+
+  // 🔥 SECURED: Handle fkey.id submission - ONLY with explicit user consent
+  private async handleFkeyIdSubmission(fkeyInput: string, senderInboxId: string): Promise<string> {
+    try {
+      // 🚨 SECURITY: Only process fkey.id if explicitly provided by user
+      if (!fkeyInput || fkeyInput.trim() === '') {
+        throw new Error('fkey.id submission requires explicit user input - no automatic lookups');
+      }
+
+      // Normalize the fkey.id input
+      let fkeyId = fkeyInput.trim();
+      if (!fkeyId.endsWith('.fkey.id')) {
+        fkeyId = `${fkeyId}.fkey.id`;
+      }
+
+      console.log(`🔑 Processing fkey.id: ${fkeyId} (user-initiated: ${senderInboxId})`);
+      
+      // 🚨 SECURITY: Only perform zkfetch with explicit user-provided fkey.id
+      // This ensures we never automatically fetch address/proof data without consent
+      const lookupResult = await this.apiClient.lookupFkey(fkeyId);
+      
+      // 🔧 SECURITY: Strict validation - must have both address and proof
+      if (!lookupResult.success || !lookupResult.address) {
+        console.log(`❌ fkey.id lookup failed for: ${fkeyId} - no valid address found`);
+        return `❌ **FluidKey ID not found**: ${fkeyId}
+
+Please check the spelling or create one at:
+🔗 **FluidKey**: https://app.fluidkey.com/?ref=62YNSG
+
+Once you have a fkey.id, tell me your username and I'll help you set up stealth payments!`;
+      }
+
+      // 🚨 SECURITY: Only store data if we have verified proof from zkfetch
+      if (!lookupResult.proof) {
+        console.log(`❌ fkey.id missing zk proof for: ${fkeyId} - cannot verify authenticity`);
+        return `❌ **FluidKey ID verification failed**: ${fkeyId}
+
+The fkey.id exists but couldn't be verified with a ZK proof. Please try again or contact support if this persists.
+
+🔗 **FluidKey**: https://app.fluidkey.com/?ref=62YNSG`;
+      }
+
+      console.log(`✅ fkey.id verified with proof: ${fkeyId} -> ${lookupResult.address}`);
+
+      // Store user data (map 'address' to 'stealthAddress') - ONLY after full verification
+      await agentDb.storeUserStealthData({
+        userId: senderInboxId,
+        fkeyId,
+        stealthAddress: lookupResult.address, // Use 'address' from backend
+        zkProof: lookupResult.proof, // Use 'proof' from backend  
+        requestedBy: senderInboxId,
+        setupStatus: 'fkey_set',
+        lastUpdated: Date.now()
+      });
+
+      return `✅ **FluidKey ID verified**: ${fkeyId}
+🏠 **Stealth Address**: ${lookupResult.address}
+
+🎯 **Next Step**: Complete setup in the dStealth Mini App
+📱 **Link**: ${this.getDStealthMiniAppLink()}
+
+After setup, return here and type "/setup complete" to unlock all features!`;
+
+    } catch (error) {
+      console.error('Error handling fkey.id submission:', error);
+      return `❌ **Error processing fkey.id**
+
+Please try again or create a new one at:
+🔗 **FluidKey**: https://app.fluidkey.com/?ref=62YNSG`;
+    }
+  }
+
+  // Check if query is complex (needs GPT)
+  private isComplexQuery(content: string): boolean {
+    const complexPatterns = [
+      /how.*(work|do|setup)/i,
+      /what.*(is|are|does)/i,
+      /why.*(should|would|do)/i,
+      /explain/i,
+      /difference/i,
+      /compare/i,
+      /help.*with/i,
+      /problem|issue|error/i,
+      /\?/,  // Contains question mark
+    ];
+
+    return complexPatterns.some(pattern => pattern.test(content)) || 
+           content.length > 50 ||
+           content.split(' ').length > 10;
+  }
+
+  // Guaranteed fallback response
+  private getGuaranteedFallbackResponse(): string {
+    return `👋 **Hi! I'm the dStealth Agent** 🥷
+
+💰 **I help with privacy & anonymous payments**
+
+**🚀 Get Started:**
+1. Tell me your **fkey.id username** (e.g., "tantodefi")
+2. Or say **"no"** if you don't have one yet
+
+**💳 Quick Actions:**
+• **"create payment link for $X"** - Generate payment links
+• **/help** - Full command list
+• **/scan <address>** - Check privacy score
+
+Type **"help"** for complete instructions!
+
+**🔗 Links:**
+• **dStealth Mini App**: ${this.getDStealthMiniAppLink()}
+• **Get FluidKey**: https://app.fluidkey.com/?ref=62YNSG`;
+  }
+
+  // Handle first time users
+  private async handleFirstTimeUser(senderInboxId: string): Promise<string> {
+    // Check if user already has data
+    const userData = await agentDb.getStealthDataByUser(senderInboxId);
+    
+    if (userData && userData.fkeyId) {
+      // User has fkey but maybe not complete setup
+      if (userData.setupStatus === 'complete') {
+        return this.getExistingUserWelcome(userData);
+      } else {
+        return this.requireMiniAppSetup("Full Features");
+      }
+    }
+
+    // New user - start onboarding
+    return `👋 **Welcome to dStealth!** 🥷
+
+I'm your **privacy & anonymous payment assistant**.
+
+**🔑 Do you have a FluidKey ID (fkey.id)?**
+
+**If YES**: Tell me your username (e.g., "tantodefi")
+**If NO**: Say "no" and I'll help you create one
+
+**💡 With FluidKey you get:**
+- Anonymous stealth addresses
+- Private payment links
+- Privacy rewards & challenges
+- Enhanced Web3 anonymity
+
+**Ready?** Tell me your fkey.id username or say "no" to get started!`;
+  }
+
+  // Handle "no" response (no fkey.id)
+  private handleNoFkeyId(): string {
+    return `🆕 **No problem! Let's get you set up** 
+
+**Step 1**: Create your FluidKey ID
+🎯 **Referral Code**: 62YNSG (for bonus rewards!)
+
+**Step 2**: Choose your username  
+Example: "tantodefi" becomes "tantodefi.fkey.id"
+
+**Step 3**: Complete setup in the dStealth Mini App
+
+**Step 4**: Return here and tell me your new fkey.id username!
+
+**💡 Pro Tip**: FluidKey gives you stealth addresses for anonymous payments and privacy rewards!
+
+🔗 **Get FluidKey**: https://app.fluidkey.com/?ref=62YNSG
+📱 **dStealth Mini App**: ${this.getDStealthMiniAppLink()}`;
+  }
+
+  // Check mini app registration
+  private async checkMiniAppRegistration(senderInboxId: string): Promise<boolean> {
+    try {
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      return Boolean(userData && userData.setupStatus === 'complete');
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // Require mini app setup
+  private requireMiniAppSetup(feature: string): string {
+    return `🔒 **${feature} requires complete setup**
+
+**📱 Complete setup in the dStealth Mini App:**
+${this.getDStealthMiniAppLink()}
+
+**After setup, return here and type:**
+\`/setup complete\`
+
+**🎯 This unlocks:**
+- Anonymous payment links
+- Privacy rewards tracking  
+- Advanced stealth features
+- Balance & transaction history
+
+**Questions?** Type /help for assistance!`;
+  }
+
+  // Handle setup complete
+  private async handleSetupComplete(senderInboxId: string): Promise<string> {
+    try {
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      
+      if (!userData || !userData.fkeyId) {
+        return `❌ **Setup not found**
+
+Please tell me your fkey.id username first, then complete the mini app setup.
+
+Need help? Type "help" for instructions.`;
+      }
+
+      // Update setup status
+      await agentDb.updateStealthDataByUser(senderInboxId, {
+        setupStatus: 'complete',
+        lastUpdated: Date.now()
+      });
+
+      return this.getSetupCompleteMessage(userData);
+      
+    } catch (error) {
+      console.error('Error handling setup complete:', error);
+      return `❌ **Error updating setup status**
+
+Please try again or type /help for assistance.`;
+    }
+  }
+
+  // Handle fkey lookup command
+  private async handleFkeyLookup(fkeyId: string, senderInboxId: string): Promise<string> {
+    try {
+      const lookupResult = await this.apiClient.lookupFkey(fkeyId);
+      
+      if (!lookupResult.success) {
+        return `❌ **FluidKey ID not found**: ${fkeyId}
+
+Please check the spelling or try a different username.`;
+      }
+
+      return `🔍 **FluidKey Lookup Results**
+
+**🔑 fkey.id**: ${fkeyId}
+**🏠 Stealth Address**: ${lookupResult.stealthAddress || 'Not available'}
+**✅ Status**: Registered
+**🏆 Privacy Score**: ${lookupResult.privacyScore || 'Not analyzed'}
+
+Type "/scan ${lookupResult.stealthAddress}" to analyze this address!`;
+
+    } catch (error) {
+      return `❌ **Lookup failed**\nPlease try again or type /help for assistance.`;
+    }
+  }
+
+  // Get existing user welcome
+  private getExistingUserWelcome(userData: UserStealthData): string {
+    return `🎉 **Welcome back, ${userData.fkeyId}!** 
+
+**🏠 Your Stealth Address**: ${userData.stealthAddress}
+**✅ Setup Status**: Complete
+
+**💳 Quick Actions:**
+• **"create payment link for $X"** - Generate anonymous payment links
+• **/balance** - Check your stealth address balance
+• **/links** - View your payment links
+• **/scan <address>** - Analyze any address
+
+**🎯 Ready to earn privacy rewards?**
+Try: "create payment link for $10"
+
+Type **/help** for all commands!`;
+  }
+
+  // Get setup complete message
+  private getSetupCompleteMessage(userData: UserStealthData): string {
+    return `🎉 **Welcome to the full dStealth experience!**
+
+✅ **Setup Complete**: ${userData.fkeyId}
+🏠 **Stealth Address**: ${userData.stealthAddress}
+
+**🔓 All Features Unlocked:**
+💳 **Payment Links**: "create payment link for $5"
+🔍 **Advanced Scanning**: /scan <address>  
+📊 **Your Links**: /links
+💰 **Balance Tracking**: /balance
+🏆 **Privacy Rewards**: /rewards
+📡 **Proxy402 Content**: /create content
+
+**🎯 Start Earning Privacy Rewards:**
+- Generate anonymous payment links
+- Use stealth addresses for transactions
+- Complete privacy challenges
+- Build your FluidKey Score
+
+**Try this**: "create a payment link for $10" to get started!
+
+**Need help?** Type /help for full command list.`;
+  }
+
+  // 🔥 FIXED: Get dStealth mini app link with proper production URL
+  private getDStealthMiniAppLink(): string {
+    // 🌍 Production environment detection
+    const isProduction = process.env.NODE_ENV === 'production' || 
+                        process.env.RENDER || 
+                        process.env.VERCEL;
+    
+    // 🔧 Environment-specific URL selection
+    if (isProduction) {
+      // ✅ Production: Always use dstealth.xyz
+      return 'https://dstealth.xyz';
+    } else {
+      // 🔧 Development: Use localhost
+      return env.FRONTEND_URL || process.env.NEXT_PUBLIC_URL || 'http://localhost:3000';
+    }
+  }
+}
+
+// Export the agent instance
+export const dStealthAgent = new DStealthAgent();
