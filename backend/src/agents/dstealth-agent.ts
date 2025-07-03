@@ -2051,10 +2051,21 @@ Type **/help** for all commands!`;
 **Need help?** Type /help for full command list.`;
   }
 
-  // Get dStealth mini app link
+  // 🔥 FIXED: Get dStealth mini app link with proper production URL
   private getDStealthMiniAppLink(): string {
-    const frontendURL = env.FRONTEND_URL || process.env.NEXT_PUBLIC_URL || 'https://dstealth.xyz';
-    return frontendURL;
+    // 🌍 Production environment detection
+    const isProduction = process.env.NODE_ENV === 'production' || 
+                        process.env.RENDER || 
+                        process.env.VERCEL;
+    
+    // 🔧 Environment-specific URL selection
+    if (isProduction) {
+      // ✅ Production: Always use dstealth.xyz
+      return 'https://dstealth.xyz';
+    } else {
+      // 🔧 Development: Use localhost
+      return env.FRONTEND_URL || process.env.NEXT_PUBLIC_URL || 'http://localhost:3000';
+    }
   }
 }
 
