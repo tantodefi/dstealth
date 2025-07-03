@@ -526,11 +526,11 @@ export class DStealthAgent {
   async initialize(retryCount = 0, maxRetries = 5): Promise<void> {
     try {
       console.log(`🚀 Initializing dStealth Agent (attempt ${retryCount + 1}/${maxRetries + 1})...`);
-
+      
       if (!env.WALLET_KEY || !env.ENCRYPTION_KEY) {
         throw new Error('Missing required environment variables: WALLET_KEY or ENCRYPTION_KEY');
       }
-
+      
       console.log('📱 Creating XMTP client...');
       
       // 🔧 Enhanced: Database path with error recovery
@@ -560,8 +560,8 @@ export class DStealthAgent {
       
       for (let dbAttempt = 0; dbAttempt < 3; dbAttempt++) {
         try {
-          this.client = await Client.create(signer, {
-            dbEncryptionKey: encryptionKey,
+      this.client = await Client.create(signer, {
+        dbEncryptionKey: encryptionKey,
             env: env.XMTP_ENV as XmtpEnv,
             dbPath: dbAttempt === 0 ? dbPath : `${dbPath}.backup${dbAttempt}`,
           });
@@ -616,8 +616,8 @@ export class DStealthAgent {
 
       // 🔧 Enhanced: Start listening with robust error handling
       try {
-        await this.startListening();
-        
+      await this.startListening();
+
         this.isRunning = true;
         console.log('✅ dStealth Agent is now listening for messages');
         
@@ -631,7 +631,7 @@ export class DStealthAgent {
           console.log(`⏳ Waiting ${retryDelay / 1000}s before retry to avoid rate limits...`);
           
           await new Promise(resolve => setTimeout(resolve, retryDelay));
-          return this.initialize(retryCount + 1, maxRetries);
+        return this.initialize(retryCount + 1, maxRetries);
         } else {
           throw listeningError;
         }
@@ -662,7 +662,7 @@ export class DStealthAgent {
       console.log(`🔍 Agent inbox ID: ${this.client?.inboxId}`);
       console.log(`🌍 XMTP Environment: ${env.XMTP_ENV}`);
 
-      if (!this.client) {
+    if (!this.client) {
         throw new Error('XMTP client not initialized');
       }
 
@@ -673,7 +673,7 @@ export class DStealthAgent {
       
       while (conversationSyncAttempts < maxSyncAttempts) {
         try {
-          await this.client.conversations.sync();
+      await this.client.conversations.sync();
           break;
         } catch (syncError) {
           conversationSyncAttempts++;
@@ -688,7 +688,7 @@ export class DStealthAgent {
 
       const conversations = await this.client.conversations.list();
       console.log(`📋 Agent has ${conversations.length} conversations`);
-
+      
       // 🔄 Enhanced: Sync individual conversations with error handling
       const finalConversations = [];
       for (const conversation of conversations) {
@@ -708,7 +708,7 @@ export class DStealthAgent {
       let stream;
       try {
         stream = await this.client.conversations.streamAllMessages();
-        console.log('✅ Message stream created, listening for messages...');
+      console.log('✅ Message stream created, listening for messages...');
       } catch (streamError) {
         console.error('❌ Failed to create message stream:', streamError);
         throw streamError;
@@ -757,18 +757,18 @@ export class DStealthAgent {
       // 🔍 Force re-sync to catch any missed conversations
       console.log('🔍 Force re-sync to catch any missed conversations...');
       try {
-        await this.client.conversations.sync();
-        const resynced = await this.client.conversations.list();
+      await this.client.conversations.sync();
+      const resynced = await this.client.conversations.list();
+      
+      if (resynced.length > finalConversations.length) {
+        console.log(`🆕 Found ${resynced.length - finalConversations.length} additional conversations on re-sync!`);
         
-        if (resynced.length > finalConversations.length) {
-          console.log(`🆕 Found ${resynced.length - finalConversations.length} additional conversations on re-sync!`);
-          
           // Only sync new conversations without processing their existing messages
-          for (let i = finalConversations.length; i < resynced.length; i++) {
-            const newConversation = resynced[i];
-            try {
-              await newConversation.sync();
-              const messages = await newConversation.messages();
+        for (let i = finalConversations.length; i < resynced.length; i++) {
+          const newConversation = resynced[i];
+          try {
+            await newConversation.sync();
+            const messages = await newConversation.messages();
               
               // Mark all existing messages as processed
               messages.forEach(message => {
@@ -820,58 +820,58 @@ export class DStealthAgent {
               hasReceivedNewMessages = true;
               
               console.log(`\n🔔 NEW MESSAGE STREAM EVENT #${messageCount}:`);
-              console.log('📨 RAW STREAM MESSAGE:', {
-                hasMessage: !!message,
-                content: message?.content || 'no-content',
-                senderInboxId: message?.senderInboxId || 'no-sender',
+          console.log('📨 RAW STREAM MESSAGE:', {
+            hasMessage: !!message,
+            content: message?.content || 'no-content',
+            senderInboxId: message?.senderInboxId || 'no-sender',
                 agentInboxId: this.client?.inboxId || 'no-agent-id',
-                contentType: message?.contentType?.typeId || 'no-type',
-                conversationId: message?.conversationId || 'no-conversation',
-                messageId: message?.id || 'no-id',
-                sentAt: message?.sentAt || 'no-timestamp'
-              });
+            contentType: message?.contentType?.typeId || 'no-type',
+            conversationId: message?.conversationId || 'no-conversation',
+            messageId: message?.id || 'no-id',
+            sentAt: message?.sentAt || 'no-timestamp'
+          });
 
               // 🔧 Enhanced: Validate message before processing
-              if (!message || !message.content || !message.senderInboxId) {
-                console.log('⏭️ Skipping invalid message (missing content or sender)');
-                continue;
-              }
+          if (!message || !message.content || !message.senderInboxId) {
+            console.log('⏭️ Skipping invalid message (missing content or sender)');
+            continue;
+          }
 
-              console.log('📧 VALID MESSAGE DETAILS:', {
+          console.log('📧 VALID MESSAGE DETAILS:', {
                 content: JSON.stringify(message.content),
                 contentLength: String(message.content).length,
-                contentType: typeof message.content,
-                senderInboxId: message.senderInboxId,
+            contentType: typeof message.content,
+            senderInboxId: message.senderInboxId,
                 agentInboxId: this.client?.inboxId,
                 isOwnMessage: message.senderInboxId === this.client?.inboxId,
-                messageContentType: message.contentType?.typeId,
-                conversationId: message.conversationId
-              });
+            messageContentType: message.contentType?.typeId,
+            conversationId: message.conversationId
+          });
 
               // Skip own messages
               if (message.senderInboxId === this.client?.inboxId) {
-                console.log('⏭️ Skipping own message');
-                continue;
-              }
+            console.log('⏭️ Skipping own message');
+            continue;
+          }
 
               // 🔧 NEW: Skip if message already processed
               if (message.id && this.processedMessages.has(message.id)) {
                 console.log('⏭️ Skipping already processed message');
-                continue;
-              }
+            continue;
+          }
 
-              console.log(`🚀 PROCESSING NEW MESSAGE from ${message.senderInboxId}: "${message.content}"`);
-              
+          console.log(`🚀 PROCESSING NEW MESSAGE from ${message.senderInboxId}: "${message.content}"`);
+          
               // Add to processed messages
               if (message.id) {
-                this.processedMessages.add(message.id);
-                
-                // Keep processed messages list manageable
-                if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
-                  const firstItem = this.processedMessages.values().next().value;
+          this.processedMessages.add(message.id);
+          
+          // Keep processed messages list manageable
+          if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
+            const firstItem = this.processedMessages.values().next().value;
                   if (firstItem) {
-                    this.processedMessages.delete(firstItem);
-                  }
+            this.processedMessages.delete(firstItem);
+          }
                 }
               }
 
@@ -1239,7 +1239,7 @@ export class DStealthAgent {
     // Enhanced response for verified users, basic invite for new users
     if (isVerifiedUser) {
       return this.getVerifiedUserGroupMessage(userData);
-    } else {
+      } else {
       return this.getGroupInviteMessage();
     }
   }
@@ -1329,7 +1329,7 @@ export class DStealthAgent {
       if (fkeyId) {
         if (isGroupChat) {
           // In groups: Only allow if user is verified
-          const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
           if (!userData || !userData.fkeyId) {
             return `🔒 **fkey.id lookup requires setup**
 
@@ -1677,28 +1677,17 @@ Respond to the user's message in a helpful way while staying focused on privacy 
     }
   }
 
-  // 🔥 NEW: Handle payment link requests with stealth addresses and ZK receipts
+  // 🔥 SECURED: Handle payment link requests with FRESH stealth addresses and ZK receipts
   private async handlePaymentLinkRequest(amount: string, senderInboxId: string): Promise<string> {
     try {
       console.log(`💰 Processing payment link request for $${amount} from ${senderInboxId}`);
 
-      // 🚨 SECURITY: Get user data - STRICT validation required
+      // 🚨 SECURITY: Get user data for initial validation
       const userData = await agentDb.getStealthDataByUser(senderInboxId);
       
-      // 🚨 SECURITY: Triple-check all required fields exist
-      if (!userData || 
-          !userData.fkeyId || 
-          !userData.stealthAddress || 
-          userData.fkeyId.trim() === '' || 
-          userData.stealthAddress.trim() === '') {
-        
-        console.log(`❌ Payment link creation BLOCKED - missing verified data for user: ${senderInboxId}`, {
-          hasUserData: !!userData,
-          hasFkeyId: !!userData?.fkeyId,
-          hasStealthAddress: !!userData?.stealthAddress,
-          fkeyIdValid: userData?.fkeyId ? userData.fkeyId.trim() !== '' : false,
-          stealthAddressValid: userData?.stealthAddress ? userData.stealthAddress.trim() !== '' : false
-        });
+      // 🚨 SECURITY: Must have fkey.id in database to proceed
+      if (!userData || !userData.fkeyId || userData.fkeyId.trim() === '') {
+        console.log(`❌ Payment link creation BLOCKED - no fkey.id found for user: ${senderInboxId}`);
         
         return `🚫 **Payment Link Creation Failed**\n\n` +
                `❌ **Reason**: No verified FluidKey ID found for your account\n\n` +
@@ -1711,48 +1700,84 @@ Respond to the user's message in a helpful way while staying focused on privacy 
                `🔒 **Security**: No payment links without verified identity - no exceptions!`;
       }
 
-      // 🚨 SECURITY: Ensure zkProof exists (proves authenticity)
-      if (!userData.zkProof) {
-        console.log(`❌ Payment link creation BLOCKED - no zk proof for user: ${senderInboxId}`);
-        return `🚫 **Payment Link Creation Failed**\n\n` +
-               `❌ **Reason**: Missing ZK proof for your fkey.id verification\n\n` +
-               `🔑 **Please re-setup your fkey.id**:\n` +
-               `1. DM me your fkey.id username again\n` +
-               `2. Complete verification process\n\n` +
-               `🔒 **Security**: ZK proof required for authenticity verification!`;
+      // 🔥 CRITICAL SECURITY FIX: Always fetch FRESH fkey.id data for payment links
+      console.log(`🔄 Fetching FRESH fkey.id data for: ${userData.fkeyId}`);
+      const freshLookupResult = await this.apiClient.lookupFkey(userData.fkeyId);
+      
+      if (!freshLookupResult.success || !freshLookupResult.address) {
+        console.log(`❌ Fresh fkey.id lookup failed for: ${userData.fkeyId}`);
+        return `❌ **Fresh Verification Failed**\n\n` +
+               `🔄 **Could not verify current fkey.id data**: ${userData.fkeyId}\n\n` +
+               `⚠️ **Possible causes:**\n` +
+               `• fkey.id temporarily unavailable\n` +
+               `• Network connectivity issues\n` +
+               `• FluidKey service maintenance\n\n` +
+               `🔑 **Please try again in a few moments**\n\n` +
+               `💡 **Security**: We always fetch fresh data for payment links to ensure accuracy!`;
       }
 
-      console.log(`✅ Payment link authorized for verified user: ${userData.fkeyId} -> ${userData.stealthAddress}`);
+      // 🚨 SECURITY: Ensure fresh zkProof exists (proves current authenticity)
+      if (!freshLookupResult.proof) {
+        console.log(`❌ Fresh fkey.id missing zk proof for: ${userData.fkeyId}`);
+        return `❌ **Fresh Verification Failed**\n\n` +
+               `🔄 **Current fkey.id lacks ZK proof**: ${userData.fkeyId}\n\n` +
+               `🔑 **Please re-setup your fkey.id**:\n` +
+               `1. Visit: https://app.fluidkey.com/?ref=62YNSG\n` +
+               `2. Re-verify your account\n` +
+               `3. Tell me your fkey.id username again\n\n` +
+               `🔒 **Security**: Fresh ZK proof required for payment link authenticity!`;
+      }
 
-      // 🔥 Generate stealth payment link with user's verified data - NOW REQUIRES ALL PARAMS
+      // 🔥 ENHANCED: Use FRESH data, update database with latest info
+      const freshStealthAddress = freshLookupResult.address;
+      const freshZkProof = freshLookupResult.proof;
+      
+      console.log(`✅ Payment link authorized with FRESH data: ${userData.fkeyId} -> ${freshStealthAddress}`);
+      
+      // 🔄 Update database with fresh data for future reference
+      try {
+        await agentDb.updateStealthDataByUser(senderInboxId, {
+          stealthAddress: freshStealthAddress,
+          zkProof: freshZkProof,
+          lastUpdated: Date.now()
+        });
+        console.log(`📊 Database updated with fresh fkey.id data for: ${userData.fkeyId}`);
+      } catch (updateError) {
+        console.warn('⚠️ Failed to update database with fresh data:', updateError);
+        // Continue with payment link creation even if database update fails
+      }
+
+      // 🔥 Generate stealth payment link with FRESH verified data - NO STALE DATA
       const stealthPaymentLink = await this.generateDaimoPaymentLink(
         amount, 
-        userData.stealthAddress, // Required - no fallbacks
+        freshStealthAddress, // Using FRESH address, never cached
         {
           contentId: `xmtp_payment_${Date.now()}`,
-          userStealthAddress: userData.stealthAddress,
+          userStealthAddress: freshStealthAddress, // Fresh address
           fkeyId: userData.fkeyId, // Required for verification
-          zkProof: userData.zkProof, // Required for authenticity
+          zkProof: freshZkProof, // Fresh proof
           senderInboxId: senderInboxId,
           paymentIntent: `XMTP Payment $${amount}`,
-          privacyLevel: 'stealth'
+          privacyLevel: 'stealth',
+          dataFreshness: 'live' // Indicate this is fresh data
         }
       );
       
-      // Store ZK receipt for the payment
+      // Store ZK receipt for the payment with fresh data
       try {
         const zkReceiptId = `zk_xmtp_${senderInboxId}_${Date.now()}`;
-        console.log(`🧾 ZK receipt prepared: ${zkReceiptId}`);
+        console.log(`🧾 ZK receipt prepared with fresh data: ${zkReceiptId}`);
         
         await agentDb.logAgentInteraction(
           this.client?.inboxId || 'unknown',
           senderInboxId,
-          'payment_link_created_stealth',
+          'payment_link_created_stealth_fresh',
           {
             amount,
-            stealthAddress: userData.stealthAddress,
+            stealthAddress: freshStealthAddress, // Fresh address
             fkeyId: userData.fkeyId,
             zkReceiptId,
+            dataFreshness: 'live',
             timestamp: Date.now()
           }
         );
@@ -1760,27 +1785,28 @@ Respond to the user's message in a helpful way while staying focused on privacy 
         console.warn('⚠️ Failed to create ZK receipt:', receiptError);
       }
       
-      // 🔥 ENHANCED: Include fkey.id for trust verification  
-      return `💰 **Your Stealth Payment Link**:\n${stealthPaymentLink}\n\n` +
+      // 🔥 ENHANCED: Include fresh data verification in response
+      return `💰 **Your Stealth Payment Link** (Fresh Data ✅):\n${stealthPaymentLink}\n\n` +
              `🔐 **Verified Identity**: ${userData.fkeyId}\n` +
-             `🥷 **Stealth Address**: \`${userData.stealthAddress?.slice(0, 6)}...${userData.stealthAddress?.slice(-4)}\`\n` +
+             `🥷 **Live Stealth Address**: \`${freshStealthAddress?.slice(0, 6)}...${freshStealthAddress?.slice(-4)}\`\n` +
+             `🔄 **Data Freshness**: Live (just fetched)\n` +
              `🧾 **Privacy**: ZK receipt will be generated upon payment\n` +
-             `⚡ **Trust**: This link uses YOUR verified stealth address\n\n` +
-             `✅ Recipients will send payments privately to your stealth address!\n` +
+             `⚡ **Trust**: This link uses your CURRENT verified stealth address\n\n` +
+             `✅ Recipients will send payments privately to your latest stealth address!\n` +
              `📱 **Manage**: ${this.getDStealthMiniAppLink()}`;
 
     } catch (error) {
       console.error('❌ Error handling payment link request:', error);
       
-      // 🔥 ENHANCED: Even error responses require fkey.id setup
+      // 🔥 ENHANCED: Even error responses require fresh verification
       return `❌ **Payment Link Creation Failed**\n\n` +
              `🔧 **Technical Error**: ${error instanceof Error ? error.message : 'Unknown error'}\n\n` +
-             `🔑 **Ensure Setup Complete**:\n` +
+             `🔑 **Ensure Fresh Setup**:\n` +
              `1. FluidKey: https://app.fluidkey.com/?ref=62YNSG\n` +
              `2. Tell me your fkey.id username (DM me privately)\n` +
              `3. Complete: ${this.getDStealthMiniAppLink()}\n\n` +
-             `💡 **Only verified users can create stealth payment links**\n\n` +
-             `🔒 **Security**: No payment links without complete verification!`;
+             `💡 **Security**: We always verify fresh data for payment links\n\n` +
+             `🔒 **No stale data**: Payment links use live verification only!`;
     }
   }
 
