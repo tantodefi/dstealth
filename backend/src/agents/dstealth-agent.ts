@@ -461,16 +461,25 @@ export class DStealthAgent {
   private contacts: Map<string, AgentContactInfo> = new Map();
   private isShuttingDown = false;
   
-  // 🔥 NEW: Message deduplication to prevent infinite loops
+  // 🔧 PRODUCTION: Memory management and processed message tracking
   private processedMessages: Set<string> = new Set();
-  private readonly MAX_PROCESSED_MESSAGES = 1000; // Keep last 1000 message IDs
+  private readonly MAX_PROCESSED_MESSAGES = 500; // REDUCED: Keep last 500 message IDs instead of 1000
   
-  // 🔧 NEW: Health monitoring
+  // 🔧 PRODUCTION: Health monitoring
   private lastHealthCheck = Date.now();
   private healthCheckInterval: NodeJS.Timeout | null = null;
   private autoRestartEnabled = true;
   private restartAttempts = 0;
   private readonly maxRestartAttempts = 3;
+  
+  // 🔧 PRODUCTION: Circuit breaker for stream restarts
+  private streamRestartCount = 0;
+  private lastStreamRestart = 0;
+  private readonly MAX_STREAM_RESTARTS_PER_HOUR = 3;
+  
+  // 🔧 PRODUCTION: Environment-based logging
+  private readonly isProduction = process.env.NODE_ENV === 'production';
+  private readonly logLevel = process.env.NODE_ENV === 'production' ? 'error' : 'debug';
 
   // Enhanced trigger patterns with better categorization
   private readonly triggerPatterns = {
@@ -764,7 +773,7 @@ export class DStealthAgent {
         
         // Try to ping the client
         try {
-      await this.client.conversations.sync();
+          await this.client.conversations.sync();
           console.log('💓 Agent health check: OK');
         } catch (syncError) {
           console.warn('⚠️ Agent health check: Sync failed', syncError);
@@ -773,7 +782,7 @@ export class DStealthAgent {
       } catch (healthError) {
         console.error('❌ Health check error:', healthError);
       }
-    }, 5 * 60 * 1000); // Check every 5 minutes
+    }, 10 * 60 * 1000); // INCREASED: Check every 10 minutes instead of 5
   }
 
   // 🔧 NEW: Restart the agent
@@ -954,7 +963,7 @@ export class DStealthAgent {
       // 🎧 Enhanced: Start HYBRID message stream for NEW messages with robust error handling
       console.log('🎧 Starting HYBRID message stream for NEW messages...');
       
-      // Set up periodic conversation sync to catch new conversations
+      // Set up periodic conversation sync to catch new conversations - REDUCED FREQUENCY
       const syncInterval = setInterval(async () => {
         try {
           console.log('🔄 Periodic conversation sync...');
@@ -965,7 +974,7 @@ export class DStealthAgent {
         } catch (syncIntervalError) {
           console.warn('⚠️ Periodic sync failed:', syncIntervalError);
         }
-      }, 30000); // Every 30 seconds
+      }, 5 * 60 * 1000); // INCREASED: Every 5 minutes instead of 30 seconds
 
       // 🔧 Enhanced: Process messages with comprehensive error handling
       let messageCount = 0;
@@ -980,9 +989,9 @@ export class DStealthAgent {
         let consecutiveErrors = 0;
         const maxConsecutiveErrors = 5;
         let lastSuccessfulMessage = Date.now();
-        const staleStreamTimeout = 10 * 60 * 1000; // 10 minutes
+        const staleStreamTimeout = 30 * 60 * 1000; // INCREASED: 30 minutes instead of 10
         
-        // Set up stream health monitoring
+        // Set up stream health monitoring - REDUCED FREQUENCY
         const streamHealthCheck = setInterval(async () => {
           const timeSinceLastMessage = Date.now() - lastSuccessfulMessage;
           
@@ -1009,7 +1018,7 @@ export class DStealthAgent {
             }, 5000);
             return;
           }
-        }, 60000); // Check every minute
+        }, 5 * 60 * 1000); // INCREASED: Check every 5 minutes instead of 1 minute
         
         try {
           for await (const message of stream) {
@@ -1069,16 +1078,19 @@ export class DStealthAgent {
 
           console.log(`🚀 PROCESSING NEW MESSAGE from ${message.senderInboxId}: "${message.content}"`);
           
-              // Add to processed messages
+              // Add to processed messages with improved memory management
               if (message.id) {
-          this.processedMessages.add(message.id);
-          
-          // Keep processed messages list manageable
-          if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
-            const firstItem = this.processedMessages.values().next().value;
-                  if (firstItem) {
-            this.processedMessages.delete(firstItem);
-          }
+                this.processedMessages.add(message.id);
+                
+                // 🔧 PRODUCTION: Enhanced memory management - more aggressive cleanup
+                if (this.processedMessages.size > this.MAX_PROCESSED_MESSAGES) {
+                  // Remove the oldest 25% of messages to prevent frequent cleanups
+                  const oldestMessages = Array.from(this.processedMessages).slice(0, Math.floor(this.MAX_PROCESSED_MESSAGES * 0.25));
+                  oldestMessages.forEach(id => this.processedMessages.delete(id));
+                  
+                  if (!this.isProduction) {
+                    console.log(`🧹 Cleaned up ${oldestMessages.length} old processed messages (${this.processedMessages.size} remaining)`);
+                  }
                 }
               }
 
@@ -1130,16 +1142,37 @@ export class DStealthAgent {
             return; // Don't restart for DB encryption errors during normal operation
           }
           
-          // 🔧 Enhanced: Only restart stream for severe errors
+          // 🔧 PRODUCTION: Circuit breaker for stream restarts - prevent excessive restarts
           if (!this.isShuttingDown) {
-            console.log('🔄 Attempting to recover message stream...');
-            setTimeout(() => {
-              if (!this.isShuttingDown) {
-                this.startListening().catch(restartError => {
-                  console.error('❌ Failed to restart message listener:', restartError);
-                });
+            // Check circuit breaker before attempting restart
+            const now = Date.now();
+            const timeSinceLastRestart = now - this.lastStreamRestart;
+            
+            if (timeSinceLastRestart < 60 * 60 * 1000) { // Within 1 hour
+              if (this.streamRestartCount >= this.MAX_STREAM_RESTARTS_PER_HOUR) {
+                console.log('🚨 Circuit breaker: Too many stream restarts in last hour - entering backoff mode');
+                console.log(`🕒 Will retry stream restart in 60 minutes (${this.streamRestartCount} restarts in last hour)`);
+                
+                // Schedule restart after cool-down period
+                setTimeout(() => {
+                  if (!this.isShuttingDown) {
+                    console.log('🔄 Circuit breaker cool-down complete - allowing stream restart');
+                    this.streamRestartCount = 0; // Reset counter after cool-down
+                    this.attemptStreamRestart();
+                  }
+                }, 60 * 60 * 1000); // 60 minutes cool-down
+                
+                return; // Skip immediate restart
               }
-            }, 5000);
+            } else {
+              this.streamRestartCount = 0; // Reset counter after 1 hour
+            }
+            
+            this.streamRestartCount++;
+            this.lastStreamRestart = now;
+            
+            console.log(`🔄 Attempting to recover message stream (restart ${this.streamRestartCount}/${this.MAX_STREAM_RESTARTS_PER_HOUR})...`);
+            this.attemptStreamRestart();
           }
         }
       };
@@ -1157,10 +1190,10 @@ export class DStealthAgent {
           hasReceivedNewMessages = true; // Prevent spam
         }
         
-        if (timeSinceLastMessage > 300000) { // 5 minutes
-          console.log('⚠️ No messages received in 5 minutes - stream may be stalled');
+        if (timeSinceLastMessage > 15 * 60 * 1000) { // INCREASED: 15 minutes instead of 5
+          console.log('⚠️ No messages received in 15 minutes - stream may be stalled');
         }
-      }, 60000);
+      }, 5 * 60 * 1000); // INCREASED: Check every 5 minutes instead of 1 minute
 
       // Cleanup on shutdown
       if (this.isShuttingDown) {
@@ -2510,7 +2543,7 @@ Type **/help** for all commands!`;
 🏠 **Stealth Address**: ${userData.stealthAddress}
 
 **🔓 All Features Unlocked:**
-💳 **Payment Links**: "create payment link for $5"
+�� **Payment Links**: "create payment link for $5"
 🔍 **Advanced Scanning**: /scan <address>  
 📊 **Your Links**: /links
 💰 **Balance Tracking**: /balance
@@ -2542,6 +2575,30 @@ Type **/help** for all commands!`;
     } else {
       // 🔧 Development: Use localhost
       return env.FRONTEND_URL || process.env.NEXT_PUBLIC_URL || 'http://localhost:3000';
+    }
+  }
+
+  // 🔧 PRODUCTION: Helper method for stream restart with delay
+  private attemptStreamRestart(): void {
+    setTimeout(() => {
+      if (!this.isShuttingDown) {
+        this.startListening().catch(restartError => {
+          console.error('❌ Failed to restart message listener:', restartError);
+        });
+      }
+    }, 5000); // 5 second delay before restart
+  }
+
+  // 🔧 PRODUCTION: Environment-based logging helper
+  private logDebug(message: string, ...args: any[]): void {
+    if (!this.isProduction) {
+      console.log(message, ...args);
+    }
+  }
+
+  private logVerbose(message: string, ...args: any[]): void {
+    if (!this.isProduction) {
+      console.log(message, ...args);
     }
   }
 }
