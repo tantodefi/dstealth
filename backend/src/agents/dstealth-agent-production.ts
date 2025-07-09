@@ -11,24 +11,22 @@
  * Architecture: Uses XmtpAgentBase for clean separation of concerns
  */
 
-import { XmtpAgentBase, type ProcessedMessage, type XmtpAgentConfig, type StreamFailureCallback } from '../lib/xmtp-agent-base.js';
 import { agentDb } from '../lib/agent-database.js';
+import { daimoPayClient } from '../lib/daimo-pay.js';
+import { XmtpAgentBase, type XmtpAgentConfig, type ProcessedMessage, type StreamFailureCallback } from '../lib/xmtp-agent-base.js';
 import { createSigner } from '../helper.js';
 import { env } from '../config/env.js';
 import { Group } from '@xmtp/node-sdk';
-import { daimoPayClient } from '../lib/daimo-pay.js';
+import { 
+  ReactionCodec, 
+  type Reaction,
+  ContentTypeReaction
+} from '@xmtp/content-type-reaction';
 import {
   type ContentCodec,
   ContentTypeId,
   type EncodedContent,
 } from "@xmtp/content-type-primitives";
-
-// 🥷 NEW: Official XMTP Reaction Content Type
-import {
-  ContentTypeReaction,
-  type Reaction,
-  ReactionCodec,
-} from "@xmtp/content-type-reaction";
 
 // 🔧 NEW: Coinbase Wallet Content Type IDs
 export const ContentTypeActions = new ContentTypeId({
@@ -267,9 +265,23 @@ export class DStealthAgentProduction {
           const conversation = await client.conversations.getConversationById(message.conversationId);
           
           if (conversation) {
-            // XMTP v3 doesn't support reactions natively, send as simple message
-            await conversation.send("🥷");
-            console.log("🥷 Ninja reaction sent (simple message)");
+            // Create proper XMTP reaction content following official docs
+            const reaction: Reaction = {
+              reference: message.messageId,
+              action: "added",
+              content: "🥷",
+              schema: "unicode"
+            };
+            
+            // Send reaction as JSON string with XMTP content type metadata
+            const reactionMessage = JSON.stringify({
+              type: 'xmtp.org/reaction:1.0',
+              content: reaction,
+              fallback: `🥷`
+            });
+            
+            await conversation.send(reactionMessage);
+            console.log("🥷 Ninja reaction sent (proper XMTP reaction content type)");
           }
         }
       } catch (receiptError) {
@@ -459,7 +471,7 @@ export class DStealthAgentProduction {
    */
   private async handleFkeyStatusQuery(senderInboxId: string, isGroup: boolean): Promise<string> {
     try {
-      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+          const userData = await agentDb.getStealthDataByUser(senderInboxId);
       
       if (!userData?.fkeyId) {
         return `🔍 **No fkey.id Set**
@@ -1104,7 +1116,7 @@ Please re-verify: \`/set ${userData.fkeyId}\``;
       
       // Generate Coinbase Wallet payment URL
       const coinbaseWalletUrl = this.generateCoinbaseWalletLink(currentAddress, amount, "USDC");
-      
+
       const addressChangeWarning = isAddressUpdated 
         ? `\n⚠️ **Address Updated**: Your stealth address was refreshed.`
         : '';
@@ -1653,18 +1665,39 @@ An error occurred while processing your button interaction. Please try again or 
 
       console.log(`🎯 Sending Coinbase Wallet Actions message for $${amount} to ${fkeyId}`);
 
-      // Send Actions content as structured message with proper Coinbase Wallet metadata
-      const actionsMessage = `💳 **Interactive Payment Options for $${amount} USDC**
+      // Send Actions content as properly formatted JSON for Coinbase Wallet
+      const actionsContent: ActionsContent = {
+        id: `payment_actions_${Date.now()}`,
+        description: `💳 Interactive Payment Options for $${amount} USDC`,
+        actions: [
+          {
+            id: "coinbase_wallet_payment",
+            label: `💼 Pay $${amount} via Coinbase Wallet`,
+            style: "primary"
+          },
+          {
+            id: "payment_link_help", 
+            label: "❓ How do payment links work?",
+            style: "secondary"
+          },
+          {
+            id: "setup_fkey",
+            label: "🔧 Set up your own fkey.id",
+            style: "secondary"
+          }
+        ],
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
+      };
 
-🔗 **Coinbase Wallet Payment**: ${coinbaseWalletUrl}
-
-**Actions:**
-• [💼 Pay $${amount} via Coinbase Wallet](${coinbaseWalletUrl})
-• [❓ Help](${this.DSTEALTH_APP_URL})
-• [🔧 Setup Guide](${this.FLUIDKEY_REFERRAL_URL})
-
-**Recipient**: ${fkeyId}.fkey.id
-**Features**: 🥷 Anonymous sender, ⚡ Direct payment, 🧾 ZK receipts`;
+      // Send as JSON string with content type metadata that Coinbase Wallet can interpret
+      const actionsMessage = JSON.stringify({
+        type: 'coinbase.com/actions:1.0',
+        content: actionsContent,
+        metadata: {
+          coinbaseWalletUrl,
+          fallback: `💳 Alternative: ${coinbaseWalletUrl}`
+        }
+      });
       
       await conversation.send(actionsMessage);
       
