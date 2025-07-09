@@ -305,6 +305,23 @@ export class DStealthAgentProduction {
       console.log(`📋 Message properties:`, Object.keys(message));
       console.log(`📋 Message conversation ID:`, message.conversationId);
       
+      // 🔧 DEBUG: Log content type information
+      if ((message as any).contentType) {
+        const contentType = (message as any).contentType;
+        console.log(`📋 Message contentType:`, contentType);
+        console.log(`📋 ContentType authority: ${contentType.authorityId}`);
+        console.log(`📋 ContentType typeId: ${contentType.typeId}`);
+        console.log(`📋 ContentType version: ${contentType.versionMajor}.${contentType.versionMinor}`);
+        
+        // Check if this is an Intent content type
+        if (contentType.authorityId === 'coinbase.com' && contentType.typeId === 'intent') {
+          console.log(`🎯 INTENT CONTENT TYPE DETECTED!`);
+          console.log(`🎯 Intent message content:`, messageContent);
+        }
+      } else {
+        console.log(`📋 No contentType property found on message`);
+      }
+      
       // 🔧 DEBUG: Log all message content to detect Intent messages
       if (typeof messageContent === 'object' && messageContent !== null) {
         console.log(`🔍 Object content received:`, JSON.stringify(messageContent, null, 2));
@@ -328,6 +345,15 @@ export class DStealthAgentProduction {
           console.log(`🎯 intent: ${(messageContent as any).intent}`);
         }
       }
+      
+      // 🔧 DEBUG: Log EVERY message to see what's being received
+      console.log(`📨 RAW MESSAGE DEBUG:`, {
+        content: messageContent,
+        type: typeof messageContent,
+        isString: typeof messageContent === 'string',
+        isObject: typeof messageContent === 'object',
+        hasContent: !!messageContent
+      });
 
       // Handle Intent content type from Coinbase Wallet button interactions
       if (this.isIntentContent(messageContent)) {
