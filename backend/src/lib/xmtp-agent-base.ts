@@ -131,11 +131,20 @@ export class XmtpAgentBase {
       // 🔧 NEW v3.0.0+: Check inbox state before creating client
       await this.checkInboxState(agentAddress);
 
+      // Log codec registration
+      if (this.config.codecs && this.config.codecs.length > 0) {
+        console.log(`🔧 Registering ${this.config.codecs.length} content type codecs with XMTP client`);
+        this.config.codecs.forEach(codec => {
+          console.log(`   - ${codec.contentType.authorityId}/${codec.contentType.typeId}:${codec.contentType.versionMajor}.${codec.contentType.versionMinor}`);
+        });
+      }
+
       this.client = await Client.create(signer, {
         dbEncryptionKey,
         env: this.config.env as XmtpEnv,
         dbPath: this.config.dbPath,
-      });
+        codecs: this.config.codecs || [], // Pass codecs to the XMTP client
+      }) as Client;
 
       console.log(`📧 Agent Address: ${agentAddress}`);
       console.log(`🆔 Agent Inbox ID: ${this.client.inboxId}`);

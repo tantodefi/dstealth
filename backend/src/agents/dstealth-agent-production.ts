@@ -240,7 +240,7 @@ export class DStealthAgentProduction {
       const identifier = await Promise.resolve(signer.getIdentifier());
       this.agentAddress = identifier.identifier;
 
-      console.log("🔧 Content type codecs registered for reactions and actions");
+      console.log("🔧 Content type codecs passed to XmtpAgentBase (will be registered with XMTP client)");
       console.log("✅ Production dStealth Agent initialized successfully");
       console.log(`📬 Agent Address: ${this.agentAddress}`);
       console.log(`📬 Agent Inbox ID: ${agentClient.inboxId}`);
@@ -1153,9 +1153,6 @@ Share this link to receive payments!`;
       // 🔧 NEW: Send Coinbase Wallet Actions as separate message
       await this.sendActionsMessage(conversationId, amount, currentData.fkeyId, coinbaseWalletUrl);
 
-      // 🔧 NEW: Send dstealth.xyz link as separate message for metadata loading
-      await this.sendMessage(conversationId, this.DSTEALTH_APP_URL);
-
       return daimoMessage;
 
     } catch (error) {
@@ -1869,7 +1866,8 @@ Choose an action:
 • 🔧 Set up fkey.id (type "/set username")
 • ℹ️ More info (type "/help")
 
-**Quick Start:** Get FluidKey at ${this.FLUIDKEY_REFERRAL_URL}`;
+**Quick Start:** Get FluidKey at ${this.FLUIDKEY_REFERRAL_URL}
+**Complete Setup:** ${this.DSTEALTH_APP_URL}`;
 
         await userConversation.send(fallbackText);
         console.log("✅ Help Actions sent as formatted text (fallback)");
@@ -1954,7 +1952,8 @@ Choose an action:
 • 💳 Create payment link (type "create payment link for $X")
 • 🔧 Set up fkey.id (type "/set username")
 
-**Need help?** Type "/help" for more options!`;
+**Need help?** Type "/help" for more options!
+**Complete Setup:** ${this.DSTEALTH_APP_URL}`;
 
         await userConversation.send(fallbackText);
         console.log("✅ Actions Menu sent as formatted text (fallback)");
