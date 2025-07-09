@@ -4272,6 +4272,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@xmtp/content-type-transaction-reference@npm:^2.0.2":
+  version: 2.0.2
+  resolution: "@xmtp/content-type-transaction-reference@npm:2.0.2"
+  dependencies:
+    "@xmtp/content-type-primitives": "npm:^2.0.2"
+  checksum: 10/37437069fe47812647f856f871d83d95e62a35dd297f30578a3857dc90575284dad56ad3d734eeb1fe3599aa43512c2ae9e492b41404c492bdd70f9e7d03f734
+  languageName: node
+  linkType: hard
+
+"@xmtp/content-type-wallet-send-calls@npm:^2.0.0":
+  version: 2.0.0
+  resolution: "@xmtp/content-type-wallet-send-calls@npm:2.0.0"
+  dependencies:
+    "@xmtp/content-type-primitives": "npm:^2.0.2"
+  checksum: 10/95a6688873f1aae44d7675a06a758f4b85157abaa14dedbb4ca3c75205c642064167cb2b7d9d0f9286b5cacc5c34c2afbae8fce0cce094c6154f943062028b3b
+  languageName: node
+  linkType: hard
+
 "@xmtp/node-bindings@npm:1.2.7":
   version: 1.2.7
   resolution: "@xmtp/node-bindings@npm:1.2.7"
@@ -9274,7 +9292,10 @@ __metadata:
     "@typescript-eslint/eslint-plugin": "npm:^6.15.0"
     "@typescript-eslint/parser": "npm:^6.15.0"
     "@upstash/redis": "npm:^1.35.0"
+    "@xmtp/content-type-primitives": "npm:^2.0.2"
     "@xmtp/content-type-reaction": "npm:^2.0.2"
+    "@xmtp/content-type-transaction-reference": "npm:^2.0.2"
+    "@xmtp/content-type-wallet-send-calls": "npm:^2.0.0"
     "@xmtp/node-sdk": "npm:^3.1.1"
     axios: "npm:^1.9.0"
     cors: "npm:^2.8.5"

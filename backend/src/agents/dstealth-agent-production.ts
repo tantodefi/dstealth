@@ -241,6 +241,8 @@ export class DStealthAgentProduction {
       this.agentAddress = identifier.identifier;
 
       console.log("🔧 Content type codecs passed to XmtpAgentBase (will be registered with XMTP client)");
+      console.log("🔧 ContentTypeActions ID:", ContentTypeActions.authorityId + "/" + ContentTypeActions.typeId + ":" + ContentTypeActions.versionMajor + "." + ContentTypeActions.versionMinor);
+      console.log("🔧 ContentTypeIntent ID:", ContentTypeIntent.authorityId + "/" + ContentTypeIntent.typeId + ":" + ContentTypeIntent.versionMajor + "." + ContentTypeIntent.versionMinor);
       console.log("✅ Production dStealth Agent initialized successfully");
       console.log(`📬 Agent Address: ${this.agentAddress}`);
       console.log(`📬 Agent Inbox ID: ${agentClient.inboxId}`);
@@ -300,16 +302,30 @@ export class DStealthAgentProduction {
       
       console.log(`💬 Processing message from ${senderInboxId}`);
       console.log(`📋 Content type: ${typeof messageContent}`);
+      console.log(`📋 Message properties:`, Object.keys(message));
+      console.log(`📋 Message conversation ID:`, message.conversationId);
       
       // 🔧 DEBUG: Log all message content to detect Intent messages
       if (typeof messageContent === 'object' && messageContent !== null) {
         console.log(`🔍 Object content received:`, JSON.stringify(messageContent, null, 2));
+        
+        // Check for ANY object properties that might indicate an Intent
+        const keys = Object.keys(messageContent);
+        console.log(`🔍 Object keys: [${keys.join(', ')}]`);
         
         // Check if this looks like an Intent message
         if (messageContent && typeof messageContent === 'object' && 'actionId' in messageContent) {
           console.log(`🎯 Potential Intent message detected!`);
           console.log(`🎯 ActionId: ${(messageContent as any).actionId}`);
           console.log(`🎯 Id: ${(messageContent as any).id}`);
+        }
+        
+        // Check for other potential Intent patterns
+        if ('id' in messageContent || 'action' in messageContent || 'intent' in messageContent) {
+          console.log(`🎯 Alternative Intent pattern detected!`);
+          console.log(`🎯 id: ${(messageContent as any).id}`);
+          console.log(`🎯 action: ${(messageContent as any).action}`);
+          console.log(`🎯 intent: ${(messageContent as any).intent}`);
         }
       }
 
@@ -377,12 +393,25 @@ export class DStealthAgentProduction {
    * 🔧 NEW: Check if message content is Intent content type
    */
   private isIntentContent(content: any): content is IntentContent {
-    return content && 
+    console.log(`🔍 Checking if content is Intent:`, {
+      exists: !!content,
+      type: typeof content,
+      isObject: typeof content === 'object',
+      hasId: content && 'id' in content,
+      hasActionId: content && 'actionId' in content,
+      idType: content && typeof content.id,
+      actionIdType: content && typeof content.actionId,
+    });
+    
+    const result = content && 
            typeof content === 'object' && 
            'id' in content && 
            'actionId' in content &&
            typeof content.id === 'string' &&
            typeof content.actionId === 'string';
+           
+    console.log(`🔍 Intent check result: ${result}`);
+    return result;
   }
 
   /**
@@ -433,7 +462,7 @@ export class DStealthAgentProduction {
       } else {
         // In DMs: Always process
         console.log("💬 DM - will process");
-        return true;
+          return true;
       }
     } catch (error) {
       console.error("❌ Error checking if message should be processed:", error);
