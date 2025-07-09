@@ -50,7 +50,6 @@ interface Action {
   imageUrl?: string;
   style?: 'primary' | 'secondary' | 'danger';
   expiresAt?: string;
-  url?: string;
 }
 
 interface ActionsContent {
@@ -305,6 +304,13 @@ export class DStealthAgentProduction {
       // 🔧 DEBUG: Log all message content to detect Intent messages
       if (typeof messageContent === 'object' && messageContent !== null) {
         console.log(`🔍 Object content received:`, JSON.stringify(messageContent, null, 2));
+        
+        // Check if this looks like an Intent message
+        if (messageContent && typeof messageContent === 'object' && 'actionId' in messageContent) {
+          console.log(`🎯 Potential Intent message detected!`);
+          console.log(`🎯 ActionId: ${(messageContent as any).actionId}`);
+          console.log(`🎯 Id: ${(messageContent as any).id}`);
+        }
       }
 
       // Handle Intent content type from Coinbase Wallet button interactions
@@ -1880,6 +1886,8 @@ Click the Coinbase Wallet link above to complete payment!`;
 
       try {
         console.log("🎯 Help Actions (no URLs, native intent handling)");
+        console.log("🎯 Actions Content:", JSON.stringify(actionsContent, null, 2));
+        console.log("🎯 ContentTypeActions:", JSON.stringify(ContentTypeActions, null, 2));
         await (userConversation as any).send(actionsContent, ContentTypeActions);
         console.log("✅ Help Actions sent (proper content type)");
       } catch (actionsError) {
@@ -1969,6 +1977,7 @@ Choose an action:
 
       try {
         console.log("🎯 Actions Menu (no URLs, native intent handling)");
+        console.log("🎯 Actions Content:", JSON.stringify(actionsContent, null, 2));
         await (userConversation as any).send(actionsContent, ContentTypeActions);
         console.log("✅ Actions Menu sent (proper content type)");
       } catch (actionsError) {
