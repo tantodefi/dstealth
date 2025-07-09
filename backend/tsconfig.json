@@ -7,7 +7,7 @@
     "declarationMap": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": false,
-    "lib": ["ESNext"],
+    "lib": ["ESNext", "DOM"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": false,
@@ -17,7 +17,8 @@
     "sourceMap": true,
     "strict": true,
     "esModuleInterop": true,
-    "target": "ESNext",
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2022",
     "types": ["node"],
     "paths": {
       "@helpers/client": ["./helpers/client.ts"],
@@ -25,5 +26,6 @@
       "@helpers/usdc": ["./helpers/usdc.ts"]
     }
   },
-  "include": ["**/*.ts"]
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

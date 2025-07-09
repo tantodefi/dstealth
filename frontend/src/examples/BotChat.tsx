@@ -26,6 +26,7 @@ export default function BotChat() {
   const [agentAddress, setAgentAddress] = useState<string | null>(null);
   const [agentInfo, setAgentInfo] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [agentStatus, setAgentStatus] = useState<'idle' | 'loading' | 'error' | 'ready'>('idle');
 
   // Use ref to track if stream is already started to prevent infinite loops
   const streamStartedRef = useRef(false);
@@ -41,6 +42,9 @@ export default function BotChat() {
     if (!client) return;
     
     try {
+      setAgentStatus('loading');
+      setError(null);
+
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
       console.log('Fetching agent info from:', `${backendUrl}/api/agent/info`);
       
@@ -53,22 +57,86 @@ export default function BotChat() {
       const data = await response.json();
       
       if (data.success && data.agent) {
+        // 🔧 CRITICAL FIX: Better handling of initialization states
+        if (data.agent.fallbackMode || 
+            data.agent.status === 'initializing' || 
+            data.agent.status === 'configuring' ||
+            data.agent.status === 'recovery' ||
+            data.agent.status === 'error' ||
+            data.agent.address === '0x0000000000000000000000000000000000000000') {
+          
+          console.warn('⚠️ Agent is not ready:', data.agent.status);
+          
+          // 🔧 NEW: Smarter retry logic based on agent status
+          let retryDelay = 10000; // Default 10s
+          let shouldRetry = true;
+          
+          if (data.agent.status === 'configuring') {
+            // Agent is actively configuring - retry sooner
+            retryDelay = 5000;
+            setError(`Agent is configuring (${data.agent.initializationStatus?.expectedReadyTime ? 'ready in ~30s' : 'almost ready'})`);
+          } else if (data.agent.status === 'recovery') {
+            // Agent failed but is retrying - be more patient
+            retryDelay = 15000;
+            setError('Agent initialization failed, auto-recovery in progress');
+          } else if (data.agent.status === 'initializing') {
+            // Initial startup - be patient
+            retryDelay = 8000;
+            setError('Agent is starting up (this may take 30-60 seconds)');
+          } else {
+            setError(`Agent status: ${data.agent.status}. ${data.agent.error || 'Please wait.'}`);
+          }
+          
+          setAgentAddress(null);
+          setAgentInfo(null);
+          
+          // 🔧 NEW: Intelligent retry with exponential backoff
+          if (shouldRetry) {
+            setTimeout(() => {
+              if (!agentAddress) { // Only retry if still not ready
+                console.log(`🔄 Retrying agent info fetch (${data.agent.status})...`);
+                fetchAgentInfo();
+              }
+            }, retryDelay);
+          }
+          
+          return;
+        }
+        
         setAgentAddress(data.agent.address);
         setAgentInfo(data.agent);
+        setError(null); // Clear any previous errors
         console.log('✅ dStealth agent info loaded:', data.agent);
       } else {
         console.warn('⚠️ Agent info request succeeded but no agent data received');
+        setError('Agent data not available');
       }
     } catch (error) {
       console.error('❌ Error fetching agent info:', error);
+      setError(`Failed to connect to agent: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      
+      // 🔧 NEW: Retry on network errors with exponential backoff
+      setTimeout(() => {
+        if (!agentAddress) {
+          console.log('🔄 Retrying after network error...');
+          fetchAgentInfo();
+        }
+      }, 15000);
     }
-  }, [client]);
+  }, [client, agentAddress]);
 
   // Initialize the conversation with the backend agent
   const initializeConversation = useCallback(async () => {
     if (!client || !agentAddress || isConnecting) return;
 
+    // Additional validation for agent address
+    if (agentAddress === '0x0000000000000000000000000000000000000000') {
+      setError('Invalid agent address. Please refresh and try again.');
+      return;
+    }
+
     setIsConnecting(true);
+    setError(null); // Clear any previous errors
     
     try {
       console.log("🚀 Initializing conversation with dStealth agent:", agentAddress);
@@ -92,6 +160,7 @@ export default function BotChat() {
       setIsConnecting(false);
     } catch (error) {
       console.error("❌ Error initializing dStealth agent conversation:", error);
+      setError(`Failed to initialize conversation: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setIsConnecting(false);
     }
   }, [client, agentAddress, isConnecting]);
@@ -150,14 +219,53 @@ export default function BotChat() {
     }
   }, [client, botConversation]);
 
-  // Fetch agent info on component mount
+  // Helper function to check if agent address is valid
+  const isValidAgentAddress = (address: string | null): boolean => {
+    return address !== null && 
+           address !== '0x0000000000000000000000000000000000000000' && 
+           address.length === 42;
+  };
+
+  // Load agent info when client is ready
   useEffect(() => {
-    fetchAgentInfo();
-  }, [fetchAgentInfo]);
+    if (client && !agentAddress) {
+      // 🔧 CRITICAL FIX: Add startup delay to prevent early requests during backend initialization
+      const startupDelay = 3000; // Wait 3 seconds after client is ready
+      console.log(`⏳ Waiting ${startupDelay/1000}s before fetching agent info to allow backend initialization...`);
+      
+      const timer = setTimeout(() => {
+        console.log('🚀 Starting agent info fetch after startup delay');
+        fetchAgentInfo();
+      }, startupDelay);
+
+      return () => clearTimeout(timer);
+    }
+  }, [client, agentAddress, fetchAgentInfo]);
+
+  // Periodic retry for agent info when not ready
+  useEffect(() => {
+    let retryInterval: NodeJS.Timeout;
+
+    // Only retry if we have a client but no valid agent address and there's an error
+    if (client && !isValidAgentAddress(agentAddress) && error) {
+      console.log('⏰ Setting up periodic retry for agent info...');
+      
+      retryInterval = setInterval(() => {
+        console.log('🔄 Retrying agent info fetch...');
+        fetchAgentInfo();
+      }, 10000); // Retry every 10 seconds
+    }
+
+    return () => {
+      if (retryInterval) {
+        clearInterval(retryInterval);
+      }
+    };
+  }, [client, agentAddress, error, fetchAgentInfo]);
 
   // Initialize conversation when client and agent address are available
   useEffect(() => {
-    if (agentAddress && client && !botConversation && !isConnecting) {
+    if (isValidAgentAddress(agentAddress) && client && !botConversation && !isConnecting) {
       initializeConversation();
     }
   }, [agentAddress, client, botConversation, isConnecting, initializeConversation]);
@@ -236,7 +344,7 @@ export default function BotChat() {
           <p className="text-yellow-500 text-xs mt-2">
             Initializing XMTP client...
           </p>
-        ) : !agentAddress ? (
+        ) : !isValidAgentAddress(agentAddress) ? (
           <p className="text-yellow-500 text-xs mt-2">
             Loading agent information...
           </p>
@@ -247,6 +355,8 @@ export default function BotChat() {
             <button
               onClick={() => {
                 setError(null);
+                setAgentAddress(null);
+                setAgentInfo(null);
                 fetchAgentInfo();
               }}
               className="mt-2 px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs"

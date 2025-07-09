@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { getRandomValues } from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { IdentifierKind, type Signer } from "@xmtp/node-sdk";
 import { fromString, toString } from "uint8arrays";
 import { createWalletClient, http, toBytes } from "viem";
@@ -17,7 +17,7 @@ export const defaultInboxes = [
 export interface User {
   key: `0x${string}`;
   account: ReturnType<typeof privateKeyToAccount>;
-  wallet: ReturnType<typeof createWalletClient>;
+  wallet: any; // Simplified to avoid infinite type instantiation
 }
 
 export const createUser = (key: string): User => {
@@ -54,14 +54,20 @@ export const createSigner = (key: string): Signer => {
 
 export const getDbPath = (env: string) => {
   // Properly detect different deployment platforms
-  const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true' || process.env.VERCEL_ENV;
-  const isRender = process.env.RENDER === 'true' || process.env.RENDER_SERVICE_ID;
+  const isVercel =
+    process.env.VERCEL === "1" ||
+    process.env.VERCEL === "true" ||
+    process.env.VERCEL_ENV;
+  const isRender =
+    process.env.RENDER === "true" || process.env.RENDER_SERVICE_ID;
   const isRailway = process.env.RAILWAY_ENVIRONMENT_NAME;
-  
-  console.log(`🔧 Platform Detection: Vercel=${isVercel}, Render=${isRender}, Railway=${isRailway}`);
-  
+
+  console.log(
+    `🔧 Platform Detection: Vercel=${isVercel}, Render=${isRender}, Railway=${isRailway}`,
+  );
+
   let volumePath: string;
-  
+
   if (isVercel) {
     // Vercel: Use ephemeral /tmp (no persistent storage available)
     volumePath = "/tmp/xmtp";
@@ -79,7 +85,7 @@ export const getDbPath = (env: string) => {
     volumePath = ".data/xmtp";
     console.log("💻 Using local development storage");
   }
-  
+
   // Create database directory if it doesn't exist
   try {
     if (!fs.existsSync(volumePath)) {
@@ -88,7 +94,7 @@ export const getDbPath = (env: string) => {
     }
   } catch (error) {
     console.warn(`⚠️ Could not create directory ${volumePath}:`, error);
-    
+
     // Fallback logic based on platform
     if (isVercel) {
       // For Vercel, fallback to direct /tmp file
@@ -112,7 +118,7 @@ export const getDbPath = (env: string) => {
       }
     }
   }
-  
+
   const dbPath = `${volumePath}/${env}-xmtp.db3`;
   console.log(`📁 Using database path: ${dbPath}`);
   return dbPath;
@@ -133,7 +139,7 @@ export const getEncryptionKeyFromHex = (hex: string) => {
 export const resetXmtpDatabase = (env: string) => {
   const dbPath = getDbPath(env);
   console.log(`🗑️ Attempting to reset XMTP database at: ${dbPath}`);
-  
+
   try {
     if (fs.existsSync(dbPath)) {
       fs.unlinkSync(dbPath);

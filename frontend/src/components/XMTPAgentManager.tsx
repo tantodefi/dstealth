@@ -24,9 +24,18 @@ export default function XMTPAgentManager() {
     return "Act as a helpful privacy advisor focused on stealth addresses and anonymous payments. Guide users through creating stealth addresses, generating payment links, and understanding zk receipts for enhanced privacy.";
   });
 
+  // Load agent info on component mount
   useEffect(() => {
-    // Fetch agent info from backend on component mount
-    fetchAgentInfo();
+    // 🔧 CRITICAL FIX: Add startup delay to prevent early requests
+    const startupDelay = 5000; // Wait 5 seconds before first request (longer than BotChat)
+    console.log(`⏳ XMTPAgentManager waiting ${startupDelay/1000}s before fetching agent info...`);
+    
+    const timer = setTimeout(() => {
+      console.log('🚀 XMTPAgentManager starting agent info fetch after startup delay');
+      fetchAgentInfo();
+    }, startupDelay);
+
+    return () => clearTimeout(timer);
   }, []);
 
   // Save custom prompt to localStorage when it changes
@@ -59,6 +68,45 @@ export default function XMTPAgentManager() {
       const data = await response.json();
       
       if (data.success) {
+        // 🔧 CRITICAL FIX: Better handling of initialization states
+        if (data.agent.fallbackMode || 
+            data.agent.status === 'initializing' || 
+            data.agent.status === 'configuring' ||
+            data.agent.status === 'recovery' ||
+            data.agent.status === 'error' ||
+            data.agent.address === '0x0000000000000000000000000000000000000000') {
+          
+          console.warn('⚠️ Agent is not ready:', data.agent.status);
+          
+          // 🔧 NEW: Smarter retry logic
+          let retryDelay = 12000; // Default 12s for manager (less frequent than BotChat)
+          let errorMessage = `Agent is ${data.agent.status}`;
+          
+          if (data.agent.status === 'configuring') {
+            retryDelay = 8000;
+            errorMessage = 'Agent is configuring - almost ready!';
+          } else if (data.agent.status === 'recovery') {
+            retryDelay = 20000;
+            errorMessage = 'Agent initialization failed, auto-recovery in progress';
+          } else if (data.agent.status === 'initializing') {
+            retryDelay = 15000;
+            errorMessage = 'Agent is starting up (this may take 30-60 seconds)';
+          }
+          
+          setError(errorMessage);
+          setAgentStatus('error');
+          
+          // 🔧 NEW: Auto-retry with intelligent delays
+          setTimeout(() => {
+            if (agentStatus !== 'running') {
+              console.log(`🔄 Auto-retrying agent info fetch (${data.agent.status})...`);
+              fetchAgentInfo();
+            }
+          }, retryDelay);
+          
+          return;
+        }
+        
         setAgentInfo(data.agent);
         setAgentStatus('running');
         console.log('🥷 dStealth Agent info loaded successfully');
@@ -69,7 +117,21 @@ export default function XMTPAgentManager() {
       console.error('Failed to fetch agent info:', err);
       setError('Failed to connect to backend agent. Please check configuration.');
       setAgentStatus('error');
+      
+      // 🔧 NEW: Retry on network errors
+      setTimeout(() => {
+        if (agentStatus !== 'running') {
+          console.log('🔄 Retrying after network error...');
+          fetchAgentInfo();
+        }
+      }, 20000);
     }
+  };
+
+  // Manual refresh function
+  const handleRefresh = () => {
+    console.log('🔄 Manual agent info refresh requested');
+    fetchAgentInfo();
   };
 
   const copyToClipboard = async (text: string, field: string) => {
@@ -120,7 +182,7 @@ export default function XMTPAgentManager() {
         {/* Agent Controls */}
         <div className="flex gap-3">
           <button
-            onClick={fetchAgentInfo}
+            onClick={handleRefresh}
             disabled={agentStatus === 'loading'}
             className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
           >

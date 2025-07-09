@@ -4254,6 +4254,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@xmtp/content-type-reaction@npm:^2.0.2":
+  version: 2.0.2
+  resolution: "@xmtp/content-type-reaction@npm:2.0.2"
+  dependencies:
+    "@xmtp/content-type-primitives": "npm:^2.0.2"
+  checksum: 10/704e64c79ae44fa002265d74b0f19a423ad2f7164397caafe842cd868d122d89b2b083989394bad50186b1aaf9944f632aa35cbbd2af840e9498d64cd52ad4f0
+  languageName: node
+  linkType: hard
+
 "@xmtp/content-type-text@npm:^2.0.2":
   version: 2.0.2
   resolution: "@xmtp/content-type-text@npm:2.0.2"
@@ -4263,23 +4272,22 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@xmtp/node-bindings@npm:1.1.6":
-  version: 1.1.6
-  resolution: "@xmtp/node-bindings@npm:1.1.6"
-  checksum: 10/8eb5991da04a38fdde053d8f54d8cf2c03b0edfa30aded13e4c277e910cd95009ca48835e437f808624e19c8702d3171a010db05a25bf310c956f4681c14f90a
+"@xmtp/node-bindings@npm:1.2.7":
+  version: 1.2.7
+  resolution: "@xmtp/node-bindings@npm:1.2.7"
+  checksum: 10/b077e651c0dde2b3dbc1d259ca876fecf995bb984e39c4d644b94c87f4d0f6b8b743dfc0813f7a485f00936ba04e88cd66444bab94feadfc06927111991b865a
   languageName: node
   linkType: hard
 
-"@xmtp/node-sdk@npm:^2.0.6":
-  version: 2.0.6
-  resolution: "@xmtp/node-sdk@npm:2.0.6"
+"@xmtp/node-sdk@npm:^3.1.1":
+  version: 3.1.1
+  resolution: "@xmtp/node-sdk@npm:3.1.1"
   dependencies:
     "@xmtp/content-type-group-updated": "npm:^2.0.2"
     "@xmtp/content-type-primitives": "npm:^2.0.2"
     "@xmtp/content-type-text": "npm:^2.0.2"
-    "@xmtp/node-bindings": "npm:1.1.6"
-    "@xmtp/proto": "npm:^3.78.0"
-  checksum: 10/734ff15f764a356f2e06b7b44849bf53b45032c6207d73d1005ca05dbd9df8d5008935b65f6f9ea64fcd7c137ecb4c5dc8eaec9e0afd36936a54e60140612edb
+    "@xmtp/node-bindings": "npm:1.2.7"
+  checksum: 10/d262eec49e3ef79104bd15c13c89943c06cbf151a1997806710d14b06bb90fe4f3320856e1549e1e0ddcc9060e18d8caf807acd45138a3a9aad1fb77a9fd3ce1
   languageName: node
   linkType: hard
 
@@ -9266,7 +9274,8 @@ __metadata:
     "@typescript-eslint/eslint-plugin": "npm:^6.15.0"
     "@typescript-eslint/parser": "npm:^6.15.0"
     "@upstash/redis": "npm:^1.35.0"
-    "@xmtp/node-sdk": "npm:^2.0.6"
+    "@xmtp/content-type-reaction": "npm:^2.0.2"
+    "@xmtp/node-sdk": "npm:^3.1.1"
     axios: "npm:^1.9.0"
     cors: "npm:^2.8.5"
     dotenv: "npm:^16.3.1"
