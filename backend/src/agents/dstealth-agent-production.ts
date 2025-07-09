@@ -273,11 +273,10 @@ export class DStealthAgentProduction {
               schema: "unicode"
             };
             
-            // Send reaction as JSON string with XMTP content type metadata
+            // Send reaction as JSON string with proper XMTP content type metadata
             const reactionMessage = JSON.stringify({
               type: 'xmtp.org/reaction:1.0',
-              content: reaction,
-              fallback: `🥷`
+              content: reaction
             });
             
             await conversation.send(reactionMessage);
@@ -1665,7 +1664,7 @@ An error occurred while processing your button interaction. Please try again or 
 
       console.log(`🎯 Sending Coinbase Wallet Actions message for $${amount} to ${fkeyId}`);
 
-      // Send Actions content as properly formatted JSON for Coinbase Wallet
+      // Create Actions content for Coinbase Wallet
       const actionsContent: ActionsContent = {
         id: `payment_actions_${Date.now()}`,
         description: `💳 Interactive Payment Options for $${amount} USDC`,
@@ -1689,13 +1688,13 @@ An error occurred while processing your button interaction. Please try again or 
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
       };
 
-      // Send as JSON string with content type metadata that Coinbase Wallet can interpret
+      // Send Actions as JSON string with proper XMTP content type metadata
       const actionsMessage = JSON.stringify({
         type: 'coinbase.com/actions:1.0',
         content: actionsContent,
         metadata: {
           coinbaseWalletUrl,
-          fallback: `💳 Alternative: ${coinbaseWalletUrl}`
+          fallback: `💳 Pay $${amount} via Coinbase Wallet: ${coinbaseWalletUrl}`
         }
       });
       
