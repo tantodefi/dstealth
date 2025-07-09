@@ -50,6 +50,7 @@ interface Action {
   imageUrl?: string;
   style?: 'primary' | 'secondary' | 'danger';
   expiresAt?: string;
+  url?: string;
 }
 
 interface ActionsContent {
@@ -300,11 +301,17 @@ export class DStealthAgentProduction {
       
       console.log(`💬 Processing message from ${senderInboxId}`);
       console.log(`📋 Content type: ${typeof messageContent}`);
+      
+      // 🔧 DEBUG: Log all message content to detect Intent messages
+      if (typeof messageContent === 'object' && messageContent !== null) {
+        console.log(`🔍 Object content received:`, JSON.stringify(messageContent, null, 2));
+      }
 
       // Handle Intent content type from Coinbase Wallet button interactions
       if (this.isIntentContent(messageContent)) {
         const intent = messageContent as IntentContent;
-        console.log(`🎯 Processing Intent: ${intent.actionId}`);
+        console.log(`🎯 Processing Intent: ${intent.actionId} from user ${senderInboxId}`);
+        console.log(`🎯 Intent details:`, JSON.stringify(intent, null, 2));
         
         const response = await this.handleIntentMessage(intent, senderInboxId);
         return response;
@@ -392,57 +399,40 @@ export class DStealthAgentProduction {
         return false;
       }
 
-      const isGroup = conversation instanceof Group;
+      const isActualGroup = conversation instanceof Group;
       
-      if (isGroup) {
-        // 🔧 UPDATED: Group chat logic - more restrictive
+      if (isActualGroup) {
+        // 🔧 FIXED: Group chat logic - VERY restrictive - only @mentions
         
         // Always send welcome message if not sent yet
         if (!this.groupIntroductions.has(conversationId)) {
           console.log("👋 Sending group introduction");
+          this.groupIntroductions.add(conversationId); // Mark as sent immediately
           return true;
         }
 
-        // Check for @mentions
-        const hasMention = trimmed.includes('@dstealth') || 
-                          trimmed.includes('@dstealth.eth') ||
-                          trimmed.includes('@dstealth.base.eth');
+        // 🔧 STRICT: Only respond to explicit @mentions in groups
+        const hasExplicitMention = trimmed.includes('@dstealth') || 
+                                   trimmed.includes('@dstealth.eth') ||
+                                   trimmed.includes('@dstealth.base.eth');
         
-        if (hasMention) {
-          console.log("📢 Group message mentions @dstealth - will process");
+        if (hasExplicitMention) {
+          console.log("📢 Group message has explicit @dstealth mention - will process");
           return true;
         }
 
-        // Check for payment link requests and other trigger phrases
-        const hasPaymentTrigger = (trimmed.includes('create') && trimmed.includes('payment') && trimmed.includes('link')) ||
-                                  (trimmed.includes('payment') && trimmed.includes('link')) ||
-                                  (trimmed.includes('create') && trimmed.includes('link'));
-        
-        if (hasPaymentTrigger) {
-          const userData = await agentDb.getStealthDataByUser(senderInboxId);
-          if (userData?.fkeyId) {
-            console.log("💰 Group payment request from user with fkey.id - will process");
-            return true;
-          } else {
-            console.log("🔒 Group payment request from user without fkey.id - will ask to DM");
-            return true; // Process to send DM request message
-          }
-        }
-
-        // TODO: Check if message is a reply to the agent (requires message metadata)
-        // For now, we can't easily detect replies in groups without additional XMTP metadata
-        
-        console.log("🔇 Group message doesn't meet criteria - ignoring");
+        // 🔧 REMOVED: Payment trigger logic for groups - only @mentions allowed
+        console.log("🔇 Group message lacks @mention - ignoring");
         return false;
       } else {
-        // In DMs: Always process (will handle fkey.id requirement in response)
+        // In DMs: Always process
         console.log("💬 DM - will process");
-          return true;
-        }
+        return true;
+      }
     } catch (error) {
       console.error("❌ Error checking if message should be processed:", error);
-      // Default to processing if we can't determine (safer)
-          return true;
+      // Default to NOT processing in groups if we can't determine
+      return !isGroup;
     }
   }
 
@@ -1543,7 +1533,7 @@ Failed to lookup ${cleanFkeyId}.fkey.id. Please try again.
   }
 
   /**
-   * 🔧 NEW: Handle Intent content type messages from Coinbase Wallet button interactions
+   * �� NEW: Handle Intent messages from action buttons
    */
   private async handleIntentMessage(
     intent: IntentContent,
@@ -1553,13 +1543,9 @@ Failed to lookup ${cleanFkeyId}.fkey.id. Please try again.
       const actionId = intent.actionId;
       const metadata = intent.metadata;
 
-      console.log(`🎯 Handling intent action: ${actionId} with metadata:`, metadata);
+      console.log(`🎯 Handling Intent Action: ${actionId}`);
 
       switch (actionId) {
-        case 'show-actions':
-          await this.sendActionsMenu(senderInboxId);
-          return ""; // Empty string since we're sending actions
-
         case 'check-balance':
           return await this.handleBalanceCheck(senderInboxId);
 
@@ -1573,28 +1559,32 @@ To create a payment link, specify the amount:
 • "create payment link for $100"
 • "create payment link for $500"
 
-**Note:** You'll need a fkey.id set up first. Type "/set yourUsername" if you haven't done this yet.
-
-**Get FluidKey:** ${this.FLUIDKEY_REFERRAL_URL}`;
+**Setup Required:**
+🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
+📝 **Set fkey.id**: \`/set yourUsername\`
+🌐 **Complete Setup**: ${this.DSTEALTH_APP_URL}`;
 
         case 'setup-fkey':
+        case 'get-fluidkey':
           return `🚀 **Set Up Your fkey.id**
 
-**Step 1**: Get FluidKey (free privacy wallet)
+**Step 1**: 🔑 **Get FluidKey** (free privacy wallet)
 ${this.FLUIDKEY_REFERRAL_URL}
 
-**Step 2**: Tell me your username
-Example: "tantodefi.fkey.id" or "/set tantodefi"
+**Step 2**: 📝 **Tell me your username**
+Example: \`/set tantodefi\` or \`my fkey is tantodefi\`
 
-**Step 3**: Complete setup
+**Step 3**: 🌐 **Complete setup at dStealth**
 ${this.DSTEALTH_APP_URL}
 
 **Benefits:**
 • 🥷 Anonymous payment links
-• 🧾 ZK receipts for transactions
-• 🎯 Privacy rewards & points`;
+• 🧾 ZK receipts for transactions  
+• 🎯 Privacy rewards & points
+• 🔒 Stealth address protection`;
 
         case 'more-info':
+        case 'show-actions':
           return this.getHelpMessage();
 
         case 'send-small':
@@ -1605,7 +1595,7 @@ ${this.DSTEALTH_APP_URL}
           }
           return `❌ **Error Creating Payment Link**
 
-Could not find conversation to send payment link. Please try again.`;
+Could not find conversation. Please try: "create payment link for $0.005"`;
 
         case 'send-large':
           // Create payment link for $1
@@ -1615,63 +1605,81 @@ Could not find conversation to send payment link. Please try again.`;
           }
           return `❌ **Error Creating Payment Link**
 
-Could not find conversation to send payment link. Please try again.`;
+Could not find conversation. Please try: "create payment link for $1"`;
 
         case 'coinbase_wallet_payment':
-          const amount = metadata?.amount as string;
-          if (!amount) {
-            return `❌ **Invalid Payment Amount**
+          return `💼 **Coinbase Wallet Payment**
 
-Could not process your Coinbase Wallet payment. Please specify an amount.`;
-          }
-          
-          // Get user data for payment processing
-          const userData = await agentDb.getStealthDataByUser(senderInboxId);
-          if (!userData || !userData.fkeyId) {
-            return `🔒 **Setup Required**
+Your payment link is ready! The Coinbase Wallet button should open the payment directly.
 
-Please set your fkey.id first to use payment features:
-1. Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
-2. Set fkey.id: \`/set yourUsername\`
-3. Complete setup: ${this.DSTEALTH_APP_URL}`;
-          }
+**If the button doesn't work:**
+• Look for the direct link in the previous message
+• Copy and paste the go.cb-w URL into Coinbase Wallet
+• Or visit: ${this.DSTEALTH_APP_URL}
 
-          // Generate Coinbase Wallet payment URL for the confirmed amount
-          const coinbaseWalletUrl = this.generateCoinbaseWalletLink(userData.stealthAddress || userData.fkeyId, amount, "USDC");
+**Need FluidKey?** ${this.FLUIDKEY_REFERRAL_URL}`;
 
-          return `✅ **Coinbase Wallet Payment Link Ready**
+        case 'copy_payment_link':
+          return `📋 **Payment Link Copied**
 
-**Amount**: $${amount} USDC
-**Recipient**: ${userData.fkeyId}.fkey.id
-**Payment URL**: ${coinbaseWalletUrl}
+Look for the go.cb-w URL in the previous message to copy it.
 
-🔐 **Privacy Features:**
-• Payment goes to your stealth address
-• Anonymous sender protection
-• ZK proof verification available
+**Alternative:** Visit ${this.DSTEALTH_APP_URL} to manage all your payment links.`;
 
-Click the link above to complete payment in Coinbase Wallet!`;
+        case 'view_dstealth':
+          return `👁️ **View on dStealth**
+
+Visit the dStealth mini-app: ${this.DSTEALTH_APP_URL}
+
+**Features:**
+• 📊 Dashboard with all payment links
+• 🧾 ZK receipt verification  
+• 📈 Privacy rewards tracking
+• 🔒 Stealth address management
+
+**Need FluidKey?** ${this.FLUIDKEY_REFERRAL_URL}`;
 
         case 'payment_link_help':
-          return this.getHelpMessage();
+          return `❓ **How Payment Links Work**
+
+1. 🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
+2. 📝 **Set fkey.id**: \`/set yourUsername\`
+3. 💳 **Create links**: "create payment link for $X"
+4. 🔗 **Share links**: Recipients pay to your stealth address
+5. 🧾 **ZK receipts**: Cryptographic proof of payment
+
+**Privacy Benefits:**
+• Anonymous payments
+• Stealth addresses  
+• ZK receipt verification
+• No direct wallet exposure
+
+**Complete Setup**: ${this.DSTEALTH_APP_URL}`;
 
         default:
-          return `🤖 **Intent Action: ${actionId}**
+          return `🤖 **Button Clicked: ${actionId}**
 
-I received your button interaction but this specific action isn't implemented yet.
+I received your button interaction! This action is being processed.
 
 **Available actions:**
-• Payment link generation
-• fkey.id setup
-• Balance checking
+• 💳 Create payment links
+• 🔧 Set up fkey.id  
+• 💰 Check balance
+• 🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
 
-Type "/help" to see available commands!`;
+**Complete Setup**: ${this.DSTEALTH_APP_URL}
+
+Type "/help" for all commands!`;
       }
     } catch (error) {
       console.error("Error handling intent message:", error);
-      return `❌ **Error Handling Intent**
+      return `❌ **Error Handling Button Action**
 
-An error occurred while processing your button interaction. Please try again or use text commands.`;
+Something went wrong processing your button click. Please try:
+• Type the command manually (e.g., "/balance")
+• Get help: "/help"
+• Setup: ${this.DSTEALTH_APP_URL}
+• FluidKey: ${this.FLUIDKEY_REFERRAL_URL}`;
     }
   }
 
@@ -1721,21 +1729,26 @@ An error occurred while processing your button interaction. Please try again or 
       // Create proper Actions content for Coinbase Wallet
       const actionsContent: ActionsContent = {
         id: `payment_actions_${Date.now()}`,
-        description: `💳 Interactive Payment Options for $${amount} USDC`,
+        description: `💳 Payment Options for $${amount} USDC to ${fkeyId}.fkey.id`,
         actions: [
           {
             id: "coinbase_wallet_payment",
-            label: `💼 Pay $${amount} via Coinbase Wallet`,
+            label: `💼 Pay $${amount} in Coinbase Wallet`,
             style: "primary"
           },
           {
-            id: "payment_link_help", 
-            label: "❓ How do payment links work?",
+            id: "copy_payment_link", 
+            label: "📋 Copy Payment Link",
             style: "secondary"
           },
           {
-            id: "setup_fkey",
-            label: "🔧 Set up your own fkey.id",
+            id: "view_dstealth",
+            label: "👁️ View on dStealth",
+            style: "secondary"
+          },
+          {
+            id: "get_fluidkey",
+            label: "🔑 Get FluidKey",
             style: "secondary"
           }
         ],
@@ -1746,26 +1759,37 @@ An error occurred while processing your button interaction. Please try again or 
         // Use proper Node SDK content type pattern (bypass type checking)
         await (conversation as any).send(actionsContent, ContentTypeActions);
         console.log("✅ Coinbase Wallet Actions sent (proper content type)");
+        
+        // 🔧 SEND ACTUAL LINKS as separate messages for accessibility
+        const linksMessage = `🔗 **Direct Links:**
+
+💼 **Coinbase Wallet**: ${coinbaseWalletUrl}
+🌐 **dStealth App**: ${this.DSTEALTH_APP_URL}  
+🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}`;
+
+        await conversation.send(linksMessage);
+        console.log("✅ Direct links sent as separate message");
+        
       } catch (actionsError) {
         console.error("⚠️ Failed to send Actions content type:", actionsError);
         
         // Fallback to formatted text if content type fails
-        const actionsText = `💳 **Interactive Payment Options for $${amount} USDC**
+        const actionsText = `💳 **Payment Options for $${amount} USDC**
 
 **Recipient**: ${fkeyId}.fkey.id
 
-🔗 **Coinbase Wallet Payment**: 
-${coinbaseWalletUrl}
+🔗 **Direct Links:**
+💼 **Coinbase Wallet**: ${coinbaseWalletUrl}
+🌐 **dStealth App**: ${this.DSTEALTH_APP_URL}
+🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
 
 **Quick Actions:**
-[💼] Pay $${amount} via Coinbase Wallet
-[❓] How do payment links work?
-[🔧] Set up your own fkey.id
+[💼] Pay $${amount} in Coinbase Wallet
+[📋] Copy Payment Link  
+[👁️] View on dStealth
+[🔑] Get FluidKey
 
-**Alternative Links:**
-• Coinbase Wallet: ${coinbaseWalletUrl}
-• Complete Setup: ${this.DSTEALTH_APP_URL}
-• Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}`;
+**Complete your privacy setup at dStealth.xyz!**`;
 
         await conversation.send(actionsText);
         console.log("✅ Actions sent as formatted text (fallback)");
@@ -1774,13 +1798,17 @@ ${coinbaseWalletUrl}
     } catch (error) {
       console.error("❌ Failed to send Coinbase Wallet Actions:", error);
       
-      // Fallback to regular markdown link if Actions fail
+      // Final fallback 
       try {
-        const fallbackMessage = `💼 **Alternative Payment Method**
+        const fallbackMessage = `💼 **Payment Link Ready**
 
 [💳 Pay $${amount} via Coinbase Wallet](${coinbaseWalletUrl})
 
-Click the link above to complete payment in Coinbase Wallet!`;
+**Setup Links:**
+• **dStealth App**: ${this.DSTEALTH_APP_URL}
+• **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
+
+Click the Coinbase Wallet link above to complete payment!`;
         
         await this.sendMessage(conversationId, fallbackMessage);
         console.log("✅ Sent fallback Coinbase Wallet link");
@@ -1825,32 +1853,33 @@ Click the link above to complete payment in Coinbase Wallet!`;
           {
             id: "show-actions",
             label: "🚀 Show me actions",
-            style: "primary",
+            style: "primary"
           },
           {
-            id: "check-balance",
+            id: "check-balance", 
             label: "💰 Check balance",
-            style: "primary",
+            style: "primary"
           },
           {
             id: "create-payment-link",
-            label: "💳 Create payment link",
-            style: "primary",
+            label: "💳 Create payment link", 
+            style: "primary"
           },
           {
             id: "setup-fkey",
             label: "🔧 Set up fkey.id",
-            style: "secondary",
+            style: "secondary"
           },
           {
-            id: "more-info",
-            label: "ℹ️ More info",
-            style: "secondary",
+            id: "get-fluidkey",
+            label: "🔑 Get FluidKey (referral)",
+            style: "secondary"
           }
         ]
       };
 
       try {
+        console.log("🎯 Help Actions (no URLs, native intent handling)");
         await (userConversation as any).send(actionsContent, ContentTypeActions);
         console.log("✅ Help Actions sent (proper content type)");
       } catch (actionsError) {
@@ -1864,10 +1893,11 @@ Choose an action:
 • 💰 Check balance (type "/balance")
 • 💳 Create payment link (type "create payment link for $X")
 • 🔧 Set up fkey.id (type "/set username")
-• ℹ️ More info (type "/help")
+• 🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
 
-**Quick Start:** Get FluidKey at ${this.FLUIDKEY_REFERRAL_URL}
-**Complete Setup:** ${this.DSTEALTH_APP_URL}`;
+**Complete Setup:** ${this.DSTEALTH_APP_URL}
+
+**Need help?** Type "/help" for more options!`;
 
         await userConversation.send(fallbackText);
         console.log("✅ Help Actions sent as formatted text (fallback)");
@@ -1912,32 +1942,33 @@ Choose an action:
           {
             id: "send-small",
             label: "Send 0.005 USDC",
-            style: "primary",
+            style: "primary"
           },
           {
             id: "send-large", 
             label: "Send 1 USDC",
-            style: "primary",
+            style: "primary"
           },
           {
             id: "check-balance",
             label: "💰 Check balance",
-            style: "primary",
+            style: "primary"
           },
           {
             id: "create-payment-link",
             label: "💳 Create payment link",
-            style: "secondary",
+            style: "secondary"
           },
           {
             id: "setup-fkey",
-            label: "🔧 Set up fkey.id",
-            style: "secondary",
+            label: "🔧 Set up fkey.id", 
+            style: "secondary"
           }
         ]
       };
 
       try {
+        console.log("🎯 Actions Menu (no URLs, native intent handling)");
         await (userConversation as any).send(actionsContent, ContentTypeActions);
         console.log("✅ Actions Menu sent (proper content type)");
       } catch (actionsError) {
@@ -1952,8 +1983,10 @@ Choose an action:
 • 💳 Create payment link (type "create payment link for $X")
 • 🔧 Set up fkey.id (type "/set username")
 
-**Need help?** Type "/help" for more options!
-**Complete Setup:** ${this.DSTEALTH_APP_URL}`;
+**Get FluidKey:** ${this.FLUIDKEY_REFERRAL_URL}
+**Complete Setup:** ${this.DSTEALTH_APP_URL}
+
+**Need help?** Type "/help" for more options!`;
 
         await userConversation.send(fallbackText);
         console.log("✅ Actions Menu sent as formatted text (fallback)");
