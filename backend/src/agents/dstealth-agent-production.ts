@@ -830,9 +830,16 @@ I only respond when @mentioned or for payment requests!`;
   ): Promise<string> {
     const cmd = command.toLowerCase().trim();
 
-    // /help command - always available
+    // /help command - always available - send action buttons
     if (cmd === "/help") {
-        return this.getHelpMessage();
+        await this.sendHelpActionsMessage(senderInboxId);
+        return ""; // Return empty string since we're sending actions
+    }
+
+    // /actions command - send action buttons
+    if (cmd === "/actions") {
+        await this.sendActionsMenu(senderInboxId);
+        return ""; // Return empty string since we're sending actions
     }
 
     // Check if user has fkey.id set for other commands
@@ -1552,6 +1559,67 @@ Failed to lookup ${cleanFkeyId}.fkey.id. Please try again.
       console.log(`🎯 Handling intent action: ${actionId} with metadata:`, metadata);
 
       switch (actionId) {
+        case 'show-actions':
+          await this.sendActionsMenu(senderInboxId);
+          return ""; // Empty string since we're sending actions
+
+        case 'check-balance':
+          return await this.handleBalanceCheck(senderInboxId);
+
+        case 'create-payment-link':
+          return `💳 **Create Payment Link**
+
+To create a payment link, specify the amount:
+
+**Examples:**
+• "create payment link for $25"
+• "create payment link for $100"
+• "create payment link for $500"
+
+**Note:** You'll need a fkey.id set up first. Type "/set yourUsername" if you haven't done this yet.
+
+**Get FluidKey:** ${this.FLUIDKEY_REFERRAL_URL}`;
+
+        case 'setup-fkey':
+          return `🚀 **Set Up Your fkey.id**
+
+**Step 1**: Get FluidKey (free privacy wallet)
+${this.FLUIDKEY_REFERRAL_URL}
+
+**Step 2**: Tell me your username
+Example: "tantodefi.fkey.id" or "/set tantodefi"
+
+**Step 3**: Complete setup
+${this.DSTEALTH_APP_URL}
+
+**Benefits:**
+• 🥷 Anonymous payment links
+• 🧾 ZK receipts for transactions
+• 🎯 Privacy rewards & points`;
+
+        case 'more-info':
+          return this.getHelpMessage();
+
+        case 'send-small':
+          // Create payment link for $0.005
+          const conversationId = await this.getConversationIdForUser(senderInboxId);
+          if (conversationId) {
+            return await this.handlePaymentRequest("0.005", senderInboxId, conversationId, false);
+          }
+          return `❌ **Error Creating Payment Link**
+
+Could not find conversation to send payment link. Please try again.`;
+
+        case 'send-large':
+          // Create payment link for $1
+          const conversationId2 = await this.getConversationIdForUser(senderInboxId);
+          if (conversationId2) {
+            return await this.handlePaymentRequest("1", senderInboxId, conversationId2, false);
+          }
+          return `❌ **Error Creating Payment Link**
+
+Could not find conversation to send payment link. Please try again.`;
+
         case 'coinbase_wallet_payment':
           const amount = metadata?.amount as string;
           if (!amount) {
@@ -1589,23 +1657,6 @@ Click the link above to complete payment in Coinbase Wallet!`;
 
         case 'payment_link_help':
           return this.getHelpMessage();
-
-        case 'setup_fkey':
-          return `🚀 **Set Up Your fkey.id**
-
-**Step 1**: Get FluidKey (free privacy wallet)
-${this.FLUIDKEY_REFERRAL_URL}
-
-**Step 2**: Tell me your username
-Example: "tantodefi.fkey.id" or "/set tantodefi"
-
-**Step 3**: Complete setup
-${this.DSTEALTH_APP_URL}
-
-**Benefits:**
-• 🥷 Anonymous payment links
-• 🧾 ZK receipts for transactions
-• 🎯 Privacy rewards & points`;
 
         default:
           return `🤖 **Intent Action: ${actionId}**
@@ -1739,6 +1790,211 @@ Click the link above to complete payment in Coinbase Wallet!`;
       } catch (fallbackError) {
         console.error("❌ Failed to send fallback message:", fallbackError);
       }
+    }
+  }
+
+  /**
+   * Send help actions message (following TBA pattern)
+   */
+  private async sendHelpActionsMessage(senderInboxId: string): Promise<void> {
+    try {
+      if (!this.baseAgent) {
+        console.log("⚠️ Base agent not available, skipping Help Actions message");
+        return;
+      }
+
+      // Get user's conversations to send actions to
+      const client = this.baseAgent.getClient();
+      const conversations = await client.conversations.list();
+      
+      // Find the conversation with this user
+      const userConversation = conversations.find(conv => {
+        // For DMs, check if this is a 1:1 conversation with the user
+        if (!(conv instanceof Group)) {
+          return conv.peerInboxId === senderInboxId;
+        }
+        return false;
+      });
+
+      if (!userConversation) {
+        console.log("⚠️ User conversation not found, skipping Help Actions message");
+        return;
+      }
+
+      const actionsContent: ActionsContent = {
+        id: `help-${Date.now()}`,
+        description: "👋 Welcome to dStealth! Here are some actions you can take:",
+        actions: [
+          {
+            id: "show-actions",
+            label: "🚀 Show me actions",
+            style: "primary",
+          },
+          {
+            id: "check-balance",
+            label: "💰 Check balance",
+            style: "primary",
+          },
+          {
+            id: "create-payment-link",
+            label: "💳 Create payment link",
+            style: "primary",
+          },
+          {
+            id: "setup-fkey",
+            label: "🔧 Set up fkey.id",
+            style: "secondary",
+          },
+          {
+            id: "more-info",
+            label: "ℹ️ More info",
+            style: "secondary",
+          }
+        ]
+      };
+
+      try {
+        await (userConversation as any).send(actionsContent, ContentTypeActions);
+        console.log("✅ Help Actions sent (proper content type)");
+      } catch (actionsError) {
+        console.error("⚠️ Failed to send Help Actions content type:", actionsError);
+        
+        // Fallback to formatted text
+        const fallbackText = `👋 **Welcome to dStealth!** 🥷
+
+Choose an action:
+• 🚀 Show me actions (type "/actions")
+• 💰 Check balance (type "/balance")
+• 💳 Create payment link (type "create payment link for $X")
+• 🔧 Set up fkey.id (type "/set username")
+• ℹ️ More info (type "/help")
+
+**Quick Start:** Get FluidKey at ${this.FLUIDKEY_REFERRAL_URL}`;
+
+        await userConversation.send(fallbackText);
+        console.log("✅ Help Actions sent as formatted text (fallback)");
+      }
+    } catch (error) {
+      console.error("❌ Failed to send Help Actions:", error);
+    }
+  }
+
+  /**
+   * Send actions menu (following TBA pattern)
+   */
+  private async sendActionsMenu(senderInboxId: string): Promise<void> {
+    try {
+      if (!this.baseAgent) {
+        console.log("⚠️ Base agent not available, skipping Actions Menu");
+        return;
+      }
+
+      // Get user's conversations to send actions to
+      const client = this.baseAgent.getClient();
+      const conversations = await client.conversations.list();
+      
+      // Find the conversation with this user
+      const userConversation = conversations.find(conv => {
+        // For DMs, check if this is a 1:1 conversation with the user
+        if (!(conv instanceof Group)) {
+          return conv.peerInboxId === senderInboxId;
+        }
+        return false;
+      });
+
+      if (!userConversation) {
+        console.log("⚠️ User conversation not found, skipping Actions Menu");
+        return;
+      }
+
+      const actionsContent: ActionsContent = {
+        id: `actions-${Date.now()}`,
+        description: "Choose an action:",
+        actions: [
+          {
+            id: "send-small",
+            label: "Send 0.005 USDC",
+            style: "primary",
+          },
+          {
+            id: "send-large", 
+            label: "Send 1 USDC",
+            style: "primary",
+          },
+          {
+            id: "check-balance",
+            label: "💰 Check balance",
+            style: "primary",
+          },
+          {
+            id: "create-payment-link",
+            label: "💳 Create payment link",
+            style: "secondary",
+          },
+          {
+            id: "setup-fkey",
+            label: "🔧 Set up fkey.id",
+            style: "secondary",
+          }
+        ]
+      };
+
+      try {
+        await (userConversation as any).send(actionsContent, ContentTypeActions);
+        console.log("✅ Actions Menu sent (proper content type)");
+      } catch (actionsError) {
+        console.error("⚠️ Failed to send Actions Menu content type:", actionsError);
+        
+        // Fallback to formatted text
+        const fallbackText = `**Choose an action:**
+
+• Send 0.005 USDC (type "create payment link for $0.005")
+• Send 1 USDC (type "create payment link for $1")
+• 💰 Check balance (type "/balance")
+• 💳 Create payment link (type "create payment link for $X")
+• 🔧 Set up fkey.id (type "/set username")
+
+**Need help?** Type "/help" for more options!`;
+
+        await userConversation.send(fallbackText);
+        console.log("✅ Actions Menu sent as formatted text (fallback)");
+      }
+    } catch (error) {
+      console.error("❌ Failed to send Actions Menu:", error);
+    }
+  }
+
+  /**
+   * Get conversation ID for a specific user
+   */
+  private async getConversationIdForUser(senderInboxId: string): Promise<string | null> {
+    try {
+      if (!this.baseAgent) {
+        console.log("⚠️ Base agent not available");
+        return null;
+      }
+
+      const client = this.baseAgent.getClient();
+      const conversations = await client.conversations.list();
+      
+      // Find the conversation with this user
+      const userConversation = conversations.find(conv => {
+        // For DMs, check if this is a 1:1 conversation with the user
+        if (!(conv instanceof Group)) {
+          return conv.peerInboxId === senderInboxId;
+        }
+        return false;
+      });
+
+      if (!userConversation) {
+        console.log("⚠️ User conversation not found");
+        return null;
+      }
+
+      return userConversation.id;
+    } catch (error) {
+      console.error("❌ Failed to get conversation ID for user:", error);
+      return null;
     }
   }
 
