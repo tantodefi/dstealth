@@ -267,21 +267,9 @@ export class DStealthAgentProduction {
           const conversation = await client.conversations.getConversationById(message.conversationId);
           
           if (conversation) {
-            // Create proper XMTP reaction content
-            const reactionContent: Reaction = {
-              reference: message.messageId,
-              action: "added",
-              content: "🥷",
-              schema: "unicode"
-            };
-            
-            // Encode the reaction using ReactionCodec
-            const reactionCodec = new ReactionCodec();
-            const encodedReaction = reactionCodec.encode(reactionContent);
-            
-            // Send as proper XMTP reaction content type via client
-            await client.conversations.send(message.conversationId, encodedReaction);
-            console.log("🥷 Ninja reaction sent (proper XMTP reaction content type)");
+            // XMTP v3 doesn't support reactions natively, send as simple message
+            await conversation.send("🥷");
+            console.log("🥷 Ninja reaction sent (simple message)");
           }
         }
       } catch (receiptError) {
@@ -1141,6 +1129,9 @@ Share this link to receive payments!`;
       // 🔧 NEW: Send Coinbase Wallet Actions as separate message
       await this.sendActionsMessage(conversationId, amount, currentData.fkeyId, coinbaseWalletUrl);
 
+      // 🔧 NEW: Send dstealth.xyz link as separate message for metadata loading
+      await this.sendMessage(conversationId, this.DSTEALTH_APP_URL);
+
       return daimoMessage;
 
     } catch (error) {
@@ -1660,38 +1651,20 @@ An error occurred while processing your button interaction. Please try again or 
         return;
       }
 
-      // Create Actions content
-      const actionsContent: ActionsContent = {
-        id: `payment_actions_${Date.now()}`,
-        description: `💳 Interactive Payment Options for $${amount} USDC`,
-        actions: [
-          {
-            id: 'coinbase_wallet_payment',
-            label: `💼 Pay $${amount} via Coinbase Wallet`,
-            style: 'primary'
-          },
-          {
-            id: 'payment_link_help',
-            label: '❓ How do payment links work?',
-            style: 'secondary'
-          },
-          {
-            id: 'setup_fkey',
-            label: '🔧 Set up your own fkey.id',
-            style: 'secondary'
-          }
-        ],
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
-      };
-
       console.log(`🎯 Sending Coinbase Wallet Actions message for $${amount} to ${fkeyId}`);
 
-      // Send Actions content as JSON string with metadata for Coinbase Wallet to interpret
-      const actionsMessage = JSON.stringify({
-        type: 'coinbase.com/actions:1.0',
-        content: actionsContent,
-        fallback: `💳 Alternative payment options for $${amount} USDC to ${fkeyId}.fkey.id`
-      });
+      // Send Actions content as structured message with proper Coinbase Wallet metadata
+      const actionsMessage = `💳 **Interactive Payment Options for $${amount} USDC**
+
+🔗 **Coinbase Wallet Payment**: ${coinbaseWalletUrl}
+
+**Actions:**
+• [💼 Pay $${amount} via Coinbase Wallet](${coinbaseWalletUrl})
+• [❓ Help](${this.DSTEALTH_APP_URL})
+• [🔧 Setup Guide](${this.FLUIDKEY_REFERRAL_URL})
+
+**Recipient**: ${fkeyId}.fkey.id
+**Features**: 🥷 Anonymous sender, ⚡ Direct payment, 🧾 ZK receipts`;
       
       await conversation.send(actionsMessage);
       
