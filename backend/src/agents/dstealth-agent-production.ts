@@ -393,22 +393,25 @@ export class DStealthAgentProduction {
    * 🔧 NEW: Check if message content is Intent content type
    */
   private isIntentContent(content: any): content is IntentContent {
+    // First check if content is an object before using 'in' operator
+    if (!content || typeof content !== 'object' || content === null) {
+      return false;
+    }
+    
     console.log(`🔍 Checking if content is Intent:`, {
       exists: !!content,
       type: typeof content,
       isObject: typeof content === 'object',
-      hasId: content && 'id' in content,
-      hasActionId: content && 'actionId' in content,
-      idType: content && typeof content.id,
-      actionIdType: content && typeof content.actionId,
+      hasId: 'id' in content,
+      hasActionId: 'actionId' in content,
+      idType: content.id ? typeof content.id : 'undefined',
+      actionIdType: content.actionId ? typeof content.actionId : 'undefined',
     });
     
-    const result = content && 
-           typeof content === 'object' && 
-           'id' in content && 
-           'actionId' in content &&
-           typeof content.id === 'string' &&
-           typeof content.actionId === 'string';
+    const result = 'id' in content && 
+                   'actionId' in content &&
+                   typeof content.id === 'string' &&
+                   typeof content.actionId === 'string';
            
     console.log(`🔍 Intent check result: ${result}`);
     return result;
