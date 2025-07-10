@@ -80,7 +80,9 @@ export class ActionsCodec implements ContentCodec<ActionsContent> {
   }
 
   encode(content: ActionsContent): EncodedContent {
+    // Validate content before encoding
     this.validateContent(content);
+
     return {
       type: ContentTypeActions,
       parameters: { encoding: 'UTF-8' },
@@ -93,6 +95,7 @@ export class ActionsCodec implements ContentCodec<ActionsContent> {
     if (encoding && encoding !== 'UTF-8') {
       throw new Error(`unrecognized encoding ${encoding}`);
     }
+
     const decodedContent = new TextDecoder().decode(content.content);
     try {
       const parsed = JSON.parse(decodedContent) as ActionsContent;
@@ -114,30 +117,88 @@ export class ActionsCodec implements ContentCodec<ActionsContent> {
     return true;
   }
 
+  /**
+   * Validates Actions content according to XIP-67 specification
+   */
   private validateContent(content: ActionsContent): void {
     if (!content.id || typeof content.id !== 'string') {
       throw new Error('Actions.id is required and must be a string');
     }
+
     if (!content.description || typeof content.description !== 'string') {
       throw new Error('Actions.description is required and must be a string');
     }
+
     if (!Array.isArray(content.actions) || content.actions.length === 0) {
       throw new Error('Actions.actions is required and must be a non-empty array');
     }
+
     if (content.actions.length > 10) {
       throw new Error('Actions.actions cannot exceed 10 actions for UX reasons');
+    }
+
+    // Validate each action
+    content.actions.forEach((action, index) => {
+      if (!action.id || typeof action.id !== 'string') {
+        throw new Error(`Action[${index}].id is required and must be a string`);
+      }
+
+      if (!action.label || typeof action.label !== 'string') {
+        throw new Error(`Action[${index}].label is required and must be a string`);
+      }
+
+      if (action.label.length > 50) {
+        throw new Error(`Action[${index}].label cannot exceed 50 characters`);
+      }
+
+      if (action.style && !['primary', 'secondary', 'danger'].includes(action.style)) {
+        throw new Error(`Action[${index}].style must be one of: primary, secondary, danger`);
+      }
+
+      if (action.expiresAt && !this.isValidISO8601(action.expiresAt)) {
+        throw new Error(`Action[${index}].expiresAt must be a valid ISO-8601 timestamp`);
+      }
+    });
+
+    // Check for duplicate action IDs
+    const actionIds = content.actions.map((action) => action.id);
+    const uniqueActionIds = new Set(actionIds);
+    if (actionIds.length !== uniqueActionIds.size) {
+      throw new Error('Action.id values must be unique within Actions.actions array');
+    }
+
+    if (content.expiresAt && !this.isValidISO8601(content.expiresAt)) {
+      throw new Error('Actions.expiresAt must be a valid ISO-8601 timestamp');
+    }
+  }
+
+  /**
+   * Basic ISO-8601 timestamp validation
+   */
+  private isValidISO8601(timestamp: string): boolean {
+    try {
+      const date = new Date(timestamp);
+      return date.toISOString() === timestamp;
+    } catch {
+      return false;
     }
   }
 }
 
-// 🔧 NEW: Intent Codec Implementation
+/**
+ * Intent codec for encoding/decoding Intent messages
+ * Implements XMTP ContentCodec interface for Intent content type
+ * Following TBA example exactly
+ */
 export class IntentCodec implements ContentCodec<IntentContent> {
   get contentType(): ContentTypeId {
     return ContentTypeIntent;
   }
 
   encode(content: IntentContent): EncodedContent {
+    // Validate content before encoding
     this.validateContent(content);
+
     return {
       type: ContentTypeIntent,
       parameters: { encoding: 'UTF-8' },
@@ -150,6 +211,7 @@ export class IntentCodec implements ContentCodec<IntentContent> {
     if (encoding && encoding !== 'UTF-8') {
       throw new Error(`unrecognized encoding ${encoding}`);
     }
+
     const decodedContent = new TextDecoder().decode(content.content);
     try {
       const parsed = JSON.parse(decodedContent) as IntentContent;
@@ -168,12 +230,34 @@ export class IntentCodec implements ContentCodec<IntentContent> {
     return true;
   }
 
+  /**
+   * Validates Intent content according to XIP-67 specification
+   */
   private validateContent(content: IntentContent): void {
     if (!content.id || typeof content.id !== 'string') {
       throw new Error('Intent.id is required and must be a string');
     }
+
     if (!content.actionId || typeof content.actionId !== 'string') {
       throw new Error('Intent.actionId is required and must be a string');
+    }
+
+    // Validate metadata if provided
+    if (content.metadata !== undefined) {
+      if (
+        typeof content.metadata !== 'object' ||
+        content.metadata === null ||
+        Array.isArray(content.metadata)
+      ) {
+        throw new Error('Intent.metadata must be an object if provided');
+      }
+
+      // Check for reasonable metadata size to avoid XMTP content limits
+      const metadataString = JSON.stringify(content.metadata);
+      if (metadataString.length > 10000) {
+        // 10KB limit for metadata
+        throw new Error('Intent.metadata is too large (exceeds 10KB limit)');
+      }
     }
   }
 }
@@ -200,15 +284,23 @@ export class DStealthAgentProduction {
   private readonly OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
   /**
-   * Create and start the production dStealth agent
+   * 🔧 UPDATED: Create and start the Production dStealth Agent
+   * Now uses TBA pattern by default for proper action button support
    */
   static async createAndStart(
     config: XmtpAgentConfig,
     streamFailureCallback?: StreamFailureCallback,
+    useTBAPattern: boolean = true // 🔧 NEW: Use TBA pattern by default
   ): Promise<DStealthAgentProduction> {
-    const agent = new DStealthAgentProduction();
-    await agent.initialize(config, streamFailureCallback);
-    return agent;
+    if (useTBAPattern) {
+      console.log("🚀 Using TBA Pattern for action button support");
+      return await DStealthAgentProduction.createAndStartTBA(config, streamFailureCallback);
+    } else {
+      console.log("🚀 Using legacy XmtpAgentBase pattern");
+      const agent = new DStealthAgentProduction();
+      await agent.initialize(config, streamFailureCallback);
+      return agent;
+    }
   }
 
   /**
@@ -240,9 +332,10 @@ export class DStealthAgentProduction {
       const identifier = await Promise.resolve(signer.getIdentifier());
       this.agentAddress = identifier.identifier;
 
-      console.log("🔧 Content type codecs passed to XmtpAgentBase (will be registered with XMTP client)");
-      console.log("🔧 ContentTypeActions ID:", ContentTypeActions.authorityId + "/" + ContentTypeActions.typeId + ":" + ContentTypeActions.versionMajor + "." + ContentTypeActions.versionMinor);
-      console.log("🔧 ContentTypeIntent ID:", ContentTypeIntent.authorityId + "/" + ContentTypeIntent.typeId + ":" + ContentTypeIntent.versionMajor + "." + ContentTypeIntent.versionMinor);
+      console.log("🔧 Registering 3 content type codecs with XMTP client");
+      console.log("   - coinbase.com/actions:1.0");
+      console.log("   - coinbase.com/intent:1.0");
+      console.log("   - xmtp.org/reaction:1.0");
       console.log("✅ Production dStealth Agent initialized successfully");
       console.log(`📬 Agent Address: ${this.agentAddress}`);
       console.log(`📬 Agent Inbox ID: ${agentClient.inboxId}`);
@@ -250,6 +343,163 @@ export class DStealthAgentProduction {
       console.error("❌ Failed to initialize Production dStealth Agent:", error);
       throw error;
     }
+  }
+
+  /**
+   * 🔧 TBA PATTERN: Initialize with direct XMTP streaming (like TBA index.ts)
+   * This bypasses XmtpAgentBase to get direct access to contentType like TBA
+   */
+  static async createAndStartTBA(
+    config: XmtpAgentConfig,
+    streamFailureCallback?: StreamFailureCallback,
+  ): Promise<DStealthAgentProduction> {
+    const agent = new DStealthAgentProduction();
+    await agent.initializeTBA(config, streamFailureCallback);
+    return agent;
+  }
+
+  /**
+   * 🔧 TBA PATTERN: Direct XMTP initialization following TBA example exactly
+   */
+  private async initializeTBA(
+    config: XmtpAgentConfig,
+    streamFailureCallback?: StreamFailureCallback,
+  ): Promise<void> {
+    try {
+      console.log("🤖 TBA Pattern - Initializing dStealth Agent...");
+
+      // Create XMTP client exactly like TBA (from TBA index.ts)
+      const signer = createSigner(config.walletKey);
+      const dbEncryptionKey = getEncryptionKeyFromHex(config.encryptionKey);
+      
+      // 🔧 TBA PATTERN: Create codecs exactly like TBA
+      const actionCodec = new ActionsCodec();
+      const intentCodec = new IntentCodec();
+      const reactionCodec = new ReactionCodec();
+      
+      console.log("🔧 TBA Pattern - Registering codecs with XMTP client");
+      console.log("   - coinbase.com/actions:1.0");
+      console.log("   - coinbase.com/intent:1.0");
+      console.log("   - xmtp.org/reaction:1.0");
+      
+      // 🔧 TBA PATTERN: Create client with codecs (exactly like TBA)
+      const client = await Client.create(signer, {
+        dbEncryptionKey,
+        env: config.env as XmtpEnv,
+        dbPath: config.dbPath,
+        codecs: [actionCodec, intentCodec, reactionCodec], // TBA pattern
+      });
+
+      // Store client for our methods
+      this.tbaClient = client;
+      
+      const identifier = await signer.getIdentifier();
+      this.agentAddress = typeof identifier === "object" && "identifier" in identifier
+        ? identifier.identifier
+        : (await identifier).identifier;
+
+      console.log(`📧 TBA Pattern - Agent Address: ${this.agentAddress}`);
+      console.log(`🆔 TBA Pattern - Agent Inbox ID: ${client.inboxId}`);
+      console.log(`🌍 Environment: ${config.env}`);
+
+      // Sync conversations (TBA pattern)
+      console.log("🔄 TBA Pattern - Syncing conversations...");
+      await client.conversations.sync();
+
+      console.log("👂 TBA Pattern - Listening for messages...");
+      
+      // 🔧 TBA PATTERN: Start message streaming exactly like TBA
+      this.startTBAMessageStream(client, streamFailureCallback);
+
+      console.log("✅ TBA Pattern - dStealth Agent initialized successfully");
+    } catch (error) {
+      console.error("❌ TBA Pattern initialization failed:", error);
+      throw error;
+    }
+  }
+
+  // Store TBA client
+  private tbaClient?: Client;
+
+  /**
+   * 🔧 TBA PATTERN: Message streaming exactly like TBA index.ts
+   */
+  private async startTBAMessageStream(
+    client: Client,
+    streamFailureCallback?: StreamFailureCallback,
+  ): Promise<void> {
+    const startStream = async (): Promise<void> => {
+      try {
+        const stream = await client.conversations.streamAllMessages();
+
+        for await (const message of stream) {
+          try {
+            // Skip messages from the agent itself (TBA pattern)
+            if (!message || message.senderInboxId.toLowerCase() === client.inboxId.toLowerCase()) {
+              continue;
+            }
+
+            console.log(`📨 TBA Pattern - Received: ${message.contentType?.typeId} from ${message.senderInboxId}`);
+
+            const conversation = await client.conversations.getConversationById(
+              message.conversationId
+            );
+
+            if (!conversation) {
+              console.log("❌ Unable to find conversation, skipping");
+              continue;
+            }
+
+            // 🔧 TBA PATTERN: Process message with direct contentType access
+            await this.processTBAMessage(message, conversation);
+
+          } catch (messageError: unknown) {
+            const errorMessage = messageError instanceof Error ? messageError.message : String(messageError);
+            console.error("❌ TBA Pattern - Error processing individual message:", errorMessage);
+            try {
+              const conversation = await client.conversations.getConversationById(
+                message?.conversationId || ""
+              );
+              if (conversation) {
+                await conversation.send(
+                  `❌ Error processing message: ${errorMessage}`
+                );
+              }
+            } catch (sendError) {
+              console.error("❌ Failed to send error message to conversation:", sendError);
+            }
+          }
+        }
+      } catch (streamError: unknown) {
+        const errorMessage = streamError instanceof Error ? streamError.message : String(streamError);
+        console.error("❌ TBA Pattern - Stream error occurred:", errorMessage);
+        
+        if (streamFailureCallback) {
+          try {
+            await Promise.resolve(streamFailureCallback(streamError as Error));
+          } catch (callbackError) {
+            console.error("❌ Stream failure callback error:", callbackError);
+          }
+        }
+
+        // Auto-restart with backoff
+        console.log("🔄 TBA Pattern - Attempting to reconnect in 5 seconds...");
+        setTimeout(async () => {
+          try {
+            await client.conversations.sync();
+            console.log("✅ Conversations re-synced successfully");
+            await this.startTBAMessageStream(client, streamFailureCallback);
+          } catch (restartError) {
+            console.error("❌ Failed to restart TBA stream:", restartError);
+          }
+        }, 5000);
+      }
+    };
+
+    // Start the stream (don't await to prevent blocking)
+    startStream().catch((error) => {
+      console.error("❌ TBA Pattern - Background stream failed:", error);
+    });
   }
 
   /**
@@ -296,7 +546,23 @@ export class DStealthAgentProduction {
         }
       }
       
-      // 🔧 NEW: Proper content type detection for Intent messages
+      // 🔧 TBA PATTERN: Get the raw message to check contentType
+      // We need access to the original DecodedMessage, not our processed version
+      const client = this.baseAgent?.getClient();
+      if (!client) {
+        console.error("❌ No client available for message processing");
+        return undefined;
+      }
+      
+      // Get the conversation to access raw messages
+      const conversation = await client.conversations.getConversationById(message.conversationId);
+      if (!conversation) {
+        console.error("❌ No conversation found for message processing");
+        return undefined;
+      }
+      
+      // 🔧 TBA PATTERN: We need to get the raw message with contentType
+      // For now, let's work with what we have and add proper content type detection
       const messageContent = message.content;
       const senderInboxId = message.senderInboxId;
       
@@ -305,58 +571,31 @@ export class DStealthAgentProduction {
       console.log(`📋 Message properties:`, Object.keys(message));
       console.log(`📋 Message conversation ID:`, message.conversationId);
       
-      // 🔧 DEBUG: Log content type information
-      if ((message as any).contentType) {
-        const contentType = (message as any).contentType;
-        console.log(`📋 Message contentType:`, contentType);
-        console.log(`📋 ContentType authority: ${contentType.authorityId}`);
-        console.log(`📋 ContentType typeId: ${contentType.typeId}`);
-        console.log(`📋 ContentType version: ${contentType.versionMajor}.${contentType.versionMinor}`);
-        
-        // Check if this is an Intent content type
-        if (contentType.authorityId === 'coinbase.com' && contentType.typeId === 'intent') {
-          console.log(`🎯 INTENT CONTENT TYPE DETECTED!`);
-          console.log(`🎯 Intent message content:`, messageContent);
-        }
-      } else {
-        console.log(`📋 No contentType property found on message`);
-      }
+      // 🔧 TBA PATTERN: Check for Intent content type first
+      // NOTE: We need to modify XmtpAgentBase to preserve contentType information
+      // For now, we'll detect Intent messages by content structure
       
-      // 🔧 DEBUG: Log all message content to detect Intent messages
-      if (typeof messageContent === 'object' && messageContent !== null) {
-        console.log(`🔍 Object content received:`, JSON.stringify(messageContent, null, 2));
-        
-        // Check for ANY object properties that might indicate an Intent
-        const keys = Object.keys(messageContent);
-        console.log(`🔍 Object keys: [${keys.join(', ')}]`);
-        
-        // Check if this looks like an Intent message
-        if (messageContent && typeof messageContent === 'object' && 'actionId' in messageContent) {
-          console.log(`🎯 Potential Intent message detected!`);
-          console.log(`🎯 ActionId: ${(messageContent as any).actionId}`);
-          console.log(`🎯 Id: ${(messageContent as any).id}`);
-        }
-        
-        // Check for other potential Intent patterns
-        if ('id' in messageContent || 'action' in messageContent || 'intent' in messageContent) {
-          console.log(`🎯 Alternative Intent pattern detected!`);
-          console.log(`🎯 id: ${(messageContent as any).id}`);
-          console.log(`🎯 action: ${(messageContent as any).action}`);
-          console.log(`🎯 intent: ${(messageContent as any).intent}`);
+      // Try to parse as Intent first
+      if (typeof messageContent === 'string') {
+        try {
+          const parsed = JSON.parse(messageContent);
+          if (this.isIntentContent(parsed)) {
+            console.log("🎯 INTENT MESSAGE DETECTED! (parsed from JSON)");
+            const intent = parsed as IntentContent;
+            console.log(`🎯 Processing Intent: ${intent.actionId} from user ${senderInboxId}`);
+            console.log(`🎯 Intent details:`, JSON.stringify(intent, null, 2));
+            
+            const response = await this.handleIntentMessage(intent, senderInboxId);
+            return response;
+          }
+        } catch (parseError) {
+          // Not JSON, continue with normal processing
         }
       }
       
-      // 🔧 DEBUG: Log EVERY message to see what's being received
-      console.log(`📨 RAW MESSAGE DEBUG:`, {
-        content: messageContent,
-        type: typeof messageContent,
-        isString: typeof messageContent === 'string',
-        isObject: typeof messageContent === 'object',
-        hasContent: !!messageContent
-      });
-
-      // Handle Intent content type from Coinbase Wallet button interactions
+      // 🔧 TBA PATTERN: Handle Intent content type using object detection
       if (this.isIntentContent(messageContent)) {
+        console.log("🎯 INTENT CONTENT TYPE DETECTED! (TBA pattern)");
         const intent = messageContent as IntentContent;
         console.log(`🎯 Processing Intent: ${intent.actionId} from user ${senderInboxId}`);
         console.log(`🎯 Intent details:`, JSON.stringify(intent, null, 2));
@@ -1597,7 +1836,7 @@ Failed to lookup ${cleanFkeyId}.fkey.id. Please try again.
   }
 
   /**
-   * �� NEW: Handle Intent messages from action buttons
+   * 🔧 NEW: Handle Intent messages from action buttons
    */
   private async handleIntentMessage(
     intent: IntentContent,
@@ -1610,6 +1849,31 @@ Failed to lookup ${cleanFkeyId}.fkey.id. Please try again.
       console.log(`🎯 Handling Intent Action: ${actionId}`);
 
       switch (actionId) {
+        case 'test-simple':
+          return `🧪 **Test Button Clicked Successfully!**
+
+✅ **Intent Message Working!** 
+
+The action button successfully triggered an Intent message with:
+• **Action ID**: ${actionId}
+• **Intent ID**: ${intent.id}
+• **Sender**: ${senderInboxId}
+
+This confirms that:
+1. ✅ Action buttons are rendering correctly
+2. ✅ Intent messages are being sent by Coinbase Wallet
+3. ✅ Intent content type detection is working
+4. ✅ Intent message processing is functional
+
+🎉 **The action button system is working!** 
+
+**Next steps:**
+• All other action buttons should now work
+• Try clicking "💰 Check balance" or other buttons
+• Type \`/help\` to see all available actions
+
+**Complete Setup**: ${this.DSTEALTH_APP_URL}`;
+
         case 'check-balance':
           return await this.handleBalanceCheck(senderInboxId);
 
@@ -1626,264 +1890,134 @@ To create a payment link, specify the amount:
 **Setup Required:**
 🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
 📝 **Set fkey.id**: \`/set yourUsername\`
-🌐 **Complete Setup**: ${this.DSTEALTH_APP_URL}`;
+🚀 **Complete setup**: ${this.DSTEALTH_APP_URL}
+
+**Try saying**: "create payment link for $25"`;
 
         case 'setup-fkey':
-        case 'get-fluidkey':
-          return `🚀 **Set Up Your fkey.id**
+          return `🔑 **Setup fkey.id**
 
-**Step 1**: 🔑 **Get FluidKey** (free privacy wallet)
+To set up your fkey.id:
+
+**Step 1**: 🔑 **Get FluidKey** (if you don't have it)
 ${this.FLUIDKEY_REFERRAL_URL}
 
-**Step 2**: 📝 **Tell me your username**
-Example: \`/set tantodefi\` or \`my fkey is tantodefi\`
+**Step 2**: 📝 **Set your fkey.id**
+• \`/set yourUsername\`
+• \`my fkey is yourUsername\`
 
-**Step 3**: 🌐 **Complete setup at dStealth**
+**Step 3**: 🚀 **Complete setup**
 ${this.DSTEALTH_APP_URL}
 
-**Benefits:**
-• 🥷 Anonymous payment links
-• 🧾 ZK receipts for transactions  
-• 🎯 Privacy rewards & points
-• 🔒 Stealth address protection`;
+**Examples:**
+• \`/set tantodefi\`
+• \`my fkey is tantodefi\`
 
-        case 'more-info':
-        case 'show-actions':
+**Need help?** Just ask me anything!`;
+
+        case 'manage-links':
+          return await this.handleLinksManagement(senderInboxId);
+
+        case 'check-status':
+          return this.getStatusMessage();
+
+        case 'get-help':
           return this.getHelpMessage();
 
-        case 'send-small':
-          // Create payment link for $0.005
-          const conversationId = await this.getConversationIdForUser(senderInboxId);
-          if (conversationId) {
-            return await this.handlePaymentRequest("0.005", senderInboxId, conversationId, false);
-          }
-          return `❌ **Error Creating Payment Link**
+        case 'open-coinbase-wallet':
+          return `🔗 **Open in Coinbase Wallet**
 
-Could not find conversation. Please try: "create payment link for $0.005"`;
+Your payment link is ready! Use the Coinbase Wallet app to:
 
-        case 'send-large':
-          // Create payment link for $1
-          const conversationId2 = await this.getConversationIdForUser(senderInboxId);
-          if (conversationId2) {
-            return await this.handlePaymentRequest("1", senderInboxId, conversationId2, false);
-          }
-          return `❌ **Error Creating Payment Link**
+• 📱 **Open Coinbase Wallet**
+• 💳 **Navigate to payment links**
+• 🚀 **Complete your payment**
 
-Could not find conversation. Please try: "create payment link for $1"`;
+**Direct Link**: Use the Daimo link from the previous message
 
-        case 'coinbase_wallet_payment':
-          return `💼 **Coinbase Wallet Payment**
+**Need help?** Contact support at ${this.DSTEALTH_APP_URL}`;
 
-Your payment link is ready! The Coinbase Wallet button should open the payment directly.
+        case 'share-link':
+          return `📤 **Share Your Payment Link**
 
-**If the button doesn't work:**
-• Look for the direct link in the previous message
-• Copy and paste the go.cb-w URL into Coinbase Wallet
-• Or visit: ${this.DSTEALTH_APP_URL}
+Copy the Daimo link from the previous message and share it with:
 
-**Need FluidKey?** ${this.FLUIDKEY_REFERRAL_URL}`;
+• 📱 **Social media**
+• 💬 **Direct messages**
+• 📧 **Email**
+• 🔗 **Any platform**
 
-        case 'copy_payment_link':
-          return `📋 **Payment Link Copied**
+**Privacy Features:**
+• 🥷 **Anonymous sender protection**
+• 🔒 **Stealth address technology**
+• 🧾 **ZK proof receipts**
 
-Look for the go.cb-w URL in the previous message to copy it.
+**Dashboard**: ${this.DSTEALTH_APP_URL}`;
 
-**Alternative:** Visit ${this.DSTEALTH_APP_URL} to manage all your payment links.`;
+        case 'view-receipt':
+          return `🧾 **View ZK Receipt**
 
-        case 'view_dstealth':
-          return `👁️ **View on dStealth**
+Your cryptographic receipt will be available at:
 
-Visit the dStealth mini-app: ${this.DSTEALTH_APP_URL}
+**Receipt Dashboard**: ${this.DSTEALTH_APP_URL}
+
+**What's included:**
+• 🧾 **Cryptographic proof of payment**
+• 🔒 **Privacy-preserving verification**
+• 📊 **Transaction analytics**
+• 🏆 **Privacy rewards earned**
+
+**Why ZK receipts?**
+• Prove payment without revealing sender identity
+• Earn privacy rewards for stealth transactions
+• Build reputation in privacy-first economy`;
+
+        case 'create-another':
+          return `➕ **Create Another Payment Link**
+
+Ready to create another payment link?
+
+**Examples:**
+• "create payment link for $25"
+• "create payment link for $100"
+• "create payment link for $500"
 
 **Features:**
-• 📊 Dashboard with all payment links
-• 🧾 ZK receipt verification  
-• 📈 Privacy rewards tracking
-• 🔒 Stealth address management
+• 🥷 **Anonymous sender privacy**
+• ⚡ **Direct to stealth address**
+• 🎯 **Earn privacy rewards**
+• 🧾 **ZK proof receipts**
 
-**Need FluidKey?** ${this.FLUIDKEY_REFERRAL_URL}`;
-
-        case 'payment_link_help':
-          return `❓ **How Payment Links Work**
-
-1. 🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
-2. 📝 **Set fkey.id**: \`/set yourUsername\`
-3. 💳 **Create links**: "create payment link for $X"
-4. 🔗 **Share links**: Recipients pay to your stealth address
-5. 🧾 **ZK receipts**: Cryptographic proof of payment
-
-**Privacy Benefits:**
-• Anonymous payments
-• Stealth addresses  
-• ZK receipt verification
-• No direct wallet exposure
-
-**Complete Setup**: ${this.DSTEALTH_APP_URL}`;
+**Just say the amount**: "create payment link for $X"`;
 
         default:
-          return `🤖 **Button Clicked: ${actionId}**
+          return `❓ **Unknown Action: ${actionId}**
 
-I received your button interaction! This action is being processed.
+This action isn't recognized. Available actions:
+• 🧪 **Test Button**
+• 💰 **Check Balance**  
+• 💳 **Create Payment Link**
+• 🔑 **Setup fkey.id**
+• 🔗 **Manage Links**
+• 📊 **Check Status**
+• ❓ **Get Help**
 
-**Available actions:**
-• 💳 Create payment links
-• 🔧 Set up fkey.id  
-• 💰 Check balance
-• 🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
-
-**Complete Setup**: ${this.DSTEALTH_APP_URL}
-
-Type "/help" for all commands!`;
+**Need help?** Type \`/help\` for all commands!`;
       }
     } catch (error) {
-      console.error("Error handling intent message:", error);
-      return `❌ **Error Handling Button Action**
+      console.error("❌ Error handling Intent message:", error);
+      return `❌ **Error Processing Action**
 
-Something went wrong processing your button click. Please try:
-• Type the command manually (e.g., "/balance")
-• Get help: "/help"
-• Setup: ${this.DSTEALTH_APP_URL}
-• FluidKey: ${this.FLUIDKEY_REFERRAL_URL}`;
+Something went wrong processing your action. Please try:
+• Type \`/help\` for available commands
+• Contact support if the issue persists
+
+**Error**: ${error instanceof Error ? error.message : "Unknown error"}`;
     }
   }
 
   /**
-   * 🔧 FIXED: Send a message to a conversation via XMTP
-   */
-  private async sendMessage(conversationId: string, content: string): Promise<void> {
-    try {
-      if (!this.baseAgent) {
-        throw new Error("Base agent not available");
-      }
-      
-      console.log(`📤 Sending message to conversation ${conversationId.slice(0, 8)}...`);
-      await this.baseAgent.sendMessage(conversationId, content);
-      console.log("✅ Message sent successfully");
-    } catch (error) {
-      console.error("❌ Failed to send message:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * 🔧 COMPLETED: Send Coinbase Wallet Actions content type
-   */
-  private async sendActionsMessage(
-    conversationId: string, 
-    amount: string, 
-    fkeyId: string, 
-    coinbaseWalletUrl: string
-  ): Promise<void> {
-    try {
-      if (!this.baseAgent) {
-        console.log("⚠️ Base agent not available, skipping Actions message");
-        return;
-      }
-
-      const client = this.baseAgent.getClient();
-      const conversation = await client.conversations.getConversationById(conversationId);
-      
-      if (!conversation) {
-        console.log("⚠️ Conversation not found, skipping Actions message");
-        return;
-      }
-
-      console.log(`🎯 Sending Coinbase Wallet Actions message for $${amount} to ${fkeyId}`);
-
-      // Create proper Actions content for Coinbase Wallet
-      const actionsContent: ActionsContent = {
-        id: `payment_actions_${Date.now()}`,
-        description: `💳 Payment Options for $${amount} USDC to ${fkeyId}.fkey.id`,
-        actions: [
-          {
-            id: "coinbase_wallet_payment",
-            label: `💼 Pay $${amount} in Coinbase Wallet`,
-            style: "primary"
-          },
-          {
-            id: "copy_payment_link", 
-            label: "📋 Copy Payment Link",
-            style: "secondary"
-          },
-          {
-            id: "view_dstealth",
-            label: "👁️ View on dStealth",
-            style: "secondary"
-          },
-          {
-            id: "get_fluidkey",
-            label: "🔑 Get FluidKey",
-            style: "secondary"
-          }
-        ],
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-      };
-
-      try {
-        // Use proper Node SDK content type pattern (bypass type checking)
-        await (conversation as any).send(actionsContent, ContentTypeActions);
-        console.log("✅ Coinbase Wallet Actions sent (proper content type)");
-        
-        // 🔧 SEND ACTUAL LINKS as separate messages for accessibility
-        const linksMessage = `🔗 **Direct Links:**
-
-💼 **Coinbase Wallet**: ${coinbaseWalletUrl}
-🌐 **dStealth App**: ${this.DSTEALTH_APP_URL}  
-🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}`;
-
-        await conversation.send(linksMessage);
-        console.log("✅ Direct links sent as separate message");
-        
-      } catch (actionsError) {
-        console.error("⚠️ Failed to send Actions content type:", actionsError);
-        
-        // Fallback to formatted text if content type fails
-        const actionsText = `💳 **Payment Options for $${amount} USDC**
-
-**Recipient**: ${fkeyId}.fkey.id
-
-🔗 **Direct Links:**
-💼 **Coinbase Wallet**: ${coinbaseWalletUrl}
-🌐 **dStealth App**: ${this.DSTEALTH_APP_URL}
-🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
-
-**Quick Actions:**
-[💼] Pay $${amount} in Coinbase Wallet
-[📋] Copy Payment Link  
-[👁️] View on dStealth
-[🔑] Get FluidKey
-
-**Complete your privacy setup at dStealth.xyz!**`;
-
-        await conversation.send(actionsText);
-        console.log("✅ Actions sent as formatted text (fallback)");
-      }
-
-    } catch (error) {
-      console.error("❌ Failed to send Coinbase Wallet Actions:", error);
-      
-      // Final fallback 
-      try {
-        const fallbackMessage = `💼 **Payment Link Ready**
-
-[💳 Pay $${amount} via Coinbase Wallet](${coinbaseWalletUrl})
-
-**Setup Links:**
-• **dStealth App**: ${this.DSTEALTH_APP_URL}
-• **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
-
-Click the Coinbase Wallet link above to complete payment!`;
-        
-        await this.sendMessage(conversationId, fallbackMessage);
-        console.log("✅ Sent fallback Coinbase Wallet link");
-      } catch (fallbackError) {
-        console.error("❌ Failed to send fallback message:", fallbackError);
-      }
-    }
-  }
-
-  /**
-   * Send help actions message (following TBA pattern)
+   * 🔧 TBA PATTERN: Send help actions message (following TBA pattern)
    */
   private async sendHelpActionsMessage(senderInboxId: string): Promise<void> {
     try {
@@ -1910,76 +2044,50 @@ Click the Coinbase Wallet link above to complete payment!`;
         return;
       }
 
+      // Create Actions content following TBA pattern exactly
       const actionsContent: ActionsContent = {
-        id: `help-${Date.now()}`,
-        description: "👋 Welcome to dStealth! Here are some actions you can take:",
+        id: `help-actions-${Date.now()}`,
+        description: "🤖 dStealth Agent - Choose an action:",
         actions: [
           {
-            id: "show-actions",
-            label: "🚀 Show me actions",
+            id: "test-simple",
+            label: "🧪 Test Button",
             style: "primary"
           },
           {
-            id: "check-balance", 
-            label: "💰 Check balance",
-            style: "primary"
-          },
-          {
-            id: "create-payment-link",
-            label: "💳 Create payment link", 
-            style: "primary"
-          },
-          {
-            id: "setup-fkey",
-            label: "🔧 Set up fkey.id",
+            id: "check-balance",
+            label: "💰 Check Balance",
             style: "secondary"
           },
           {
-            id: "get-fluidkey",
-            label: "🔑 Get FluidKey (referral)",
+            id: "create-payment-link",
+            label: "💳 Create Payment Link",
+            style: "primary"
+          },
+          {
+            id: "get-help",
+            label: "❓ Get Help",
             style: "secondary"
           }
         ]
       };
 
-      try {
-        console.log("🎯 Help Actions (no URLs, native intent handling)");
-        console.log("🎯 Actions Content:", JSON.stringify(actionsContent, null, 2));
-        console.log("🎯 ContentTypeActions:", JSON.stringify(ContentTypeActions, null, 2));
-        await (userConversation as any).send(actionsContent, ContentTypeActions);
-        console.log("✅ Help Actions sent (proper content type)");
-      } catch (actionsError) {
-        console.error("⚠️ Failed to send Help Actions content type:", actionsError);
-        
-        // Fallback to formatted text
-        const fallbackText = `👋 **Welcome to dStealth!** 🥷
+      // Send actions using the ActionsCodec
+      await userConversation.send(actionsContent, ContentTypeActions);
+      console.log("✅ Help Actions sent (proper content type)");
 
-Choose an action:
-• 🚀 Show me actions (type "/actions")
-• 💰 Check balance (type "/balance")
-• 💳 Create payment link (type "create payment link for $X")
-• 🔧 Set up fkey.id (type "/set username")
-• 🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
-
-**Complete Setup:** ${this.DSTEALTH_APP_URL}
-
-**Need help?** Type "/help" for more options!`;
-
-        await userConversation.send(fallbackText);
-        console.log("✅ Help Actions sent as formatted text (fallback)");
-      }
     } catch (error) {
-      console.error("❌ Failed to send Help Actions:", error);
+      console.error("❌ Error sending Help Actions:", error);
     }
   }
 
   /**
-   * Send actions menu (following TBA pattern)
+   * 🔧 TBA PATTERN: Send actions menu
    */
   private async sendActionsMenu(senderInboxId: string): Promise<void> {
     try {
       if (!this.baseAgent) {
-        console.log("⚠️ Base agent not available, skipping Actions Menu");
+        console.log("⚠️ Base agent not available, skipping Actions menu");
         return;
       }
 
@@ -1997,164 +2105,109 @@ Choose an action:
       });
 
       if (!userConversation) {
-        console.log("⚠️ User conversation not found, skipping Actions Menu");
+        console.log("⚠️ User conversation not found, skipping Actions menu");
         return;
       }
 
+      // Create comprehensive Actions menu
       const actionsContent: ActionsContent = {
-        id: `actions-${Date.now()}`,
-        description: "Choose an action:",
+        id: `actions-menu-${Date.now()}`,
+        description: "🥷 dStealth Agent - Full Actions Menu:",
         actions: [
           {
-            id: "send-small",
-            label: "Send 0.005 USDC",
-            style: "primary"
-          },
-          {
-            id: "send-large", 
-            label: "Send 1 USDC",
+            id: "setup-fkey",
+            label: "🔑 Setup fkey.id",
             style: "primary"
           },
           {
             id: "check-balance",
-            label: "💰 Check balance",
-            style: "primary"
-          },
-          {
-            id: "create-payment-link",
-            label: "💳 Create payment link",
+            label: "💰 Check Balance",
             style: "secondary"
           },
           {
-            id: "setup-fkey",
-            label: "🔧 Set up fkey.id", 
+            id: "create-payment-link",
+            label: "💳 Create Payment Link",
+            style: "primary"
+          },
+          {
+            id: "manage-links",
+            label: "🔗 Manage Links",
+            style: "secondary"
+          },
+          {
+            id: "check-status",
+            label: "📊 Check Status",
             style: "secondary"
           }
         ]
       };
 
-      try {
-        console.log("🎯 Actions Menu (no URLs, native intent handling)");
-        console.log("🎯 Actions Content:", JSON.stringify(actionsContent, null, 2));
-        await (userConversation as any).send(actionsContent, ContentTypeActions);
-        console.log("✅ Actions Menu sent (proper content type)");
-      } catch (actionsError) {
-        console.error("⚠️ Failed to send Actions Menu content type:", actionsError);
-        
-        // Fallback to formatted text
-        const fallbackText = `**Choose an action:**
+      // Send actions using the ActionsCodec
+      await userConversation.send(actionsContent, ContentTypeActions);
+      console.log("✅ Actions Menu sent (proper content type)");
 
-• Send 0.005 USDC (type "create payment link for $0.005")
-• Send 1 USDC (type "create payment link for $1")
-• 💰 Check balance (type "/balance")
-• 💳 Create payment link (type "create payment link for $X")
-• 🔧 Set up fkey.id (type "/set username")
-
-**Get FluidKey:** ${this.FLUIDKEY_REFERRAL_URL}
-**Complete Setup:** ${this.DSTEALTH_APP_URL}
-
-**Need help?** Type "/help" for more options!`;
-
-        await userConversation.send(fallbackText);
-        console.log("✅ Actions Menu sent as formatted text (fallback)");
-      }
     } catch (error) {
-      console.error("❌ Failed to send Actions Menu:", error);
+      console.error("❌ Error sending Actions Menu:", error);
     }
   }
 
   /**
-   * Get conversation ID for a specific user
+   * 🔧 TBA PATTERN: Send payment-related actions
    */
-  private async getConversationIdForUser(senderInboxId: string): Promise<string | null> {
+  private async sendActionsMessage(
+    conversationId: string,
+    amount: string,
+    fkeyId: string,
+    coinbaseWalletUrl: string
+  ): Promise<void> {
     try {
       if (!this.baseAgent) {
-        console.log("⚠️ Base agent not available");
-        return null;
+        console.log("⚠️ Base agent not available, skipping payment Actions");
+        return;
       }
 
       const client = this.baseAgent.getClient();
-      const conversations = await client.conversations.list();
+      const conversation = await client.conversations.getConversationById(conversationId);
       
-      // Find the conversation with this user
-      const userConversation = conversations.find(conv => {
-        // For DMs, check if this is a 1:1 conversation with the user
-        if (!(conv instanceof Group)) {
-          return conv.peerInboxId === senderInboxId;
-        }
-        return false;
-      });
-
-      if (!userConversation) {
-        console.log("⚠️ User conversation not found");
-        return null;
+      if (!conversation) {
+        console.log("⚠️ Conversation not found, skipping payment Actions");
+        return;
       }
 
-      return userConversation.id;
-    } catch (error) {
-      console.error("❌ Failed to get conversation ID for user:", error);
-      return null;
-    }
-  }
-
-  /**
-   * Get agent contact information
-   */
-  getContactInfo(): { inboxId: string; address: string } {
-    if (!this.baseAgent) {
-      throw new Error("Agent not initialized");
-    }
-
-    return {
-      inboxId: this.baseAgent.getClient().inboxId,
-      address: this.agentAddress || "unknown",
-    };
-  }
-
-  /**
-   * Get agent status
-   */
-  getStatus(): DStealthAgentStatus {
-    if (!this.baseAgent) {
-      return {
-        isRunning: false,
-        streamRestartCount: 0,
-        processedMessageCount: this.processedMessageCount,
-        installationCount: 0,
-        lastError: this.lastError || "Agent not initialized",
+      // Create payment-related Actions content
+      const actionsContent: ActionsContent = {
+        id: `payment-actions-${Date.now()}`,
+        description: `💳 Payment Link Created for ${fkeyId}.fkey.id ($${amount} USDC)`,
+        actions: [
+          {
+            id: "open-coinbase-wallet",
+            label: "🔗 Open in Coinbase Wallet",
+            style: "primary"
+          },
+          {
+            id: "share-link",
+            label: "📤 Share Link",
+            style: "secondary"
+          },
+          {
+            id: "view-receipt",
+            label: "🧾 View Receipt",
+            style: "secondary"
+          },
+          {
+            id: "create-another",
+            label: "➕ Create Another",
+            style: "primary"
+          }
+        ]
       };
+
+      // Send actions using the ActionsCodec
+      await conversation.send(actionsContent, ContentTypeActions);
+      console.log("✅ Payment Actions sent (proper content type)");
+
+    } catch (error) {
+      console.error("❌ Error sending Payment Actions:", error);
     }
-
-    const baseStatus = this.baseAgent.getStatus();
-    return {
-      isRunning: baseStatus.isRunning,
-      streamRestartCount: baseStatus.streamRestartCount,
-      processedMessageCount: this.processedMessageCount,
-      installationCount: baseStatus.installationCount,
-      lastError: this.lastError || undefined,
-    };
-  }
-
-  /**
-   * Get XMTP client
-   */
-  getClient() {
-    if (!this.baseAgent) {
-      throw new Error("Agent not initialized");
-    }
-    return this.baseAgent.getClient();
-  }
-
-  /**
-   * Graceful shutdown
-   */
-  async shutdown(): Promise<void> {
-    console.log("🛑 Shutting down Production dStealth Agent...");
-
-    if (this.baseAgent) {
-      await this.baseAgent.shutdown();
-    }
-
-    console.log("✅ Production dStealth Agent shutdown complete");
   }
 }
