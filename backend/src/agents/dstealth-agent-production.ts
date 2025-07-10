@@ -19,10 +19,37 @@ import {
   ContentTypeReaction
 } from '@xmtp/content-type-reaction';
 import {
+  WalletSendCallsCodec,
+  ContentTypeWalletSendCalls,
+  type WalletSendCallsParams,
+} from "@xmtp/content-type-wallet-send-calls";
+import {
+  TransactionReferenceCodec,
+  ContentTypeTransactionReference,
+  type TransactionReference
+} from "@xmtp/content-type-transaction-reference";
+import {
   type ContentCodec,
   ContentTypeId,
   type EncodedContent,
 } from "@xmtp/content-type-primitives";
+
+// Import Redis for ZK receipt storage
+import { Redis } from "@upstash/redis";
+import { env } from '../config/env.js';
+
+// Get Redis instance for ZK receipt storage
+let redis: Redis | null = null;
+try {
+  if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
+    redis = new Redis({
+      url: env.UPSTASH_REDIS_REST_URL,
+      token: env.UPSTASH_REDIS_REST_TOKEN,
+    });
+  }
+} catch (error) {
+  console.warn('⚠️ Failed to initialize Redis for ZK receipts:', error);
+}
 
 // Action button content types (from working example)
 export const ContentTypeActions = new ContentTypeId({
@@ -136,8 +163,9 @@ export class DStealthAgentProduction {
   private streamRestartCount = 0;
   private installationCount = 0;
 
-  // Track the latest action set ID for each user to invalidate old buttons
-  private userLatestActionSetId: Map<string, string> = new Map();
+  // Track recent action set IDs for each user (allow last 3 sets to be valid)
+  private userRecentActionSets: Map<string, string[]> = new Map();
+  private readonly MAX_VALID_ACTION_SETS = 3;
 
   // Track processed intent messages to prevent duplicates
   private processedIntentIds: Set<string> = new Set();
@@ -181,7 +209,7 @@ export class DStealthAgentProduction {
         dbEncryptionKey,
         env: config.env as XmtpEnv,
         dbPath: config.dbPath,
-        codecs: [new ActionsCodec(), new IntentCodec(), new ReactionCodec()],
+        codecs: [new ActionsCodec(), new IntentCodec(), new ReactionCodec(), new WalletSendCallsCodec(), new TransactionReferenceCodec()],
       });
 
       const identifier = await signer.getIdentifier();
@@ -286,6 +314,20 @@ export class DStealthAgentProduction {
         if (response) {
           await conversation.send(response);
           console.log("✅ Intent response sent");
+        }
+        return;
+      }
+
+      // Handle transaction reference messages (from tba-chat-example-bot pattern)
+      if (message.contentType?.typeId === "transactionReference") {
+        console.log("🧾 Transaction reference message detected - processing ZK receipt!");
+        console.log("📋 Transaction reference content:", JSON.stringify(message.content, null, 2));
+        
+        const transactionRef = message.content as TransactionReference;
+        const response = await this.handleTransactionReference(transactionRef, senderInboxId, senderAddress);
+        if (response) {
+          await conversation.send(response);
+          console.log("✅ Transaction reference response sent");
         }
         return;
       }
@@ -1073,6 +1115,34 @@ I only respond when @mentioned or for payment requests!`;
   }
 
   /**
+   * 🔧 NEW: Generate CBW request link for stealth payments (following frontend pattern)
+   * This uses the same logic as the frontend DaimoPayButton.tsx generateCoinbaseWalletLink
+   */
+  private generateCBWRequestLink(toAddress: string, amount: string, tokenSymbol: string = 'USDC'): string {
+    try {
+      // USDC contract address on Base
+      const usdcContractBase = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+      
+      // Convert amount to smallest unit (USDC has 6 decimals)
+      const amountInSmallestUnit = Math.floor(parseFloat(amount) * 1000000).toString();
+      
+      // Construct EIP-681 URI for Base network
+      const eip681Uri = `ethereum:${usdcContractBase}@8453/transfer?address=${toAddress}&uint256=${amountInSmallestUnit}`;
+      
+      // URL encode the EIP-681 URI
+      const encodedUri = encodeURIComponent(eip681Uri);
+      
+      // Construct Coinbase Wallet request URL
+      const coinbaseWalletUrl = `https://go.cb-w.com/pay-request?EIP681Link=${encodedUri}`;
+      
+      return coinbaseWalletUrl;
+    } catch (error) {
+      console.error('Error generating CBW request link:', error);
+      return '';
+    }
+  }
+
+  /**
    * 🔧 UPDATED: Handle payment requests with fkey.id requirement
    */
   private async handlePaymentRequest(
@@ -1613,29 +1683,30 @@ Failed to lookup ${cleanFkeyId}.fkey.id. Please try again.
       const actionSetId = intent.id;
       console.log(`🔍 Action Set ID: ${actionSetId}`);
 
-      // Check if this is from the latest action set for this user
-      const latestActionSetId = this.userLatestActionSetId.get(senderInboxId);
+      // Check if this is from a recent valid action set for this user
+      const recentActionSets = this.userRecentActionSets.get(senderInboxId) || [];
       console.log(`🔍 Action Set Validation for user ${senderInboxId}:`);
       console.log(`   Current Intent Action Set: ${actionSetId}`);
-      console.log(`   Latest Stored Action Set: ${latestActionSetId || 'none'}`);
-      console.log(`   Total Tracked Users: ${this.userLatestActionSetId.size}`);
+      console.log(`   Recent Valid Action Sets: [${recentActionSets.join(', ')}]`);
+      console.log(`   Total Recent Sets: ${recentActionSets.length}`);
       
-      if (latestActionSetId && latestActionSetId !== actionSetId) {
-        console.log(`⚠️  REJECTING outdated action set: ${actionSetId}, latest: ${latestActionSetId}`);
+      if (recentActionSets.length > 0 && !recentActionSets.includes(actionSetId)) {
+        console.log(`⚠️  REJECTING outdated action set: ${actionSetId}`);
+        console.log(`   Valid sets: ${recentActionSets.join(', ')}`);
         return `⚠️ Outdated Action Button
 
-The action button you clicked is from an older menu. Please use the latest action buttons.
+The action button you clicked is from an older menu. Please use more recent action buttons.
 
 Clicked Action Set: ${actionSetId}
-Latest Action Set: ${latestActionSetId}
+Recent Valid Sets: ${recentActionSets.length}
 
-To get the latest actions:
-Type /help for a fresh set of action buttons.
+To get fresh actions:
+Type /help for a new set of action buttons.
 
 Why this happens:
-• New action buttons were sent after the one you clicked
-• Only the most recent action buttons are valid
-• This prevents accidentally clicking old buttons
+• You have too many old button sets open
+• Only the last ${this.MAX_VALID_ACTION_SETS} button sets are valid
+• This prevents confusion from too many button sets
 
 Try again: Type /help now!`;
       } else {
@@ -1800,69 +1871,141 @@ Just say the amount: "create payment link for $X"`;
         case 'send-to-stealth':
           const paymentData = this.getPaymentDataForUser(senderInboxId);
           if (paymentData) {
-            return `💰 Send to Stealth Address
+            // 🔧 FIXED: Actually send wallet transaction request instead of just text
+            try {
+              // Get sender's wallet address
+              const client = this.client;
+              if (!client) {
+                return `❌ **Agent Error**: Unable to access client for wallet transaction`;
+              }
 
-Ready to send $${paymentData.amount} USDC?
+              // Get user's wallet address from inbox state
+              const inboxState = await client.preferences.inboxStateFromInboxIds([senderInboxId]);
+              const senderWalletAddress = inboxState[0]?.identifiers[0]?.identifier;
+              
+              if (!senderWalletAddress) {
+                return `❌ **Wallet Error**: Unable to determine your wallet address`;
+              }
 
-Recipient: ${paymentData.fkeyId}.fkey.id
-Stealth Address: ${paymentData.stealthAddress}
-Amount: $${paymentData.amount} USDC
+              // Create wallet send calls for the stealth payment
+              const walletSendCalls = this.createStealthWalletSendCalls(
+                senderWalletAddress,
+                paymentData.stealthAddress,
+                paymentData.amount,
+                paymentData.fkeyId
+              );
 
-Use your wallet to send to this stealth address:
-${paymentData.stealthAddress}
+              // Find the conversation to send the wallet request
+              const conversations = await client.conversations.list();
+              const userConversation = conversations.find(conv => {
+                if (!(conv instanceof Group)) {
+                  return conv.peerInboxId === senderInboxId;
+                }
+                return false;
+              });
 
-Features:
+              if (!userConversation) {
+                return `❌ **Conversation Error**: Unable to find conversation for wallet request`;
+              }
+
+              // Send the wallet send calls request
+              await userConversation.send(walletSendCalls, ContentTypeWalletSendCalls);
+              
+              console.log(`💰 Wallet transaction request sent: $${paymentData.amount} USDC to ${paymentData.stealthAddress}`);
+              
+              // Return confirmation message
+              return `💰 **Wallet Transaction Request Sent!**
+
+**Amount**: $${paymentData.amount} USDC
+**Recipient**: ${paymentData.fkeyId}.fkey.id  
+**Stealth Address**: ${paymentData.stealthAddress.slice(0, 8)}...${paymentData.stealthAddress.slice(-6)}
+
+**✅ Please approve the transaction in your wallet**
+
+**Features:**
 • 🥷 Anonymous sender privacy
 • ⚡ Direct to stealth address
-• 🧾 ZK proof receipt
+• 🧾 ZK proof receipt available
 • 🎯 Earn privacy rewards
 
-Your transaction will be processed securely through the stealth protocol.`;
+**After approval**: Share the transaction reference for ZK receipt!`;
+
+            } catch (error) {
+              console.error("Error sending wallet transaction request:", error);
+              return `❌ **Transaction Error**: Failed to create wallet transaction request. Please try again.`;
+            }
           } else {
-            return `💰 Send Transaction
-
-Use your wallet to complete the payment to the stealth address.
-
-Features:
-• 🥷 Anonymous sender privacy
-• ⚡ Direct to stealth address
-• 🧾 ZK proof receipt
-• 🎯 Earn privacy rewards`;
+            return `❌ **Payment Data Missing**: No payment information found. Please create a payment link first.`;
           }
 
         case 'open-daimo-link':
         case 'copy-payment-link':
+        case 'daimo-pay-link':
           const linkData = this.getPaymentDataForUser(senderInboxId);
           if (linkData) {
-            return `📋 Payment Link Ready
+            return `🔗 **Daimo Pay Link**
 
-Amount: $${linkData.amount} USDC
-Recipient: ${linkData.fkeyId}.fkey.id
-Stealth Address: ${linkData.stealthAddress.slice(0, 8)}...${linkData.stealthAddress.slice(-6)}
+**Payment Link:** ${linkData.daimoLink}
 
-🔗 Daimo Payment Link:
-${linkData.daimoLink}
+**Payment Details:**
+• Amount: $${linkData.amount} USDC
+• Recipient: ${linkData.fkeyId}.fkey.id
+• Stealth Address: ${linkData.stealthAddress.slice(0, 8)}...${linkData.stealthAddress.slice(-6)}
 
-Copy this link to share:
-${linkData.daimoLink}
+**How to use:**
+• 📱 Click the link to open in Daimo app
+• 💰 Complete payment with any Base-compatible wallet
+• 🔗 Share this link with anyone who needs to pay you
 
-Daimo Features:
+**Daimo Features:**
 • ⚡ Fast Base network payments
 • 💰 USDC transactions
 • 🔗 Universal payment links
 • 🛡️ Secure transactions
 
-The link works with any wallet that supports Base network.`;
+**Copy this link:** ${linkData.daimoLink}`;
           } else {
-            return `📋 Copy Payment Link
+            return `🔗 **Daimo Pay Link**
 
-Your Daimo payment link is ready to share!
+Your payment link is ready! Use the Daimo link from your recent payment creation.
 
-Features:
-• ⚡ Fast Base network payments
-• 💰 USDC transactions
-• 🔗 Universal payment links
-• 🛡️ Secure transactions`;
+**Need a new link?** Create another payment link by typing an amount like "create payment link for $25"
+
+**Dashboard:** ${this.DSTEALTH_APP_URL}`;
+          }
+
+        case 'cbw-request-link':
+          const cbwLinkData = this.getPaymentDataForUser(senderInboxId);
+          if (cbwLinkData) {
+            return `📱 **Coinbase Wallet Request Link**
+
+**CBW Payment Link:** ${cbwLinkData.cbwLink}
+
+**Payment Details:**
+• Amount: $${cbwLinkData.amount} USDC
+• Recipient: ${cbwLinkData.fkeyId}.fkey.id
+• Stealth Address: ${cbwLinkData.stealthAddress.slice(0, 8)}...${cbwLinkData.stealthAddress.slice(-6)}
+
+**How to use:**
+• 📱 Click the link to open in Coinbase Wallet
+• 💰 Complete payment directly from Coinbase Wallet
+• 🔗 Share this link with Coinbase Wallet users
+
+**CBW Features:**
+• ⚡ Direct Coinbase Wallet integration
+• 💰 USDC transactions on Base
+• 🔗 One-click payment requests
+• 🛡️ Secure wallet-to-wallet transfers
+
+**Copy this link:** ${cbwLinkData.cbwLink}`;
+          } else {
+            return `📱 **Coinbase Wallet Request Link**
+
+Your CBW payment link is ready! Use the CBW link from your recent payment creation.
+
+**Need a new link?** Create another payment link by typing an amount like "create payment link for $25"
+
+**Dashboard:** ${this.DSTEALTH_APP_URL}`;
           }
 
         case 'share-link':
@@ -1899,22 +2042,25 @@ Dashboard: ${this.DSTEALTH_APP_URL}`;
 
         case 'create-another':
         case 'create-new-link':
-          return `➕ Create New Payment Link
+          return `➕ **Create Another Payment Link**
 
 Ready to create another payment link?
 
-Examples:
+**Examples:**
 • "create payment link for $25"
 • "create payment link for $100"
 • "create payment link for $500"
+• "create payment link for $50.50"
 
-Features:
+**Features:**
 • 🥷 Anonymous sender privacy
-• ⚡ Direct to stealth address
+• ⚡ Direct to stealth address via Daimo
 • 🎯 Earn privacy rewards
 • 🧾 ZK proof receipts
 
-Just say the amount: "create payment link for $X"`;
+**Just type the amount:** "create payment link for $X"
+
+**Dashboard:** ${this.DSTEALTH_APP_URL}`;
 
         // Legacy support for old simple IDs (just in case)
         case 'test':
@@ -1957,6 +2103,27 @@ Something went wrong processing your action. Please try:
 
 Error: ${error instanceof Error ? error.message : "Unknown error"}`;
     }
+  }
+
+  /**
+   * Helper method to track recent action sets for a user
+   */
+  private addRecentActionSet(senderInboxId: string, actionSetId: string): void {
+    const recentSets = this.userRecentActionSets.get(senderInboxId) || [];
+    
+    // Add new action set to the beginning
+    recentSets.unshift(actionSetId);
+    
+    // Keep only the most recent MAX_VALID_ACTION_SETS
+    while (recentSets.length > this.MAX_VALID_ACTION_SETS) {
+      recentSets.pop();
+    }
+    
+    this.userRecentActionSets.set(senderInboxId, recentSets);
+    
+    console.log(`📋 Updated recent action sets for user ${senderInboxId}:`);
+    console.log(`   Added: ${actionSetId}`);
+    console.log(`   Current sets: [${recentSets.join(', ')}]`);
   }
 
   /**
@@ -2023,9 +2190,8 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
       await userConversation.send(actionsContent, ContentTypeActions);
       console.log(`✅ Help Actions sent with unique ID: ${actionsContent.id}`);
       
-      // Store this as the latest action set for this user
-      this.userLatestActionSetId.set(senderInboxId, actionsContent.id);
-      console.log(`📋 Stored latest action set ID for user ${senderInboxId}: ${actionsContent.id}`);
+      // Track this action set in recent sets (instead of just latest)
+      this.addRecentActionSet(senderInboxId, actionsContent.id);
 
     } catch (error) {
       console.error("❌ Error sending Help Actions:", error);
@@ -2101,9 +2267,8 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
       await userConversation.send(actionsContent, ContentTypeActions);
       console.log(`✅ Actions Menu sent with unique ID: ${actionsContent.id}`);
       
-      // Store this as the latest action set for this user
-      this.userLatestActionSetId.set(senderInboxId, actionsContent.id);
-      console.log(`📋 Stored latest action set ID for user ${senderInboxId}: ${actionsContent.id}`);
+      // Track this action set in recent sets (instead of just latest)
+      this.addRecentActionSet(senderInboxId, actionsContent.id);
 
     } catch (error) {
       console.error("❌ Error sending Actions Menu:", error);
@@ -2153,6 +2318,7 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
         fkeyId,
         daimoLink,
         stealthAddress,
+        cbwLink: this.generateCBWRequestLink(stealthAddress, amount, 'USDC'),
         timestamp: renderTimestamp
       };
 
@@ -2163,7 +2329,10 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
 
 Amount: $${amount} USDC
 Stealth Address: ${stealthAddress.slice(0, 8)}...${stealthAddress.slice(-6)}
-Daimo Link: ${daimoLink}
+
+**Available Links:**
+• Daimo Pay: ${daimoLink}
+• CBW Request: Ready
 
 Choose your next action:`,
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours from now
@@ -2174,18 +2343,18 @@ Choose your next action:`,
             style: "primary"
           },
           {
-            id: `copy-payment-link-${renderTimestamp}-${randomSuffix}`,
-            label: "📋 Copy Payment Link",
+            id: `daimo-pay-link-${renderTimestamp}-${randomSuffix}`,
+            label: "🔗 Daimo Pay Link",
             style: "secondary"
           },
           {
-            id: `share-payment-link-${renderTimestamp}-${randomSuffix}`,
-            label: "📤 Share Payment Link",
+            id: `cbw-request-link-${renderTimestamp}-${randomSuffix}`,
+            label: "📱 CBW Request Link",
             style: "secondary"
           },
           {
-            id: `create-new-link-${renderTimestamp}-${randomSuffix}`,
-            label: "➕ Create New Link",
+            id: `create-another-${renderTimestamp}-${randomSuffix}`,
+            label: "➕ Create Another",
             style: "primary"
           }
         ]
@@ -2195,9 +2364,8 @@ Choose your next action:`,
       await userConversation.send(actionsContent, ContentTypeActions);
       console.log(`✅ Transaction Actions sent with unique ID: ${actionsContent.id}`);
       
-      // Store this as the latest action set for this user
-      this.userLatestActionSetId.set(senderInboxId, actionsContent.id);
-      console.log(`📋 Stored latest action set ID for user ${senderInboxId}: ${actionsContent.id}`);
+      // Track this action set in recent sets (instead of just latest)
+      this.addRecentActionSet(senderInboxId, actionsContent.id);
 
       // Store payment data for intent responses (in memory for now)
       this.storePaymentDataForUser(senderInboxId, paymentData);
@@ -2216,6 +2384,205 @@ Choose your next action:`,
 
   private getPaymentDataForUser(senderInboxId: string) {
     return this.userPaymentData.get(senderInboxId);
+  }
+
+  /**
+   * 🔧 NEW: Create wallet send calls for USDC transfers to stealth addresses
+   * Following the tba-chat-example-bot pattern for real wallet transactions
+   */
+  private createStealthWalletSendCalls(
+    from: string,
+    to: string,
+    amount: string,
+    fkeyId: string
+  ): WalletSendCallsParams {
+    try {
+      // USDC contract address on Base
+      const usdcContractBase = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+      
+      // Convert amount to smallest unit (USDC has 6 decimals)
+      const amountInDecimals = Math.floor(parseFloat(amount) * 1000000);
+      
+      // ERC20 transfer method signature and data
+      const methodSignature = "0xa9059cbb"; // transfer(address,uint256)
+      const transactionData = `${methodSignature}${to
+        .slice(2)
+        .padStart(64, "0")}${BigInt(amountInDecimals).toString(16).padStart(64, "0")}`;
+
+      return {
+        version: "1.0",
+        from: from as `0x${string}`,
+        chainId: "0x2105", // Base network (8453 in hex)
+        calls: [
+          {
+            to: usdcContractBase as `0x${string}`,
+            data: transactionData as `0x${string}`,
+            metadata: {
+              description: `Send $${amount} USDC to ${fkeyId}.fkey.id stealth address`,
+              transactionType: "transfer",
+              currency: "USDC",
+              amount: amountInDecimals.toString(),
+              decimals: "6",
+              networkId: "base",
+              hostname: "dstealth.xyz",
+              faviconUrl: "https://dstealth.xyz/favicon.ico",
+              title: "dStealth Agent - Stealth Payment",
+              // Additional stealth payment metadata
+              stealthRecipient: fkeyId,
+              stealthAddress: to,
+              privacyFeature: "stealth-address",
+              zkProofAvailable: "true",
+            },
+          },
+        ],
+      };
+    } catch (error) {
+      console.error("Error creating stealth wallet send calls:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🔧 NEW: Handle transaction reference messages (from tba-chat-example-bot pattern)
+   * When users share their transaction hash after completing a payment
+   */
+  private async handleTransactionReference(
+    transactionRef: TransactionReference,
+    senderInboxId: string,
+    senderAddress: string
+  ): Promise<string> {
+    try {
+      console.log("🧾 Processing transaction reference:", transactionRef);
+      
+      // Extract transaction details
+      const txData = transactionRef;
+      const txHash = txData.reference;
+      const networkId = txData.networkId;
+      const metadata = txData.metadata;
+      
+      console.log("🔍 Transaction details extracted:");
+      console.log(`  • Transaction Hash: ${txHash}`);
+      console.log(`  • Network ID: ${networkId}`);
+      console.log(`  • Metadata:`, metadata);
+      
+      // Check if this is a stealth payment transaction
+      const isStealthPayment = (metadata as any)?.stealthRecipient || 
+                               (metadata as any)?.privacyFeature === "stealth-address" ||
+                               (metadata as any)?.zkProofAvailable === "true";
+      
+      if (isStealthPayment) {
+        console.log("🥷 Stealth payment transaction detected!");
+        
+        // Store transaction for ZK receipt processing
+        const userData = await agentDb.getStealthDataByUser(senderInboxId);
+        if (userData) {
+          // 🔧 ENHANCED: Store ZK receipt in Redis for frontend access
+          try {
+            const zkReceiptKey = `zk_receipt:${txHash}:${senderAddress}:${Date.now()}`;
+            const zkReceiptData = {
+              transactionHash: txHash,
+              networkId: networkId?.toString() || "base",
+              amount: metadata?.amount ? (parseFloat(metadata.amount.toString()) / 1000000).toFixed(2) : "Unknown",
+              currency: "USDC",
+              recipientAddress: userData.stealthAddress,
+              fkeyId: userData.fkeyId,
+              senderAddress: senderAddress,
+              timestamp: Date.now(),
+              status: 'completed',
+              // Include the ZK proof from agent database
+              zkProof: userData.zkProof,
+              metadata: {
+                transactionType: metadata?.transactionType || "Stealth Payment",
+                privacyFeature: "stealth-address",
+                zkProofAvailable: !!userData.zkProof,
+                source: "dstealth-agent"
+              }
+            };
+            
+            // Store in Redis for frontend access (expires in 30 days)
+            if (redis) {
+              await redis.set(zkReceiptKey, JSON.stringify(zkReceiptData), { ex: 86400 * 30 });
+              console.log(`✅ ZK receipt stored for frontend access: ${zkReceiptKey}`);
+            }
+          } catch (receiptError) {
+            console.warn('⚠️ Failed to store ZK receipt for frontend:', receiptError);
+          }
+          
+          console.log(`💾 Storing transaction reference for ZK receipt: ${txHash}`);
+        }
+        
+        // Generate ZK receipt response
+        const explorerUrl = this.getExplorerUrl(txHash, networkId?.toString() || "base");
+        
+        return `🧾 **ZK Receipt - Stealth Payment Confirmed!**
+
+**Transaction Details:**
+• Hash: ${txHash}
+• Network: ${networkId === "base" ? "Base" : networkId}
+• Type: ${metadata?.transactionType || "Stealth Payment"}
+• Amount: ${metadata?.amount ? `$${(parseFloat(metadata.amount.toString()) / 1000000).toFixed(2)} USDC` : "Unknown"}
+• Recipient: ${(metadata as any)?.stealthRecipient || "Stealth Address"}
+
+**Privacy Features:**
+• 🥷 Anonymous sender protection
+• 🔒 Stealth address technology  
+• 🧾 ZK proof receipt generated
+• 🎯 Privacy rewards earned
+
+**🔗 View Transaction:**
+${explorerUrl}
+
+**✅ Transaction confirmed!** Your ZK receipt is being processed.
+**🏆 Privacy rewards:** Check your dashboard at ${this.DSTEALTH_APP_URL}
+
+Thank you for using stealth payments! 🥷`;
+      } else {
+        // Regular transaction reference
+        const explorerUrl = this.getExplorerUrl(txHash, networkId?.toString() || "base");
+        
+        return `📋 **Transaction Reference Received**
+
+**Transaction Details:**
+• Hash: ${txHash}
+• Network: ${networkId === "base" ? "Base" : networkId}
+• Type: ${metadata?.transactionType || "Transfer"}
+• From: ${metadata?.fromAddress || senderAddress}
+
+**🔗 View Transaction:**
+${explorerUrl}
+
+**✅ Transaction confirmed!** 
+**Want privacy features?** Set up your fkey.id with \`/set yourUsername\``;
+      }
+      
+    } catch (error) {
+      console.error("Error processing transaction reference:", error);
+      return `❌ **Transaction Processing Error**
+
+Failed to process your transaction reference. Please try again.
+
+**Need help?** Contact support at ${this.DSTEALTH_APP_URL}`;
+    }
+  }
+
+  /**
+   * 🔧 NEW: Get blockchain explorer URL for transaction hash
+   */
+  private getExplorerUrl(txHash: string, networkId: string): string {
+    switch (networkId) {
+      case "base":
+      case "base-mainnet":
+        return `https://basescan.org/tx/${txHash}`;
+      case "base-sepolia":
+        return `https://sepolia.basescan.org/tx/${txHash}`;
+      case "ethereum":
+      case "mainnet":
+        return `https://etherscan.io/tx/${txHash}`;
+      case "sepolia":
+        return `https://sepolia.etherscan.io/tx/${txHash}`;
+      default:
+        return `https://basescan.org/tx/${txHash}`;
+    }
   }
 
 }

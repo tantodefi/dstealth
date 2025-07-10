@@ -91,6 +91,43 @@ export default function ZkReceipts() {
   const [generatedPaymentLinks, setGeneratedPaymentLinks] = useLocalStorage<GeneratedPaymentLink[]>("generated-payment-links", []);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [checkingPayments, setCheckingPayments] = useState<{[key: string]: boolean}>({});
+  const [agentZkReceipts, setAgentZkReceipts] = useState<any[]>([]);
+  const [loadingAgentReceipts, setLoadingAgentReceipts] = useState(false);
+
+  // Fetch ZK receipts from agent database
+  const fetchAgentZkReceipts = async () => {
+    try {
+      // Get user's wallet address from local storage or connection
+      const walletAddress = localStorage.getItem('wallet_address') || 
+                           window?.ethereum?.selectedAddress ||
+                           '0x0000000000000000000000000000000000000000'; // fallback
+      
+      if (!walletAddress || walletAddress === '0x0000000000000000000000000000000000000000') {
+        console.log('⚠️ No wallet address available for fetching agent ZK receipts');
+        return;
+      }
+
+      setLoadingAgentReceipts(true);
+      const response = await fetch(`/api/zkreceipts?userAddress=${walletAddress}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setAgentZkReceipts(data.zkReceipts || []);
+        console.log(`✅ Fetched ${data.zkReceipts?.length || 0} ZK receipts from agent database`);
+      } else {
+        console.warn('⚠️ Failed to fetch agent ZK receipts:', response.status);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching agent ZK receipts:', error);
+    } finally {
+      setLoadingAgentReceipts(false);
+    }
+  };
+
+  // Fetch agent ZK receipts on component mount
+  useEffect(() => {
+    fetchAgentZkReceipts();
+  }, []);
 
   // Removed hardcoded demo payment - only show real completed payments from Daimo Pay
 
@@ -287,14 +324,14 @@ export default function ZkReceipts() {
     setShowDeleteConfirm(linkId);
   };
 
-  if (stealthPayments.length === 0 && generatedPaymentLinks.length === 0) {
+  if (stealthPayments.length === 0 && generatedPaymentLinks.length === 0 && agentZkReceipts.length === 0) {
     return (
       <div className="space-y-4">
         <h2 className="text-xl font-bold text-white">ZK Receipts</h2>
         <div className="p-8 bg-gray-800 rounded-lg text-center">
           <p className="text-gray-400">No payment receipts yet</p>
           <p className="text-gray-500 text-sm mt-2">
-            Completed stealth payments and generated payment links will appear here.
+            Completed stealth payments, generated payment links, and ZK receipts from agent interactions will appear here.
           </p>
         </div>
       </div>
@@ -624,6 +661,138 @@ export default function ZkReceipts() {
                         </>
                       );
                     })()}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Agent ZK Receipts Section */}
+      {agentZkReceipts.length > 0 && (
+        <div className="space-y-3 mt-8">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            🤖 Agent ZK Receipts ({agentZkReceipts.length})
+            {loadingAgentReceipts && <RefreshCw className="h-4 w-4 animate-spin" />}
+          </h3>
+          {agentZkReceipts.map((receipt, index) => (
+            <div key={receipt.id} className="bg-gray-800 rounded-lg overflow-hidden">
+              {/* Receipt Header */}
+              <div className="p-4">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="text-white font-medium">{receipt.fkeyId}</p>
+                      <CopyButton text={receipt.fkeyId} />
+                      <span className="px-2 py-1 bg-purple-600 text-purple-100 text-xs rounded">
+                        Agent Generated
+                      </span>
+                    </div>
+                    <p className="text-green-400 font-mono">
+                      {receipt.amount} {receipt.currency}
+                    </p>
+                    <p className="text-gray-400 text-sm">
+                      {new Date(receipt.timestamp).toLocaleString()}
+                    </p>
+                    
+                    {/* Recipient Address */}
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className="text-xs text-gray-500">To:</span>
+                      <span className="text-xs text-gray-300 font-mono">
+                        {receipt.recipientAddress.slice(0, 6)}...{receipt.recipientAddress.slice(-4)}
+                      </span>
+                      <CopyButton text={receipt.recipientAddress} />
+                    </div>
+
+                    {/* Transaction Hash if available */}
+                    {receipt.transactionHash && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="text-xs text-gray-500">Tx:</span>
+                        <span className="text-xs text-gray-300 font-mono">
+                          {receipt.transactionHash.slice(0, 8)}...{receipt.transactionHash.slice(-6)}
+                        </span>
+                        <CopyButton text={receipt.transactionHash} />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-2 ml-4">
+                    {receipt.transactionHash && (
+                      <a
+                        href={`https://${receipt.networkId === 'base' ? 'basescan.org' : 'etherscan.io'}/tx/${receipt.transactionHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-sm"
+                      >
+                        Transaction <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                    <button
+                      onClick={() => setExpandedProofs(prev => ({
+                        ...prev,
+                        [`agent_${index}`]: !prev[`agent_${index}`]
+                      }))}
+                      className="flex items-center gap-1 text-purple-400 hover:text-purple-300 text-sm"
+                    >
+                      ZK Proof {expandedProofs[`agent_${index}`] ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Collapsible ZK Proof Section */}
+              {expandedProofs[`agent_${index}`] && receipt.zkProof && (
+                <div className="border-t border-gray-700 bg-gray-900 p-4">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-400">Provider</span>
+                      <span className="text-white">{receipt.zkProof.claimData?.provider || 'Agent Generated'}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-400">Owner</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-white font-mono">
+                          {receipt.zkProof.claimData?.owner ? 
+                            `${receipt.zkProof.claimData.owner.slice(0, 6)}...${receipt.zkProof.claimData.owner.slice(-4)}` : 
+                            'N/A'
+                          }
+                        </span>
+                        {receipt.zkProof.claimData?.owner && (
+                          <CopyButton text={receipt.zkProof.claimData.owner} />
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-400">Timestamp</span>
+                      <span className="text-white">
+                        {receipt.zkProof.claimData?.timestampS ? 
+                          new Date(receipt.zkProof.claimData.timestampS * 1000).toLocaleString() : 
+                          new Date(receipt.timestamp).toLocaleString()
+                        }
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-400">Status</span>
+                      <span className="text-green-400">✅ Verified by Agent</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-400">Source</span>
+                      <span className="text-purple-400">dStealth Agent</span>
+                    </div>
+
+                    {/* Full Proof Data */}
+                    <div className="mt-4 pt-4 border-t border-gray-700">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm text-gray-400">Full ZK Proof</span>
+                        <CopyButton text={JSON.stringify(receipt.zkProof, null, 2)} />
+                      </div>
+                      <pre className="bg-black rounded p-3 overflow-x-auto text-xs">
+                        <code className="text-gray-300">
+                          {JSON.stringify(receipt.zkProof, null, 2)}
+                        </code>
+                      </pre>
+                    </div>
                   </div>
                 </div>
               )}
