@@ -134,6 +134,12 @@ export class DStealthAgentProduction {
   private processedMessageCount = 0;
   private groupIntroductions: Set<string> = new Set();
 
+  // Track the latest action set ID for each user to invalidate old buttons
+  private userLatestActionSetId: Map<string, string> = new Map();
+
+  // Track processed intent messages to prevent duplicates
+  private processedIntentIds: Set<string> = new Set();
+
   // Configuration
   private readonly FLUIDKEY_REFERRAL_URL = "https://app.fluidkey.com/?ref=62YNSG";
   private readonly DSTEALTH_APP_URL = "https://dstealth.xyz";
@@ -259,7 +265,7 @@ export class DStealthAgentProduction {
     try {
       if (!this.client) return;
 
-      this.processedMessageCount++;
+              this.processedMessageCount++;
 
       // Get sender info
       const inboxState = await this.client.preferences.inboxStateFromInboxIds([
@@ -378,7 +384,7 @@ export class DStealthAgentProduction {
   getStatus() {
     return {
       isRunning: !!this.client,
-      processedMessageCount: this.processedMessageCount,
+              processedMessageCount: this.processedMessageCount,
       agentAddress: this.agentAddress,
     };
   }
@@ -1577,17 +1583,86 @@ Failed to lookup ${cleanFkeyId}.fkey.id. Please try again.
 
       console.log(`🎯 Handling Intent Action: ${actionId}`);
 
-      // Handle action IDs with unique suffixes (for button state reset)
-      const baseActionId = actionId.includes('-') ? actionId.split('-')[0] : actionId;
+      // Create unique intent message ID for deduplication
+      const intentMessageId = `${senderInboxId}-${intent.id}-${actionId}`;
+      
+      // DEDUPLICATION: Check if we've already processed this intent
+      if (this.processedIntentIds.has(intentMessageId)) {
+        console.log(`🔄 DUPLICATE Intent detected - skipping: ${intentMessageId}`);
+        console.log(`   Already processed intents: ${this.processedIntentIds.size}`);
+        return ""; // Return empty string to avoid duplicate responses
+      }
+      
+      // Mark this intent as processed
+      this.processedIntentIds.add(intentMessageId);
+      console.log(`✅ Intent marked as processed: ${intentMessageId}`);
+      console.log(`   Total processed intents: ${this.processedIntentIds.size}`);
+      
+      // Clean up old intent IDs to prevent memory leaks (keep last 100)
+      if (this.processedIntentIds.size > 100) {
+        const oldIntents = Array.from(this.processedIntentIds).slice(0, 50);
+        oldIntents.forEach(id => this.processedIntentIds.delete(id));
+        console.log(`🧹 Cleaned up ${oldIntents.length} old intent IDs`);
+      }
+
+      // Extract action set ID from intent.id (e.g., "help-actions-1752163068713-wdn9zl")
+      const actionSetId = intent.id;
+      console.log(`🔍 Action Set ID: ${actionSetId}`);
+
+      // Check if this is from the latest action set for this user
+      const latestActionSetId = this.userLatestActionSetId.get(senderInboxId);
+      console.log(`🔍 Action Set Validation for user ${senderInboxId}:`);
+      console.log(`   Current Intent Action Set: ${actionSetId}`);
+      console.log(`   Latest Stored Action Set: ${latestActionSetId || 'none'}`);
+      console.log(`   Total Tracked Users: ${this.userLatestActionSetId.size}`);
+      
+      if (latestActionSetId && latestActionSetId !== actionSetId) {
+        console.log(`⚠️  REJECTING outdated action set: ${actionSetId}, latest: ${latestActionSetId}`);
+        return `⚠️ **Outdated Action Button**
+
+The action button you clicked is from an older menu. Please use the latest action buttons.
+
+**Clicked Action Set**: ${actionSetId}
+**Latest Action Set**: ${latestActionSetId}
+
+**To get the latest actions:**
+Type \`/help\` for a fresh set of action buttons.
+
+**Why this happens:**
+• New action buttons were sent after the one you clicked
+• Only the most recent action buttons are valid
+• This prevents accidentally clicking old buttons
+
+**Try again:** Type \`/help\` now!`;
+      } else {
+        console.log(`✅ Action set validation passed - processing action`);
+      }
+
+      // Extract base action ID from complex format: "action-name-timestamp-random"
+      // Examples: 
+      // - "get-help-1752163068713-wdn9zl" -> "get-help"
+      // - "create-payment-link-1752163068713-wdn9zl" -> "create-payment-link"
+      // - "test-simple-1752163068713-wdn9zl" -> "test-simple"
+      
+      let baseActionId = actionId;
+      
+      // Remove timestamp-random suffix pattern (e.g., "-1752163068713-wdn9zl")
+      const timestampPattern = /-\d{13}-[a-z0-9]{6}$/;
+      if (timestampPattern.test(actionId)) {
+        baseActionId = actionId.replace(timestampPattern, '');
+      }
+      
+      console.log(`🎯 Base Action ID extracted: "${baseActionId}" from "${actionId}"`);
       
       switch (baseActionId) {
-        case 'test':
+        case 'test-simple':
           return `🧪 **Test Button Clicked Successfully!**
 
 ✅ **Intent Message Working!** 
 
 The action button successfully triggered an Intent message with:
 • **Action ID**: ${actionId}
+• **Base Action**: ${baseActionId}
 • **Intent ID**: ${intent.id}
 • **Sender**: ${senderInboxId}
 
@@ -1596,6 +1671,7 @@ This confirms that:
 2. ✅ Intent messages are being sent by Coinbase Wallet
 3. ✅ Intent content type detection is working
 4. ✅ Intent message processing is functional
+5. ✅ Base action ID extraction is working
 
 🎉 **The action button system is working!** 
 
@@ -1606,30 +1682,6 @@ This confirms that:
 
 **Complete Setup**: ${this.DSTEALTH_APP_URL}`;
 
-        case 'balance':
-          return await this.handleBalanceCheck(senderInboxId);
-
-        case 'payment':
-          return `💳 **Create Payment Link**
-
-To create a payment link, specify the amount:
-
-**Examples:**
-• "create payment link for $25"
-• "create payment link for $100"
-• "create payment link for $500"
-
-**Setup Required:**
-🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
-📝 **Set fkey.id**: \`/set yourUsername\`
-🚀 **Complete setup**: ${this.DSTEALTH_APP_URL}
-
-**Try saying**: "create payment link for $25"`;
-
-        case 'help':
-          return this.getHelpMessage();
-
-        // Support legacy action IDs for backward compatibility
         case 'check-balance':
           return await this.handleBalanceCheck(senderInboxId);
 
@@ -1649,6 +1701,9 @@ To create a payment link, specify the amount:
 🚀 **Complete setup**: ${this.DSTEALTH_APP_URL}
 
 **Try saying**: "create payment link for $25"`;
+
+        case 'get-help':
+          return this.getHelpMessage();
 
         case 'setup-fkey':
           return `🔑 **Setup fkey.id**
@@ -1676,9 +1731,6 @@ ${this.DSTEALTH_APP_URL}
 
         case 'check-status':
           return this.getStatusMessage();
-
-        case 'get-help':
-          return this.getHelpMessage();
 
         case 'open-coinbase-wallet':
           return `🔗 **Open in Coinbase Wallet**
@@ -1746,17 +1798,33 @@ Ready to create another payment link?
 
 **Just say the amount**: "create payment link for $X"`;
 
+        // Legacy support for old simple IDs (just in case)
+        case 'test':
+        case 'balance':
+        case 'payment':
+        case 'help':
+          console.log(`🔄 Legacy action ID detected: ${baseActionId}`);
+          return this.handleIntentMessage({...intent, actionId: baseActionId === 'test' ? 'test-simple' : 
+                                                             baseActionId === 'balance' ? 'check-balance' :
+                                                             baseActionId === 'payment' ? 'create-payment-link' :
+                                                             'get-help'}, senderInboxId);
+
         default:
-          return `❓ **Unknown Action: ${actionId}**
+          console.log(`❓ Unknown base action ID: "${baseActionId}" from full ID: "${actionId}"`);
+          return `❓ **Unknown Action: ${baseActionId}**
 
 This action isn't recognized. Available actions:
-• 🧪 **Test Button**
-• 💰 **Check Balance**  
-• 💳 **Create Payment Link**
-• 🔑 **Setup fkey.id**
-• 🔗 **Manage Links**
-• 📊 **Check Status**
-• ❓ **Get Help**
+• 🧪 **Test Button** (test-simple)
+• 💰 **Check Balance** (check-balance)
+• 💳 **Create Payment Link** (create-payment-link)
+• 🔑 **Setup fkey.id** (setup-fkey)
+• 🔗 **Manage Links** (manage-links)
+• 📊 **Check Status** (check-status)
+• ❓ **Get Help** (get-help)
+
+**Debug Info:**
+• Full Action ID: ${actionId}
+• Extracted Base ID: ${baseActionId}
 
 **Need help?** Type \`/help\` for all commands!`;
       }
@@ -1835,6 +1903,10 @@ Something went wrong processing your action. Please try:
       // Send actions using the ActionsCodec
       await userConversation.send(actionsContent, ContentTypeActions);
       console.log(`✅ Help Actions sent with unique ID: ${actionsContent.id}`);
+      
+      // Store this as the latest action set for this user
+      this.userLatestActionSetId.set(senderInboxId, actionsContent.id);
+      console.log(`📋 Stored latest action set ID for user ${senderInboxId}: ${actionsContent.id}`);
 
     } catch (error) {
       console.error("❌ Error sending Help Actions:", error);
@@ -1909,6 +1981,10 @@ Something went wrong processing your action. Please try:
       // Send actions using the ActionsCodec
       await userConversation.send(actionsContent, ContentTypeActions);
       console.log(`✅ Actions Menu sent with unique ID: ${actionsContent.id}`);
+      
+      // Store this as the latest action set for this user
+      this.userLatestActionSetId.set(senderInboxId, actionsContent.id);
+      console.log(`📋 Stored latest action set ID for user ${senderInboxId}: ${actionsContent.id}`);
 
     } catch (error) {
       console.error("❌ Error sending Actions Menu:", error);
