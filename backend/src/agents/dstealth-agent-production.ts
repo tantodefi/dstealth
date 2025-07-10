@@ -324,6 +324,48 @@ export class DStealthAgentProduction {
   }
 
   /**
+   * Process text messages with dStealth agent logic
+   */
+  private async processTextMessage(messageContent: string, senderInboxId: string, isGroup: boolean): Promise<string | undefined> {
+    try {
+      console.log(`📝 Processing text message: "${messageContent}" from ${senderInboxId}`);
+      
+      // Handle fkey.id setting commands
+      if (this.isFkeySetCommand(messageContent)) {
+        return await this.handleFkeySetCommand(messageContent, senderInboxId, isGroup);
+      }
+
+      // Handle fkey status queries
+      if (this.isFkeyStatusQuery(messageContent)) {
+        return await this.handleFkeyStatusQuery(senderInboxId, isGroup);
+      }
+
+      // Handle commands (starts with /)
+      if (messageContent.startsWith('/')) {
+        return await this.handleCommand(messageContent, senderInboxId, isGroup);
+      }
+
+      // Handle payment amount requests
+      const paymentAmount = this.extractPaymentAmount(messageContent);
+      if (paymentAmount) {
+        return await this.handlePaymentRequest(paymentAmount, senderInboxId, "conversation", isGroup);
+      }
+
+      // Handle fkey.id pattern (e.g., "tantodefi.fkey.id")
+      if (this.isFkeyIdPattern(messageContent)) {
+        return await this.handleFkeyIdSubmission(messageContent, senderInboxId);
+      }
+
+      // Handle general messages with OpenAI or basic responses
+      return await this.processGeneralMessage(messageContent, senderInboxId, isGroup);
+
+    } catch (error) {
+      console.error("❌ Error processing text message:", error);
+      return "❌ Error processing your message. Please try again.";
+    }
+  }
+
+  /**
    * Get client for action button methods
    */
   getClient(): Client | null {
