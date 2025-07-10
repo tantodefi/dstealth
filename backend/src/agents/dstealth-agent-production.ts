@@ -1801,29 +1801,31 @@ Something went wrong processing your action. Please try:
 
       // Generate unique timestamp for this render to reset button states
       const renderTimestamp = Date.now();
+      const randomSuffix = Math.random().toString(36).substring(2, 8);
 
-      // Create Actions content with unique button IDs for state reset
+      // Create Actions content with unique everything for complete state reset
       const actionsContent: ActionsContent = {
-        id: `help-actions-${renderTimestamp}`,
-        description: "🤖 dStealth Agent - Choose an action:",
+        id: `help-actions-${renderTimestamp}-${randomSuffix}`,
+        description: `🤖 dStealth Agent - Choose an action (${new Date().toLocaleTimeString()}):`,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours from now
         actions: [
           {
-            id: `test-simple-${renderTimestamp}`,
+            id: `test-simple-${renderTimestamp}-${randomSuffix}`,
             label: "🧪 Test Button",
             style: "primary"
           },
           {
-            id: `check-balance-${renderTimestamp}`,
+            id: `check-balance-${renderTimestamp}-${randomSuffix}`,
             label: "💰 Check Balance",
             style: "secondary"
           },
           {
-            id: `create-payment-link-${renderTimestamp}`,
+            id: `create-payment-link-${renderTimestamp}-${randomSuffix}`,
             label: "💳 Create Payment Link",
             style: "primary"
           },
           {
-            id: `get-help-${renderTimestamp}`,
+            id: `get-help-${renderTimestamp}-${randomSuffix}`,
             label: "❓ Get Help",
             style: "secondary"
           }
@@ -1832,7 +1834,7 @@ Something went wrong processing your action. Please try:
 
       // Send actions using the ActionsCodec
       await userConversation.send(actionsContent, ContentTypeActions);
-      console.log("✅ Help Actions sent (proper content type)");
+      console.log(`✅ Help Actions sent with unique ID: ${actionsContent.id}`);
 
     } catch (error) {
       console.error("❌ Error sending Help Actions:", error);
@@ -1868,34 +1870,36 @@ Something went wrong processing your action. Please try:
 
       // Generate unique timestamp for this render to reset button states
       const renderTimestamp = Date.now();
+      const randomSuffix = Math.random().toString(36).substring(2, 8);
 
-      // Create comprehensive Actions menu with unique button IDs
+      // Create comprehensive Actions menu with unique everything
       const actionsContent: ActionsContent = {
-        id: `actions-menu-${renderTimestamp}`,
-        description: "🥷 dStealth Agent - Full Actions Menu:",
+        id: `actions-menu-${renderTimestamp}-${randomSuffix}`,
+        description: `🥷 dStealth Agent - Full Actions Menu (${new Date().toLocaleTimeString()}):`,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours from now
         actions: [
           {
-            id: `setup-fkey-${renderTimestamp}`,
+            id: `setup-fkey-${renderTimestamp}-${randomSuffix}`,
             label: "🔑 Setup fkey.id",
             style: "primary"
           },
           {
-            id: `check-balance-${renderTimestamp}`,
+            id: `check-balance-${renderTimestamp}-${randomSuffix}`,
             label: "💰 Check Balance",
             style: "secondary"
           },
           {
-            id: `create-payment-link-${renderTimestamp}`,
+            id: `create-payment-link-${renderTimestamp}-${randomSuffix}`,
             label: "💳 Create Payment Link",
             style: "primary"
           },
           {
-            id: `manage-links-${renderTimestamp}`,
+            id: `manage-links-${renderTimestamp}-${randomSuffix}`,
             label: "🔗 Manage Links",
             style: "secondary"
           },
           {
-            id: `check-status-${renderTimestamp}`,
+            id: `check-status-${renderTimestamp}-${randomSuffix}`,
             label: "📊 Check Status",
             style: "secondary"
           }
@@ -1904,7 +1908,7 @@ Something went wrong processing your action. Please try:
 
       // Send actions using the ActionsCodec
       await userConversation.send(actionsContent, ContentTypeActions);
-      console.log("✅ Actions Menu sent (proper content type)");
+      console.log(`✅ Actions Menu sent with unique ID: ${actionsContent.id}`);
 
     } catch (error) {
       console.error("❌ Error sending Actions Menu:", error);
@@ -1935,29 +1939,31 @@ Something went wrong processing your action. Please try:
 
       // Generate unique timestamp for this render to reset button states
       const renderTimestamp = Date.now();
+      const randomSuffix = Math.random().toString(36).substring(2, 8);
 
-      // Create payment-related Actions content with unique button IDs
+      // Create payment-related Actions content with unique everything
       const actionsContent: ActionsContent = {
-        id: `payment-actions-${renderTimestamp}`,
-        description: `💳 Payment Link Created for ${fkeyId}.fkey.id ($${amount} USDC)`,
+        id: `payment-actions-${renderTimestamp}-${randomSuffix}`,
+        description: `💳 Payment Link Created for ${fkeyId}.fkey.id ($${amount} USDC) - ${new Date().toLocaleTimeString()}`,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours from now
         actions: [
           {
-            id: `open-coinbase-wallet-${renderTimestamp}`,
+            id: `open-coinbase-wallet-${renderTimestamp}-${randomSuffix}`,
             label: "🔗 Open in Coinbase Wallet",
             style: "primary"
           },
           {
-            id: `share-link-${renderTimestamp}`,
+            id: `share-link-${renderTimestamp}-${randomSuffix}`,
             label: "📤 Share Link",
             style: "secondary"
           },
           {
-            id: `view-receipt-${renderTimestamp}`,
+            id: `view-receipt-${renderTimestamp}-${randomSuffix}`,
             label: "🧾 View Receipt",
             style: "secondary"
           },
           {
-            id: `create-another-${renderTimestamp}`,
+            id: `create-another-${renderTimestamp}-${randomSuffix}`,
             label: "➕ Create Another",
             style: "primary"
           }
@@ -1966,7 +1972,7 @@ Something went wrong processing your action. Please try:
 
       // Send actions using the ActionsCodec
       await conversation.send(actionsContent, ContentTypeActions);
-      console.log("✅ Payment Actions sent (proper content type)");
+      console.log(`✅ Payment Actions sent with unique ID: ${actionsContent.id}`);
 
     } catch (error) {
       console.error("❌ Error sending Payment Actions:", error);
