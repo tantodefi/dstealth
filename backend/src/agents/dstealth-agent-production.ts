@@ -1,21 +1,17 @@
 /**
- * 🔧 Production dStealth Agent - Clean Architecture with XMTP SDK v3.1.0
- *
+ * Production dStealth Agent with Action Button Support
+ * 
  * Core Features:
- * 1. FluidKey signup with referral code
- * 2. fkey.id setting and management via commands
- * 3. Payment link generation + ZK receipts (requires fkey.id)
- * 4. Smart group chat behavior with @mentions
- * 5. OpenAI integration for intelligent responses
- *
- * Architecture: Uses XmtpAgentBase for clean separation of concerns
+ * 1. FluidKey signup with referral code  
+ * 2. fkey.id setting and management
+ * 3. Payment link generation + ZK receipts
+ * 4. Coinbase Wallet action buttons (Actions/Intent support)
+ * 5. Smart group chat behavior with @mentions
  */
 
 import { agentDb } from '../lib/agent-database.js';
 import { daimoPayClient } from '../lib/daimo-pay.js';
-import { XmtpAgentBase, type XmtpAgentConfig, type ProcessedMessage, type StreamFailureCallback } from '../lib/xmtp-agent-base.js';
 import { createSigner, getEncryptionKeyFromHex } from '../helper.js';
-import { env } from '../config/env.js';
 import { Group, Client, type XmtpEnv } from '@xmtp/node-sdk';
 import { 
   ReactionCodec, 
@@ -28,7 +24,7 @@ import {
   type EncodedContent,
 } from "@xmtp/content-type-primitives";
 
-// 🔧 NEW: Coinbase Wallet Content Type IDs
+// Action button content types (from working example)
 export const ContentTypeActions = new ContentTypeId({
   authorityId: 'coinbase.com',
   typeId: 'actions',
@@ -43,7 +39,7 @@ export const ContentTypeIntent = new ContentTypeId({
   versionMinor: 0,
 });
 
-// 🔧 NEW: Coinbase Wallet Actions types
+// Action button types (from working example)
 interface Action {
   id: string;
   label: string;
@@ -65,24 +61,13 @@ interface IntentContent {
   metadata?: Record<string, string | number | boolean | null>;
 }
 
-interface DStealthAgentStatus {
-  isRunning: boolean;
-  streamRestartCount: number;
-  processedMessageCount: number;
-  installationCount: number;
-  lastError?: string;
-}
-
-// 🔧 NEW: Actions Codec Implementation
+// Action button codecs (from working example)
 export class ActionsCodec implements ContentCodec<ActionsContent> {
   get contentType(): ContentTypeId {
     return ContentTypeActions;
   }
 
   encode(content: ActionsContent): EncodedContent {
-    // Validate content before encoding
-    this.validateContent(content);
-
     return {
       type: ContentTypeActions,
       parameters: { encoding: 'UTF-8' },
@@ -93,17 +78,9 @@ export class ActionsCodec implements ContentCodec<ActionsContent> {
   decode(content: EncodedContent): ActionsContent {
     const encoding = content.parameters.encoding;
     if (encoding && encoding !== 'UTF-8') {
-      throw new Error(`unrecognized encoding ${encoding}`);
+      throw new Error(`Unsupported encoding: ${encoding}`);
     }
-
-    const decodedContent = new TextDecoder().decode(content.content);
-    try {
-      const parsed = JSON.parse(decodedContent) as ActionsContent;
-      this.validateContent(parsed);
-      return parsed;
-    } catch (error) {
-      throw new Error(`Failed to decode Actions content: ${error}`);
-    }
+    return JSON.parse(new TextDecoder().decode(content.content));
   }
 
   fallback(content: ActionsContent): string {
@@ -116,89 +93,14 @@ export class ActionsCodec implements ContentCodec<ActionsContent> {
   shouldPush(): boolean {
     return true;
   }
-
-  /**
-   * Validates Actions content according to XIP-67 specification
-   */
-  private validateContent(content: ActionsContent): void {
-    if (!content.id || typeof content.id !== 'string') {
-      throw new Error('Actions.id is required and must be a string');
-    }
-
-    if (!content.description || typeof content.description !== 'string') {
-      throw new Error('Actions.description is required and must be a string');
-    }
-
-    if (!Array.isArray(content.actions) || content.actions.length === 0) {
-      throw new Error('Actions.actions is required and must be a non-empty array');
-    }
-
-    if (content.actions.length > 10) {
-      throw new Error('Actions.actions cannot exceed 10 actions for UX reasons');
-    }
-
-    // Validate each action
-    content.actions.forEach((action, index) => {
-      if (!action.id || typeof action.id !== 'string') {
-        throw new Error(`Action[${index}].id is required and must be a string`);
-      }
-
-      if (!action.label || typeof action.label !== 'string') {
-        throw new Error(`Action[${index}].label is required and must be a string`);
-      }
-
-      if (action.label.length > 50) {
-        throw new Error(`Action[${index}].label cannot exceed 50 characters`);
-      }
-
-      if (action.style && !['primary', 'secondary', 'danger'].includes(action.style)) {
-        throw new Error(`Action[${index}].style must be one of: primary, secondary, danger`);
-      }
-
-      if (action.expiresAt && !this.isValidISO8601(action.expiresAt)) {
-        throw new Error(`Action[${index}].expiresAt must be a valid ISO-8601 timestamp`);
-      }
-    });
-
-    // Check for duplicate action IDs
-    const actionIds = content.actions.map((action) => action.id);
-    const uniqueActionIds = new Set(actionIds);
-    if (actionIds.length !== uniqueActionIds.size) {
-      throw new Error('Action.id values must be unique within Actions.actions array');
-    }
-
-    if (content.expiresAt && !this.isValidISO8601(content.expiresAt)) {
-      throw new Error('Actions.expiresAt must be a valid ISO-8601 timestamp');
-    }
-  }
-
-  /**
-   * Basic ISO-8601 timestamp validation
-   */
-  private isValidISO8601(timestamp: string): boolean {
-    try {
-      const date = new Date(timestamp);
-      return date.toISOString() === timestamp;
-    } catch {
-      return false;
-    }
-  }
 }
 
-/**
- * Intent codec for encoding/decoding Intent messages
- * Implements XMTP ContentCodec interface for Intent content type
- * Following TBA example exactly
- */
 export class IntentCodec implements ContentCodec<IntentContent> {
   get contentType(): ContentTypeId {
     return ContentTypeIntent;
   }
 
   encode(content: IntentContent): EncodedContent {
-    // Validate content before encoding
-    this.validateContent(content);
-
     return {
       type: ContentTypeIntent,
       parameters: { encoding: 'UTF-8' },
@@ -209,239 +111,114 @@ export class IntentCodec implements ContentCodec<IntentContent> {
   decode(content: EncodedContent): IntentContent {
     const encoding = content.parameters.encoding;
     if (encoding && encoding !== 'UTF-8') {
-      throw new Error(`unrecognized encoding ${encoding}`);
+      throw new Error(`Unsupported encoding: ${encoding}`);
     }
-
-    const decodedContent = new TextDecoder().decode(content.content);
-    try {
-      const parsed = JSON.parse(decodedContent) as IntentContent;
-      this.validateContent(parsed);
-      return parsed;
-    } catch (error) {
-      throw new Error(`Failed to decode Intent content: ${error}`);
-    }
+    return JSON.parse(new TextDecoder().decode(content.content));
   }
 
   fallback(content: IntentContent): string {
-    return `User selected action: ${content.actionId}`;
+    return `Intent: ${content.actionId}`;
   }
 
   shouldPush(): boolean {
     return true;
   }
-
-  /**
-   * Validates Intent content according to XIP-67 specification
-   */
-  private validateContent(content: IntentContent): void {
-    if (!content.id || typeof content.id !== 'string') {
-      throw new Error('Intent.id is required and must be a string');
-    }
-
-    if (!content.actionId || typeof content.actionId !== 'string') {
-      throw new Error('Intent.actionId is required and must be a string');
-    }
-
-    // Validate metadata if provided
-    if (content.metadata !== undefined) {
-      if (
-        typeof content.metadata !== 'object' ||
-        content.metadata === null ||
-        Array.isArray(content.metadata)
-      ) {
-        throw new Error('Intent.metadata must be an object if provided');
-      }
-
-      // Check for reasonable metadata size to avoid XMTP content limits
-      const metadataString = JSON.stringify(content.metadata);
-      if (metadataString.length > 10000) {
-        // 10KB limit for metadata
-        throw new Error('Intent.metadata is too large (exceeds 10KB limit)');
-      }
-    }
-  }
 }
 
-// 🔧 Custom ReactionCodec removed - using official XMTP package instead
-
 /**
- * Production-ready dStealth Agent focused on core business features
+ * Production dStealth Agent with action button support
  */
 export class DStealthAgentProduction {
-  private baseAgent: XmtpAgentBase | null = null;
+  private client: Client | null = null;
   private agentAddress: string | null = null;
   private processedMessageCount = 0;
-  private lastError: string | null = null;
-
-  // FluidKey referral configuration
-  private readonly FLUIDKEY_REFERRAL_URL = "https://app.fluidkey.com/?ref=62YNSG";
-  private readonly DSTEALTH_APP_URL = "https://dstealth.xyz";
-
-  // 🔧 NEW: Track group introductions to send welcome only once per group
   private groupIntroductions: Set<string> = new Set();
 
-  // 🔧 NEW: OpenAI configuration
+  // Configuration
+  private readonly FLUIDKEY_REFERRAL_URL = "https://app.fluidkey.com/?ref=62YNSG";
+  private readonly DSTEALTH_APP_URL = "https://dstealth.xyz";
   private readonly OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
   /**
-   * 🔧 UPDATED: Create and start the Production dStealth Agent
-   * Now uses TBA pattern by default for proper action button support
+   * Create and start the dStealth Agent
    */
   static async createAndStart(
-    config: XmtpAgentConfig,
-    streamFailureCallback?: StreamFailureCallback,
-    useTBAPattern: boolean = true // 🔧 NEW: Use TBA pattern by default
+    config: any,
+    streamFailureCallback?: any,
   ): Promise<DStealthAgentProduction> {
-    if (useTBAPattern) {
-      console.log("🚀 Using TBA Pattern for action button support");
-      return await DStealthAgentProduction.createAndStartTBA(config, streamFailureCallback);
-    } else {
-      console.log("🚀 Using legacy XmtpAgentBase pattern");
-      const agent = new DStealthAgentProduction();
-      await agent.initialize(config, streamFailureCallback);
-      return agent;
-    }
-  }
-
-  /**
-   * Initialize the agent with XMTP client and content type codecs
-   */
-  private async initialize(
-    config: XmtpAgentConfig,
-    streamFailureCallback?: StreamFailureCallback,
-  ): Promise<void> {
-    try {
-      console.log("🤖 Initializing Production dStealth Agent...");
-
-      // Register content type codecs for Coinbase Wallet Actions
-      const codecs = [
-        new ActionsCodec(),
-        new IntentCodec(),
-        new ReactionCodec(), // Add ReactionCodec here
-      ];
-
-      this.baseAgent = await XmtpAgentBase.createAndStart(
-        { ...config, codecs },
-        this.processMessage.bind(this),
-        streamFailureCallback,
-      );
-
-      // Get agent details
-      const agentClient = this.baseAgent.getClient();
-      const signer = createSigner(config.walletKey);
-      const identifier = await Promise.resolve(signer.getIdentifier());
-      this.agentAddress = identifier.identifier;
-
-      console.log("🔧 Registering 3 content type codecs with XMTP client");
-      console.log("   - coinbase.com/actions:1.0");
-      console.log("   - coinbase.com/intent:1.0");
-      console.log("   - xmtp.org/reaction:1.0");
-      console.log("✅ Production dStealth Agent initialized successfully");
-      console.log(`📬 Agent Address: ${this.agentAddress}`);
-      console.log(`📬 Agent Inbox ID: ${agentClient.inboxId}`);
-    } catch (error) {
-      console.error("❌ Failed to initialize Production dStealth Agent:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * 🔧 TBA PATTERN: Initialize with direct XMTP streaming (like TBA index.ts)
-   * This bypasses XmtpAgentBase to get direct access to contentType like TBA
-   */
-  static async createAndStartTBA(
-    config: XmtpAgentConfig,
-    streamFailureCallback?: StreamFailureCallback,
-  ): Promise<DStealthAgentProduction> {
+    console.log("🚀 Starting dStealth Agent with action button support");
     const agent = new DStealthAgentProduction();
-    await agent.initializeTBA(config, streamFailureCallback);
+    await agent.initialize(config, streamFailureCallback);
     return agent;
   }
 
   /**
-   * 🔧 TBA PATTERN: Direct XMTP initialization following TBA example exactly
+   * Initialize agent with action button support
    */
-  private async initializeTBA(
-    config: XmtpAgentConfig,
-    streamFailureCallback?: StreamFailureCallback,
-  ): Promise<void> {
+  private async initialize(config: any, streamFailureCallback?: any): Promise<void> {
     try {
-      console.log("🤖 TBA Pattern - Initializing dStealth Agent...");
+      console.log("🤖 Initializing dStealth Agent with action button support...");
 
-      // Create XMTP client exactly like TBA (from TBA index.ts)
+      // Create XMTP client with action button codecs (from working example)
       const signer = createSigner(config.walletKey);
       const dbEncryptionKey = getEncryptionKeyFromHex(config.encryptionKey);
       
-      // 🔧 TBA PATTERN: Create codecs exactly like TBA
-      const actionCodec = new ActionsCodec();
-      const intentCodec = new IntentCodec();
-      const reactionCodec = new ReactionCodec();
-      
-      console.log("🔧 TBA Pattern - Registering codecs with XMTP client");
+      console.log("🔧 Registering action button codecs:");
       console.log("   - coinbase.com/actions:1.0");
       console.log("   - coinbase.com/intent:1.0");
       console.log("   - xmtp.org/reaction:1.0");
       
-      // 🔧 TBA PATTERN: Create client with codecs (exactly like TBA)
-      const client = await Client.create(signer, {
+      // Create client with codecs for action buttons
+      this.client = await Client.create(signer, {
         dbEncryptionKey,
         env: config.env as XmtpEnv,
         dbPath: config.dbPath,
-        codecs: [actionCodec, intentCodec, reactionCodec], // TBA pattern
+        codecs: [new ActionsCodec(), new IntentCodec(), new ReactionCodec()],
       });
 
-      // Store client for our methods
-      this.tbaClient = client;
-      
       const identifier = await signer.getIdentifier();
-      this.agentAddress = typeof identifier === "object" && "identifier" in identifier
-        ? identifier.identifier
-        : (await identifier).identifier;
+      this.agentAddress = identifier.identifier;
 
-      console.log(`📧 TBA Pattern - Agent Address: ${this.agentAddress}`);
-      console.log(`🆔 TBA Pattern - Agent Inbox ID: ${client.inboxId}`);
-      console.log(`🌍 Environment: ${config.env}`);
+      console.log(`📧 Agent Address: ${this.agentAddress}`);
+      console.log(`🆔 Agent Inbox ID: ${this.client.inboxId}`);
 
-      // Sync conversations (TBA pattern)
-      console.log("🔄 TBA Pattern - Syncing conversations...");
-      await client.conversations.sync();
+      // Sync conversations
+      console.log("🔄 Syncing conversations...");
+      await this.client.conversations.sync();
 
-      console.log("👂 TBA Pattern - Listening for messages...");
-      
-      // 🔧 TBA PATTERN: Start message streaming exactly like TBA
-      this.startTBAMessageStream(client, streamFailureCallback);
+      // Start message streaming
+      this.startMessageStream(streamFailureCallback);
 
-      console.log("✅ TBA Pattern - dStealth Agent initialized successfully");
+      console.log("✅ dStealth Agent initialized with action button support");
     } catch (error) {
-      console.error("❌ TBA Pattern initialization failed:", error);
+      console.error("❌ Failed to initialize dStealth Agent:", error);
       throw error;
     }
   }
 
-  // Store TBA client
-  private tbaClient?: Client;
-
   /**
-   * 🔧 TBA PATTERN: Message streaming exactly like TBA index.ts
+   * Start message streaming (from working example pattern)
    */
-  private async startTBAMessageStream(
-    client: Client,
-    streamFailureCallback?: StreamFailureCallback,
-  ): Promise<void> {
-    const startStream = async (): Promise<void> => {
+  private async startMessageStream(streamFailureCallback?: any): Promise<void> {
+    if (!this.client) return;
+
+    console.log("👂 Listening for messages...");
+    
+    // Keep the agent running with proper error handling (from working example)
+    while (true) {
       try {
-        const stream = await client.conversations.streamAllMessages();
+        const stream = await this.client.conversations.streamAllMessages();
 
         for await (const message of stream) {
           try {
-            // Skip messages from the agent itself (TBA pattern)
-            if (!message || message.senderInboxId.toLowerCase() === client.inboxId.toLowerCase()) {
+            // Skip messages from the agent itself
+            if (!message || message.senderInboxId.toLowerCase() === this.client.inboxId.toLowerCase()) {
               continue;
             }
 
-            console.log(`📨 TBA Pattern - Received: ${message.contentType?.typeId} from ${message.senderInboxId}`);
+            console.log(`📨 Received: ${message.contentType?.typeId} from ${message.senderInboxId}`);
 
-            const conversation = await client.conversations.getConversationById(
+            const conversation = await this.client.conversations.getConversationById(
               message.conversationId
             );
 
@@ -450,208 +227,118 @@ export class DStealthAgentProduction {
               continue;
             }
 
-            // 🔧 TBA PATTERN: Process message with direct contentType access
-            await this.processTBAMessage(message, conversation);
+            // Process message with contentType detection (key for action buttons)
+            await this.processMessage(message, conversation);
 
           } catch (messageError: unknown) {
             const errorMessage = messageError instanceof Error ? messageError.message : String(messageError);
-            console.error("❌ TBA Pattern - Error processing individual message:", errorMessage);
-            try {
-              const conversation = await client.conversations.getConversationById(
-                message?.conversationId || ""
-              );
-              if (conversation) {
-                await conversation.send(
-                  `❌ Error processing message: ${errorMessage}`
-                );
-              }
-            } catch (sendError) {
-              console.error("❌ Failed to send error message to conversation:", sendError);
-            }
+            console.error("❌ Error processing individual message:", errorMessage);
           }
         }
       } catch (streamError: unknown) {
         const errorMessage = streamError instanceof Error ? streamError.message : String(streamError);
-        console.error("❌ TBA Pattern - Stream error occurred:", errorMessage);
+        console.error("❌ Stream error:", errorMessage);
         
-        if (streamFailureCallback) {
-          try {
-            await Promise.resolve(streamFailureCallback(streamError as Error));
-          } catch (callbackError) {
-            console.error("❌ Stream failure callback error:", callbackError);
-          }
+        // Auto-restart
+        console.log("🔄 Reconnecting in 5 seconds...");
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        
+        try {
+          await this.client.conversations.sync();
+        } catch (syncError) {
+          console.error("❌ Failed to sync conversations:", syncError);
         }
-
-        // Auto-restart with backoff
-        console.log("🔄 TBA Pattern - Attempting to reconnect in 5 seconds...");
-        setTimeout(async () => {
-          try {
-            await client.conversations.sync();
-            console.log("✅ Conversations re-synced successfully");
-            await this.startTBAMessageStream(client, streamFailureCallback);
-          } catch (restartError) {
-            console.error("❌ Failed to restart TBA stream:", restartError);
-          }
-        }, 5000);
       }
-    };
-
-    // Start the stream (don't await to prevent blocking)
-    startStream().catch((error) => {
-      console.error("❌ TBA Pattern - Background stream failed:", error);
-    });
+    }
   }
 
   /**
-   * Process incoming XMTP message and generate appropriate response
+   * Process messages with action button support (key method from working example)
    */
-  private async processMessage(
-    message: ProcessedMessage,
-  ): Promise<string | undefined> {
+  private async processMessage(message: any, conversation: any): Promise<void> {
     try {
+      if (!this.client) return;
+
       this.processedMessageCount++;
-      
-      // 🥷 NEW: Send proper ninja emoji reaction using Node SDK content type pattern
-      try {
-        if (this.baseAgent && message.messageId) {
-          const client = this.baseAgent.getClient();
-          const conversation = await client.conversations.getConversationById(message.conversationId);
-          
-          if (conversation) {
-            // Create proper XMTP reaction content
-            const reaction: Reaction = {
-              reference: message.messageId,
-              action: "added",
-              content: "🥷",
-              schema: "unicode"
-            };
-            
-            // Use proper Node SDK content type pattern (bypass type checking)
-            await (conversation as any).send(reaction, ContentTypeReaction);
-            console.log("🥷 Ninja reaction sent (proper content type)");
-          }
-        }
-      } catch (receiptError) {
-        console.error("⚠️ Failed to send ninja reaction:", receiptError);
-        // Fallback to simple emoji if content type fails
-        try {
-          const client = this.baseAgent?.getClient();
-          const conversation = await client?.conversations.getConversationById(message.conversationId);
-          if (conversation) {
-            await conversation.send("🥷");
-            console.log("🥷 Ninja emoji sent (fallback)");
-          }
-        } catch (fallbackError) {
-          console.error("⚠️ Fallback emoji also failed:", fallbackError);
-        }
-      }
-      
-      // 🔧 TBA PATTERN: Get the raw message to check contentType
-      // We need access to the original DecodedMessage, not our processed version
-      const client = this.baseAgent?.getClient();
-      if (!client) {
-        console.error("❌ No client available for message processing");
-        return undefined;
-      }
-      
-      // Get the conversation to access raw messages
-      const conversation = await client.conversations.getConversationById(message.conversationId);
-      if (!conversation) {
-        console.error("❌ No conversation found for message processing");
-        return undefined;
-      }
-      
-      // 🔧 TBA PATTERN: We need to get the raw message with contentType
-      // For now, let's work with what we have and add proper content type detection
-      const messageContent = message.content;
+
+      // Get sender info
+      const inboxState = await this.client.preferences.inboxStateFromInboxIds([
+        message.senderInboxId,
+      ]);
+      const senderAddress = inboxState[0]?.identifiers[0]?.identifier;
       const senderInboxId = message.senderInboxId;
-      
-      console.log(`💬 Processing message from ${senderInboxId}`);
-      console.log(`📋 Content type: ${typeof messageContent}`);
-      console.log(`📋 Message properties:`, Object.keys(message));
-      console.log(`📋 Message conversation ID:`, message.conversationId);
-      
-      // 🔧 TBA PATTERN: Check for Intent content type first
-      // NOTE: We need to modify XmtpAgentBase to preserve contentType information
-      // For now, we'll detect Intent messages by content structure
-      
-      // Try to parse as Intent first
-      if (typeof messageContent === 'string') {
-        try {
-          const parsed = JSON.parse(messageContent);
-          if (this.isIntentContent(parsed)) {
-            console.log("🎯 INTENT MESSAGE DETECTED! (parsed from JSON)");
-            const intent = parsed as IntentContent;
-            console.log(`🎯 Processing Intent: ${intent.actionId} from user ${senderInboxId}`);
-            console.log(`🎯 Intent details:`, JSON.stringify(intent, null, 2));
-            
-            const response = await this.handleIntentMessage(intent, senderInboxId);
-            return response;
-          }
-        } catch (parseError) {
-          // Not JSON, continue with normal processing
-        }
-      }
-      
-      // 🔧 TBA PATTERN: Handle Intent content type using object detection
-      if (this.isIntentContent(messageContent)) {
-        console.log("🎯 INTENT CONTENT TYPE DETECTED! (TBA pattern)");
-        const intent = messageContent as IntentContent;
-        console.log(`🎯 Processing Intent: ${intent.actionId} from user ${senderInboxId}`);
-        console.log(`🎯 Intent details:`, JSON.stringify(intent, null, 2));
+
+      // CRITICAL: Handle Intent messages from action buttons (from working example)
+      if (message.contentType?.typeId === "intent") {
+        console.log("🎯 Intent message detected - action button was clicked!");
+        console.log("📋 Intent content:", JSON.stringify(message.content, null, 2));
         
+        const intent = message.content as IntentContent;
         const response = await this.handleIntentMessage(intent, senderInboxId);
-        return response;
-      }
-      
-      // Check if message should be processed based on channel (DM vs group)
-      const isGroup = message.conversationId.startsWith("group-");
-      const shouldProcess = await this.shouldProcessMessage(
-        messageContent,
-        senderInboxId,
-        isGroup,
-        message.conversationId,
-      );
-      
-      if (!shouldProcess) {
-        console.log("⏸️ Message skipped - not addressed to agent");
-        return undefined;
-      }
-      
-      // Extract message text
-      const content = (messageContent as string).trim();
-      
-      console.log(`📝 Message content: "${content}"`);
-      
-      // Handle fkey.id setting commands first
-      if (this.isFkeySetCommand(content)) {
-        return await this.handleFkeySetCommand(content, senderInboxId, isGroup);
+        if (response) {
+          await conversation.send(response);
+          console.log("✅ Intent response sent");
+        }
+        return;
       }
 
-      // 🔧 NEW: Handle fkey status queries
-      if (this.isFkeyStatusQuery(content)) {
-        return await this.handleFkeyStatusQuery(senderInboxId, isGroup);
+      // Handle text messages  
+      if (message.contentType?.typeId === "text") {
+        // Send ninja reaction
+        try {
+          const reaction: Reaction = {
+            reference: message.id,
+            action: "added",
+            content: "🥷",
+            schema: "unicode"
+          };
+          await conversation.send(reaction, ContentTypeReaction);
+        } catch (reactionError) {
+          console.error("⚠️ Failed to send ninja reaction:", reactionError);
+        }
+
+        // Check if message should be processed
+        const isGroup = conversation instanceof Group;
+        const shouldProcess = await this.shouldProcessMessage(
+          message.content,
+          senderInboxId,
+          isGroup,
+          conversation.id
+        );
+
+        if (!shouldProcess) {
+          return;
+        }
+
+        // Process the message with our dStealth logic
+        const response = await this.processTextMessage(message.content, senderInboxId, isGroup);
+        if (response) {
+          await conversation.send(response);
+        }
+        return;
       }
 
-      // Handle fkey.id patterns (e.g., "tantodefi.fkey.id")
-      if (this.isFkeyIdPattern(content)) {
-        return await this.handleFkeyIdSubmission(content, senderInboxId);
-      }
-
-      // Extract payment amount if present
-      const paymentAmount = this.extractPaymentAmount(content);
-      if (paymentAmount) {
-        return await this.handlePaymentRequest(paymentAmount, senderInboxId, message.conversationId, isGroup);
-      }
-
-      // Process general message using OpenAI
-      const response = await this.processGeneralMessage(content, senderInboxId, isGroup);
-      
-      return response;
     } catch (error) {
       console.error("❌ Error processing message:", error);
-      throw error;
     }
+  }
+
+  /**
+   * Get client for action button methods
+   */
+  getClient(): Client | null {
+    return this.client;
+  }
+
+  /**
+   * Get agent status
+   */
+  getStatus() {
+    return {
+      isRunning: !!this.client,
+      processedMessageCount: this.processedMessageCount,
+      agentAddress: this.agentAddress,
+    };
   }
 
   /**
@@ -690,7 +377,7 @@ export class DStealthAgentProduction {
       const trimmed = messageContent.trim().toLowerCase();
       
       // Get conversation info to determine if it's a group or DM
-      const client = this.baseAgent?.getClient();
+      const client = this.client;
       if (!client) {
         console.log("🔇 No client available for conversation check");
         return false;
@@ -1662,16 +1349,16 @@ Then tell me your fkey.id username!`;
    * Get agent status message
    */
   private getStatusMessage(): string {
-    if (!this.baseAgent) {
+    if (!this.client) {
       return "❌ Agent not available";
     }
 
-    const status = this.baseAgent.getStatus();
+    const status = this.getStatus();
 
     return `📊 **Agent Status**
 
 **Status**: ${status.isRunning ? "🟢 Active" : "🔴 Inactive"}
-**Messages Processed**: ${this.processedMessageCount}
+**Messages Processed**: ${status.processedMessageCount}
 **Stream Restarts**: ${status.streamRestartCount}
 **Installations**: ${status.installationCount}/5
 
@@ -1682,7 +1369,7 @@ Then tell me your fkey.id username!`;
 • ZK receipt creation
 
 **XMTP SDK**: v3.1.0+ with enhanced reliability
-**Agent Address**: ${this.agentAddress}
+**Agent Address**: ${status.agentAddress}
 
 Agent is running optimally! 🚀`;
   }
@@ -2021,14 +1708,13 @@ Something went wrong processing your action. Please try:
    */
   private async sendHelpActionsMessage(senderInboxId: string): Promise<void> {
     try {
-      if (!this.baseAgent) {
+      if (!this.client) {
         console.log("⚠️ Base agent not available, skipping Help Actions message");
         return;
       }
 
       // Get user's conversations to send actions to
-      const client = this.baseAgent.getClient();
-      const conversations = await client.conversations.list();
+      const conversations = await this.client.conversations.list();
       
       // Find the conversation with this user
       const userConversation = conversations.find(conv => {
@@ -2086,14 +1772,13 @@ Something went wrong processing your action. Please try:
    */
   private async sendActionsMenu(senderInboxId: string): Promise<void> {
     try {
-      if (!this.baseAgent) {
+      if (!this.client) {
         console.log("⚠️ Base agent not available, skipping Actions menu");
         return;
       }
 
       // Get user's conversations to send actions to
-      const client = this.baseAgent.getClient();
-      const conversations = await client.conversations.list();
+      const conversations = await this.client.conversations.list();
       
       // Find the conversation with this user
       const userConversation = conversations.find(conv => {
@@ -2161,13 +1846,12 @@ Something went wrong processing your action. Please try:
     coinbaseWalletUrl: string
   ): Promise<void> {
     try {
-      if (!this.baseAgent) {
+      if (!this.client) {
         console.log("⚠️ Base agent not available, skipping payment Actions");
         return;
       }
 
-      const client = this.baseAgent.getClient();
-      const conversation = await client.conversations.getConversationById(conversationId);
+      const conversation = await this.client.conversations.getConversationById(conversationId);
       
       if (!conversation) {
         console.log("⚠️ Conversation not found, skipping payment Actions");
