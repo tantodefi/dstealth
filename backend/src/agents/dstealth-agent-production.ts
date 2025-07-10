@@ -1178,8 +1178,8 @@ Features:
 
 Share this link to receive payments!`;
 
-      // 🔧 NEW: Send Transaction Actions for the payment link
-      await this.sendTransactionActions(conversationId, amount, currentData.fkeyId, daimoResponse.url, currentAddress);
+      // 🔧 FIXED: Send Transaction Actions for the payment link - now uses senderInboxId
+      await this.sendTransactionActions(senderInboxId, amount, currentData.fkeyId, daimoResponse.url, currentAddress);
 
       return daimoMessage;
 
@@ -1360,37 +1360,37 @@ Then tell me your fkey.id username!`;
   }
 
   /**
-   * 🔧 UPDATED: Enhanced help message with new commands
+   * 🔧 UPDATED: Enhanced help message with new commands - No markdown formatting
    */
   private getHelpMessage(): string {
-    return `🤖 **dStealth Agent Commands** 🥷
+    return `🤖 dStealth Agent Commands 🥷
 
-**🔧 Setup Commands:**
-• \`/set yourUsername\` - Set your fkey.id (required)
-• \`my fkey is yourUsername\` - Alternative way to set fkey.id
+🔧 Setup Commands:
+• /set yourUsername - Set your fkey.id (required)
+• my fkey is yourUsername - Alternative way to set fkey.id
 
-**💳 Payment Commands:**
-• \`create payment link for $25\` - Generate anonymous payment link
-• \`/balance\` - Check your earnings
-• \`/links\` - Manage your payment links
+💳 Payment Commands:
+• create payment link for $25 - Generate anonymous payment link
+• /balance - Check your earnings
+• /links - Manage your payment links
 
-**ℹ️ Info Commands:**
-• \`/help\` - Show this help
-• \`/status\` - Check agent status
-• \`/fkey username\` - Look up someone's fkey.id
+ℹ️ Info Commands:
+• /help - Show this help
+• /status - Check agent status
+• /fkey username - Look up someone's fkey.id
 
-**📋 Group Chat Behavior:**
+📋 Group Chat Behavior:
 • I only respond to @mentions or payment requests
 • DM me to set up your fkey.id privately
 • Use @dstealth, @dstealth.eth, or @dstealth.base.eth
 
-**🚀 Quick Start:**
+🚀 Quick Start:
 1. Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
-2. Set fkey.id: \`/set yourUsername\`  
+2. Set fkey.id: /set yourUsername  
 3. Complete setup: ${this.DSTEALTH_APP_URL}
 4. Create payment links!
 
-**Need help?** Just ask me anything about privacy payments!`;
+Need help? Just ask me anything about privacy payments!`;
   }
 
   /**
@@ -2027,10 +2027,10 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
   }
 
   /**
-   * 🔧 TBA PATTERN: Send payment-related actions
+   * 🔧 FIXED: Send payment-related actions - Now uses senderInboxId like other methods
    */
   private async sendTransactionActions(
-    conversationId: string,
+    senderInboxId: string,
     amount: string,
     fkeyId: string,
     daimoLink: string,
@@ -2042,10 +2042,20 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
         return;
       }
 
-      const conversation = await this.client.conversations.getConversationById(conversationId);
+      // Get user's conversations to send actions to (same pattern as other methods)
+      const conversations = await this.client.conversations.list();
       
-      if (!conversation) {
-        console.log("⚠️ Conversation not found, skipping Transaction Actions");
+      // Find the conversation with this user
+      const userConversation = conversations.find(conv => {
+        // For DMs, check if this is a 1:1 conversation with the user
+        if (!(conv instanceof Group)) {
+          return conv.peerInboxId === senderInboxId;
+        }
+        return false;
+      });
+
+      if (!userConversation) {
+        console.log("⚠️ User conversation not found, skipping Transaction Actions");
         return;
       }
 
@@ -2083,8 +2093,12 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
       };
 
       // Send actions using the ActionsCodec
-      await conversation.send(actionsContent, ContentTypeActions);
+      await userConversation.send(actionsContent, ContentTypeActions);
       console.log(`✅ Transaction Actions sent with unique ID: ${actionsContent.id}`);
+      
+      // Store this as the latest action set for this user
+      this.userLatestActionSetId.set(senderInboxId, actionsContent.id);
+      console.log(`📋 Stored latest action set ID for user ${senderInboxId}: ${actionsContent.id}`);
 
     } catch (error) {
       console.error("❌ Error sending Transaction Actions:", error);
