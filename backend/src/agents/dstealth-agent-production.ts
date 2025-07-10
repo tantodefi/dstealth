@@ -941,7 +941,7 @@ I only respond when @mentioned or for payment requests!`;
    */
   private async callFkeyLookupAPI(fkeyId: string): Promise<{ address?: string; proof?: unknown; error?: string }> {
     try {
-      const baseUrl = env.FRONTEND_URL || 'http://localhost:3000';
+      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       const response = await fetch(`${baseUrl}/api/fkey/lookup/${fkeyId}`);
       
       if (!response.ok) {
@@ -1577,8 +1577,11 @@ Failed to lookup ${cleanFkeyId}.fkey.id. Please try again.
 
       console.log(`🎯 Handling Intent Action: ${actionId}`);
 
-      switch (actionId) {
-        case 'test-simple':
+      // Handle action IDs with unique suffixes (for button state reset)
+      const baseActionId = actionId.includes('-') ? actionId.split('-')[0] : actionId;
+      
+      switch (baseActionId) {
+        case 'test':
           return `🧪 **Test Button Clicked Successfully!**
 
 ✅ **Intent Message Working!** 
@@ -1603,6 +1606,30 @@ This confirms that:
 
 **Complete Setup**: ${this.DSTEALTH_APP_URL}`;
 
+        case 'balance':
+          return await this.handleBalanceCheck(senderInboxId);
+
+        case 'payment':
+          return `💳 **Create Payment Link**
+
+To create a payment link, specify the amount:
+
+**Examples:**
+• "create payment link for $25"
+• "create payment link for $100"
+• "create payment link for $500"
+
+**Setup Required:**
+🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
+📝 **Set fkey.id**: \`/set yourUsername\`
+🚀 **Complete setup**: ${this.DSTEALTH_APP_URL}
+
+**Try saying**: "create payment link for $25"`;
+
+        case 'help':
+          return this.getHelpMessage();
+
+        // Support legacy action IDs for backward compatibility
         case 'check-balance':
           return await this.handleBalanceCheck(senderInboxId);
 
@@ -1772,28 +1799,31 @@ Something went wrong processing your action. Please try:
         return;
       }
 
-      // Create Actions content following TBA pattern exactly
+      // Generate unique timestamp for this render to reset button states
+      const renderTimestamp = Date.now();
+
+      // Create Actions content with unique button IDs for state reset
       const actionsContent: ActionsContent = {
-        id: `help-actions-${Date.now()}`,
+        id: `help-actions-${renderTimestamp}`,
         description: "🤖 dStealth Agent - Choose an action:",
         actions: [
           {
-            id: "test-simple",
+            id: `test-simple-${renderTimestamp}`,
             label: "🧪 Test Button",
             style: "primary"
           },
           {
-            id: "check-balance",
+            id: `check-balance-${renderTimestamp}`,
             label: "💰 Check Balance",
             style: "secondary"
           },
           {
-            id: "create-payment-link",
+            id: `create-payment-link-${renderTimestamp}`,
             label: "💳 Create Payment Link",
             style: "primary"
           },
           {
-            id: "get-help",
+            id: `get-help-${renderTimestamp}`,
             label: "❓ Get Help",
             style: "secondary"
           }
@@ -1836,33 +1866,36 @@ Something went wrong processing your action. Please try:
         return;
       }
 
-      // Create comprehensive Actions menu
+      // Generate unique timestamp for this render to reset button states
+      const renderTimestamp = Date.now();
+
+      // Create comprehensive Actions menu with unique button IDs
       const actionsContent: ActionsContent = {
-        id: `actions-menu-${Date.now()}`,
+        id: `actions-menu-${renderTimestamp}`,
         description: "🥷 dStealth Agent - Full Actions Menu:",
         actions: [
           {
-            id: "setup-fkey",
+            id: `setup-fkey-${renderTimestamp}`,
             label: "🔑 Setup fkey.id",
             style: "primary"
           },
           {
-            id: "check-balance",
+            id: `check-balance-${renderTimestamp}`,
             label: "💰 Check Balance",
             style: "secondary"
           },
           {
-            id: "create-payment-link",
+            id: `create-payment-link-${renderTimestamp}`,
             label: "💳 Create Payment Link",
             style: "primary"
           },
           {
-            id: "manage-links",
+            id: `manage-links-${renderTimestamp}`,
             label: "🔗 Manage Links",
             style: "secondary"
           },
           {
-            id: "check-status",
+            id: `check-status-${renderTimestamp}`,
             label: "📊 Check Status",
             style: "secondary"
           }
@@ -1900,28 +1933,31 @@ Something went wrong processing your action. Please try:
         return;
       }
 
-      // Create payment-related Actions content
+      // Generate unique timestamp for this render to reset button states
+      const renderTimestamp = Date.now();
+
+      // Create payment-related Actions content with unique button IDs
       const actionsContent: ActionsContent = {
-        id: `payment-actions-${Date.now()}`,
+        id: `payment-actions-${renderTimestamp}`,
         description: `💳 Payment Link Created for ${fkeyId}.fkey.id ($${amount} USDC)`,
         actions: [
           {
-            id: "open-coinbase-wallet",
+            id: `open-coinbase-wallet-${renderTimestamp}`,
             label: "🔗 Open in Coinbase Wallet",
             style: "primary"
           },
           {
-            id: "share-link",
+            id: `share-link-${renderTimestamp}`,
             label: "📤 Share Link",
             style: "secondary"
           },
           {
-            id: "view-receipt",
+            id: `view-receipt-${renderTimestamp}`,
             label: "🧾 View Receipt",
             style: "secondary"
           },
           {
-            id: "create-another",
+            id: `create-another-${renderTimestamp}`,
             label: "➕ Create Another",
             style: "primary"
           }
