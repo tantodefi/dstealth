@@ -129,10 +129,12 @@ export class IntentCodec implements ContentCodec<IntentContent> {
  * Production dStealth Agent with action button support
  */
 export class DStealthAgentProduction {
-  private client: Client | null = null;
+  private client: Client<any> | null = null;
   private agentAddress: string | null = null;
   private processedMessageCount = 0;
   private groupIntroductions: Set<string> = new Set();
+  private streamRestartCount = 0;
+  private installationCount = 0;
 
   // Track the latest action set ID for each user to invalidate old buttons
   private userLatestActionSetId: Map<string, string> = new Map();
@@ -186,11 +188,11 @@ export class DStealthAgentProduction {
       this.agentAddress = identifier.identifier;
 
       console.log(`📧 Agent Address: ${this.agentAddress}`);
-      console.log(`🆔 Agent Inbox ID: ${this.client.inboxId}`);
+      console.log(`🆔 Agent Inbox ID: ${this.client!.inboxId}`);
 
       // Sync conversations
       console.log("🔄 Syncing conversations...");
-      await this.client.conversations.sync();
+      await this.client!.conversations.sync();
 
       // Start message streaming
       this.startMessageStream(streamFailureCallback);
@@ -374,7 +376,7 @@ export class DStealthAgentProduction {
   /**
    * Get client for action button methods
    */
-  getClient(): Client | null {
+  getClient(): Client<any> | null {
     return this.client;
   }
 
@@ -386,6 +388,8 @@ export class DStealthAgentProduction {
       isRunning: !!this.client,
               processedMessageCount: this.processedMessageCount,
       agentAddress: this.agentAddress,
+      streamRestartCount: this.streamRestartCount,
+      installationCount: this.installationCount,
     };
   }
 
@@ -1655,52 +1659,46 @@ Try again: Type /help now!`;
       console.log(`🎯 Base Action ID extracted: "${baseActionId}" from "${actionId}"`);
       
       switch (baseActionId) {
-        case 'test-simple':
-          return `🧪 Test Button Clicked Successfully!
-
-✅ Intent Message Working! 
-
-The action button successfully triggered an Intent message with:
-• Action ID: ${actionId}
-• Base Action: ${baseActionId}
-• Intent ID: ${intent.id}
-• Sender: ${senderInboxId}
-
-This confirms that:
-1. ✅ Action buttons are rendering correctly
-2. ✅ Intent messages are being sent by Coinbase Wallet
-3. ✅ Intent content type detection is working
-4. ✅ Intent message processing is functional
-5. ✅ Base action ID extraction is working
-
-🎉 The action button system is working! 
-
-Next steps:
-• All other action buttons should now work
-• Try clicking "💰 Check balance" or other buttons
-• Type /help to see all available actions
-
-Complete Setup: ${this.DSTEALTH_APP_URL}`;
+        case 'dstealth-miniapp':
+          return `https://dstealth.xyz`;
 
         case 'check-balance':
           return await this.handleBalanceCheck(senderInboxId);
 
         case 'create-payment-link':
-          return `💳 Create Payment Link
+          // Check if user has fkey.id set before creating payment link
+          const userData = await agentDb.getStealthDataByUser(senderInboxId);
+          
+          if (!userData?.fkeyId) {
+            return `🔒 **Setup Required for Payment Links**
 
-To create a payment link, specify the amount:
+To create payment links, please set your fkey.id first:
 
-Examples:
+**Step 1**: 🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+**Step 2**: 📝 Set your fkey.id: \`/set yourUsername\`
+**Step 3**: 🚀 Complete setup: ${this.DSTEALTH_APP_URL}
+
+Once setup is complete, you can create payment links instantly!`;
+          }
+
+          // Return instructions for flexible text-based payment creation
+          return `💳 **Create Payment Link**
+
+To create a payment link, simply specify any amount:
+
+**Examples:**
 • "create payment link for $25"
-• "create payment link for $100"
-• "create payment link for $500"
+• "create payment link for $100" 
+• "create payment link for $1500"
+• "create payment link for $50.50"
 
-Setup Required:
-🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
-📝 Set fkey.id: /set yourUsername
-🚀 Complete setup: ${this.DSTEALTH_APP_URL}
+**Features:**
+• 🥷 Anonymous sender privacy
+• ⚡ Direct to stealth address via Daimo
+• 🧾 ZK proof receipts
+• 🎯 Earn privacy rewards
 
-Try saying: "create payment link for $25"`;
+**Try it now!** Just type the amount you want.`;
 
         case 'get-help':
           return this.getHelpMessage();
@@ -1746,10 +1744,13 @@ Direct Link: Use the Daimo link from the previous message
 Need help? Contact support at ${this.DSTEALTH_APP_URL}`;
 
         case 'share-link':
-          return `📤 Share Your Payment Link
+          return `📤 Share Payment Link
 
-Copy the Daimo link from the previous message and share it with:
+Share this payment link to receive anonymous payments:
 
+The link from your previous payment will work with any wallet that supports Base network.
+
+Sharing Options:
 • 📱 Social media
 • 💬 Direct messages
 • 📧 Email
@@ -1763,22 +1764,19 @@ Privacy Features:
 Dashboard: ${this.DSTEALTH_APP_URL}`;
 
         case 'view-receipt':
-          return `🧾 View ZK Receipt
+          return `🧾 ZK Receipt Available
 
-Your cryptographic receipt will be available at:
+Your transaction receipt will be available on the dStealth dashboard once payment is processed.
 
-Receipt Dashboard: ${this.DSTEALTH_APP_URL}
+Features:
+• 🔒 Zero-knowledge proof
+• 🧾 Transaction verification
+• 📊 Payment analytics
+• 💼 Export options
 
-What's included:
-• 🧾 Cryptographic proof of payment
-• 🔒 Privacy-preserving verification
-• 📊 Transaction analytics
-• 🏆 Privacy rewards earned
+View receipts: ${this.DSTEALTH_APP_URL}
 
-Why ZK receipts?
-• Prove payment without revealing sender identity
-• Earn privacy rewards for stealth transactions
-• Build reputation in privacy-first economy`;
+The ZK proof ensures privacy while providing transaction verification.`;
 
         case 'create-another':
           return `➕ Create Another Payment Link
@@ -1799,13 +1797,19 @@ Features:
 Just say the amount: "create payment link for $X"`;
 
         case 'send-transaction':
-          return `💰 Send Transaction
+        case 'send-to-stealth':
+          const paymentData = this.getPaymentDataForUser(senderInboxId);
+          if (paymentData) {
+            return `💰 Send to Stealth Address
 
-Ready to send your transaction? Use Coinbase Wallet to complete the payment:
+Ready to send $${paymentData.amount} USDC?
 
-📱 Open Coinbase Wallet
-💳 Navigate to your payment
-🚀 Confirm and send
+Recipient: ${paymentData.fkeyId}.fkey.id
+Stealth Address: ${paymentData.stealthAddress}
+Amount: $${paymentData.amount} USDC
+
+Use your wallet to send to this stealth address:
+${paymentData.stealthAddress}
 
 Features:
 • 🥷 Anonymous sender privacy
@@ -1814,16 +1818,33 @@ Features:
 • 🎯 Earn privacy rewards
 
 Your transaction will be processed securely through the stealth protocol.`;
+          } else {
+            return `💰 Send Transaction
+
+Use your wallet to complete the payment to the stealth address.
+
+Features:
+• 🥷 Anonymous sender privacy
+• ⚡ Direct to stealth address
+• 🧾 ZK proof receipt
+• 🎯 Earn privacy rewards`;
+          }
 
         case 'open-daimo-link':
-          return `🔗 Open Daimo Payment Link
+        case 'copy-payment-link':
+          const linkData = this.getPaymentDataForUser(senderInboxId);
+          if (linkData) {
+            return `📋 Payment Link Ready
 
-The Daimo payment link has been created! You can:
+Amount: $${linkData.amount} USDC
+Recipient: ${linkData.fkeyId}.fkey.id
+Stealth Address: ${linkData.stealthAddress.slice(0, 8)}...${linkData.stealthAddress.slice(-6)}
 
-📋 Copy the link from the previous message
-🌐 Open it in any browser
-💳 Complete payment with any wallet
-📱 Share with others to receive payments
+🔗 Daimo Payment Link:
+${linkData.daimoLink}
+
+Copy this link to share:
+${linkData.daimoLink}
 
 Daimo Features:
 • ⚡ Fast Base network payments
@@ -1832,14 +1853,77 @@ Daimo Features:
 • 🛡️ Secure transactions
 
 The link works with any wallet that supports Base network.`;
+          } else {
+            return `📋 Copy Payment Link
+
+Your Daimo payment link is ready to share!
+
+Features:
+• ⚡ Fast Base network payments
+• 💰 USDC transactions
+• 🔗 Universal payment links
+• 🛡️ Secure transactions`;
+          }
+
+        case 'share-link':
+        case 'share-payment-link':
+          const shareData = this.getPaymentDataForUser(senderInboxId);
+          if (shareData) {
+            return `📤 Share Payment Link
+
+Amount: $${shareData.amount} USDC
+Recipient: ${shareData.fkeyId}.fkey.id
+
+🔗 Payment Link:
+${shareData.daimoLink}
+
+Share this link to receive payments:
+• 📱 Social media
+• 💬 Direct messages  
+• 📧 Email
+• 🔗 Any platform
+
+Privacy Features:
+• 🥷 Anonymous sender protection
+• 🔒 Stealth address technology
+• 🧾 ZK proof receipts
+
+Dashboard: ${this.DSTEALTH_APP_URL}`;
+          } else {
+            return `📤 Share Payment Link
+
+Share your payment link to receive anonymous payments with privacy features.
+
+Dashboard: ${this.DSTEALTH_APP_URL}`;
+          }
+
+        case 'create-another':
+        case 'create-new-link':
+          return `➕ Create New Payment Link
+
+Ready to create another payment link?
+
+Examples:
+• "create payment link for $25"
+• "create payment link for $100"
+• "create payment link for $500"
+
+Features:
+• 🥷 Anonymous sender privacy
+• ⚡ Direct to stealth address
+• 🎯 Earn privacy rewards
+• 🧾 ZK proof receipts
+
+Just say the amount: "create payment link for $X"`;
 
         // Legacy support for old simple IDs (just in case)
         case 'test':
+        case 'test-simple':
         case 'balance':
         case 'payment':
         case 'help':
           console.log(`🔄 Legacy action ID detected: ${baseActionId}`);
-          return this.handleIntentMessage({...intent, actionId: baseActionId === 'test' ? 'test-simple' : 
+          return this.handleIntentMessage({...intent, actionId: baseActionId === 'test' || baseActionId === 'test-simple' ? 'dstealth-miniapp' : 
                                                              baseActionId === 'balance' ? 'check-balance' :
                                                              baseActionId === 'payment' ? 'create-payment-link' :
                                                              'get-help'}, senderInboxId);
@@ -1913,8 +1997,8 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours from now
         actions: [
           {
-            id: `test-simple-${renderTimestamp}-${randomSuffix}`,
-            label: "🧪 Test Button",
+            id: `dstealth-miniapp-${renderTimestamp}-${randomSuffix}`,
+            label: "🌐 dStealth Miniapp",
             style: "primary"
           },
           {
@@ -2027,7 +2111,7 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
   }
 
   /**
-   * 🔧 FIXED: Send payment-related actions - Now uses senderInboxId like other methods
+   * 🔧 ENHANCED: Send payment-related actions with self-contained information
    */
   private async sendTransactionActions(
     senderInboxId: string,
@@ -2063,30 +2147,45 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
       const renderTimestamp = Date.now();
       const randomSuffix = Math.random().toString(36).substring(2, 8);
 
+      // Store payment data for self-contained responses
+      const paymentData = {
+        amount,
+        fkeyId,
+        daimoLink,
+        stealthAddress,
+        timestamp: renderTimestamp
+      };
+
       // Create transaction-related Actions content with unique everything
       const actionsContent: ActionsContent = {
         id: `transaction-actions-${renderTimestamp}-${randomSuffix}`,
-        description: `💳 Payment Link Created for ${fkeyId}.fkey.id ($${amount} USDC) - ${new Date().toLocaleTimeString()}`,
+        description: `💳 Payment Link Ready for ${fkeyId}.fkey.id
+
+Amount: $${amount} USDC
+Stealth Address: ${stealthAddress.slice(0, 8)}...${stealthAddress.slice(-6)}
+Daimo Link: ${daimoLink}
+
+Choose your next action:`,
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours from now
         actions: [
           {
-            id: `send-transaction-${renderTimestamp}-${randomSuffix}`,
-            label: "💰 Send Transaction",
+            id: `send-to-stealth-${renderTimestamp}-${randomSuffix}`,
+            label: "💰 Send to Stealth Address",
             style: "primary"
           },
           {
-            id: `open-daimo-link-${renderTimestamp}-${randomSuffix}`,
-            label: "🔗 Open Daimo Link",
+            id: `copy-payment-link-${renderTimestamp}-${randomSuffix}`,
+            label: "📋 Copy Payment Link",
             style: "secondary"
           },
           {
-            id: `share-link-${renderTimestamp}-${randomSuffix}`,
-            label: "📤 Share Link",
+            id: `share-payment-link-${renderTimestamp}-${randomSuffix}`,
+            label: "📤 Share Payment Link",
             style: "secondary"
           },
           {
-            id: `create-another-${renderTimestamp}-${randomSuffix}`,
-            label: "➕ Create Another",
+            id: `create-new-link-${renderTimestamp}-${randomSuffix}`,
+            label: "➕ Create New Link",
             style: "primary"
           }
         ]
@@ -2100,8 +2199,23 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
       this.userLatestActionSetId.set(senderInboxId, actionsContent.id);
       console.log(`📋 Stored latest action set ID for user ${senderInboxId}: ${actionsContent.id}`);
 
+      // Store payment data for intent responses (in memory for now)
+      this.storePaymentDataForUser(senderInboxId, paymentData);
+
     } catch (error) {
       console.error("❌ Error sending Transaction Actions:", error);
     }
   }
+
+  // Store payment data for intent responses
+  private userPaymentData: Map<string, any> = new Map();
+
+  private storePaymentDataForUser(senderInboxId: string, paymentData: any) {
+    this.userPaymentData.set(senderInboxId, paymentData);
+  }
+
+  private getPaymentDataForUser(senderInboxId: string) {
+    return this.userPaymentData.get(senderInboxId);
+  }
+
 }
