@@ -1162,15 +1162,15 @@ Please re-verify: \`/set ${userData.fkeyId}\``;
         : '';
 
       // Send main Daimo response
-      const daimoMessage = `💳 **Payment Link Created!** 🥷
+      const daimoMessage = `💳 Payment Link Created! 🥷
 
-**Amount**: $${amount} USDC
-**Recipient**: ${currentData.fkeyId}.fkey.id
-**Address**: ${currentAddress.slice(0, 6)}...${currentAddress.slice(-4)}${addressChangeWarning}
+Amount: $${amount} USDC
+Recipient: ${currentData.fkeyId}.fkey.id
+Address: ${currentAddress.slice(0, 6)}...${currentAddress.slice(-4)}${addressChangeWarning}
 
-**🔗 Daimo Payment Link**: ${daimoResponse.url}
+🔗 Daimo Payment Link: ${daimoResponse.url}
 
-**Features:**
+Features:
 • 🥷 Anonymous sender privacy
 • ⚡ Direct to stealth address via Daimo
 • 🎯 Earn privacy rewards
@@ -1178,8 +1178,8 @@ Please re-verify: \`/set ${userData.fkeyId}\``;
 
 Share this link to receive payments!`;
 
-      // 🔧 NEW: Send Coinbase Wallet Actions as separate message
-      await this.sendActionsMessage(conversationId, amount, currentData.fkeyId, coinbaseWalletUrl);
+      // 🔧 NEW: Send Transaction Actions for the payment link
+      await this.sendTransactionActions(conversationId, amount, currentData.fkeyId, daimoResponse.url, currentAddress);
 
       return daimoMessage;
 
@@ -1618,22 +1618,22 @@ Failed to lookup ${cleanFkeyId}.fkey.id. Please try again.
       
       if (latestActionSetId && latestActionSetId !== actionSetId) {
         console.log(`⚠️  REJECTING outdated action set: ${actionSetId}, latest: ${latestActionSetId}`);
-        return `⚠️ **Outdated Action Button**
+        return `⚠️ Outdated Action Button
 
 The action button you clicked is from an older menu. Please use the latest action buttons.
 
-**Clicked Action Set**: ${actionSetId}
-**Latest Action Set**: ${latestActionSetId}
+Clicked Action Set: ${actionSetId}
+Latest Action Set: ${latestActionSetId}
 
-**To get the latest actions:**
-Type \`/help\` for a fresh set of action buttons.
+To get the latest actions:
+Type /help for a fresh set of action buttons.
 
-**Why this happens:**
+Why this happens:
 • New action buttons were sent after the one you clicked
 • Only the most recent action buttons are valid
 • This prevents accidentally clicking old buttons
 
-**Try again:** Type \`/help\` now!`;
+Try again: Type /help now!`;
       } else {
         console.log(`✅ Action set validation passed - processing action`);
       }
@@ -1656,15 +1656,15 @@ Type \`/help\` for a fresh set of action buttons.
       
       switch (baseActionId) {
         case 'test-simple':
-          return `🧪 **Test Button Clicked Successfully!**
+          return `🧪 Test Button Clicked Successfully!
 
-✅ **Intent Message Working!** 
+✅ Intent Message Working! 
 
 The action button successfully triggered an Intent message with:
-• **Action ID**: ${actionId}
-• **Base Action**: ${baseActionId}
-• **Intent ID**: ${intent.id}
-• **Sender**: ${senderInboxId}
+• Action ID: ${actionId}
+• Base Action: ${baseActionId}
+• Intent ID: ${intent.id}
+• Sender: ${senderInboxId}
 
 This confirms that:
 1. ✅ Action buttons are rendering correctly
@@ -1673,58 +1673,58 @@ This confirms that:
 4. ✅ Intent message processing is functional
 5. ✅ Base action ID extraction is working
 
-🎉 **The action button system is working!** 
+🎉 The action button system is working! 
 
-**Next steps:**
+Next steps:
 • All other action buttons should now work
 • Try clicking "💰 Check balance" or other buttons
-• Type \`/help\` to see all available actions
+• Type /help to see all available actions
 
-**Complete Setup**: ${this.DSTEALTH_APP_URL}`;
+Complete Setup: ${this.DSTEALTH_APP_URL}`;
 
         case 'check-balance':
           return await this.handleBalanceCheck(senderInboxId);
 
         case 'create-payment-link':
-          return `💳 **Create Payment Link**
+          return `💳 Create Payment Link
 
 To create a payment link, specify the amount:
 
-**Examples:**
+Examples:
 • "create payment link for $25"
 • "create payment link for $100"
 • "create payment link for $500"
 
-**Setup Required:**
-🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
-📝 **Set fkey.id**: \`/set yourUsername\`
-🚀 **Complete setup**: ${this.DSTEALTH_APP_URL}
+Setup Required:
+🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+📝 Set fkey.id: /set yourUsername
+🚀 Complete setup: ${this.DSTEALTH_APP_URL}
 
-**Try saying**: "create payment link for $25"`;
+Try saying: "create payment link for $25"`;
 
         case 'get-help':
           return this.getHelpMessage();
 
         case 'setup-fkey':
-          return `🔑 **Setup fkey.id**
+          return `🔑 Setup fkey.id
 
 To set up your fkey.id:
 
-**Step 1**: 🔑 **Get FluidKey** (if you don't have it)
+Step 1: 🔑 Get FluidKey (if you don't have it)
 ${this.FLUIDKEY_REFERRAL_URL}
 
-**Step 2**: 📝 **Set your fkey.id**
-• \`/set yourUsername\`
-• \`my fkey is yourUsername\`
+Step 2: 📝 Set your fkey.id
+• /set yourUsername
+• my fkey is yourUsername
 
-**Step 3**: 🚀 **Complete setup**
+Step 3: 🚀 Complete setup
 ${this.DSTEALTH_APP_URL}
 
-**Examples:**
-• \`/set tantodefi\`
-• \`my fkey is tantodefi\`
+Examples:
+• /set tantodefi
+• my fkey is tantodefi
 
-**Need help?** Just ask me anything!`;
+Need help? Just ask me anything!`;
 
         case 'manage-links':
           return await this.handleLinksManagement(senderInboxId);
@@ -1733,70 +1733,105 @@ ${this.DSTEALTH_APP_URL}
           return this.getStatusMessage();
 
         case 'open-coinbase-wallet':
-          return `🔗 **Open in Coinbase Wallet**
+          return `🔗 Open in Coinbase Wallet
 
 Your payment link is ready! Use the Coinbase Wallet app to:
 
-• 📱 **Open Coinbase Wallet**
-• 💳 **Navigate to payment links**
-• 🚀 **Complete your payment**
+• 📱 Open Coinbase Wallet
+• 💳 Navigate to payment links
+• 🚀 Complete your payment
 
-**Direct Link**: Use the Daimo link from the previous message
+Direct Link: Use the Daimo link from the previous message
 
-**Need help?** Contact support at ${this.DSTEALTH_APP_URL}`;
+Need help? Contact support at ${this.DSTEALTH_APP_URL}`;
 
         case 'share-link':
-          return `📤 **Share Your Payment Link**
+          return `📤 Share Your Payment Link
 
 Copy the Daimo link from the previous message and share it with:
 
-• 📱 **Social media**
-• 💬 **Direct messages**
-• 📧 **Email**
-• 🔗 **Any platform**
+• 📱 Social media
+• 💬 Direct messages
+• 📧 Email
+• 🔗 Any platform
 
-**Privacy Features:**
-• 🥷 **Anonymous sender protection**
-• 🔒 **Stealth address technology**
-• 🧾 **ZK proof receipts**
+Privacy Features:
+• 🥷 Anonymous sender protection
+• 🔒 Stealth address technology
+• 🧾 ZK proof receipts
 
-**Dashboard**: ${this.DSTEALTH_APP_URL}`;
+Dashboard: ${this.DSTEALTH_APP_URL}`;
 
         case 'view-receipt':
-          return `🧾 **View ZK Receipt**
+          return `🧾 View ZK Receipt
 
 Your cryptographic receipt will be available at:
 
-**Receipt Dashboard**: ${this.DSTEALTH_APP_URL}
+Receipt Dashboard: ${this.DSTEALTH_APP_URL}
 
-**What's included:**
-• 🧾 **Cryptographic proof of payment**
-• 🔒 **Privacy-preserving verification**
-• 📊 **Transaction analytics**
-• 🏆 **Privacy rewards earned**
+What's included:
+• 🧾 Cryptographic proof of payment
+• 🔒 Privacy-preserving verification
+• 📊 Transaction analytics
+• 🏆 Privacy rewards earned
 
-**Why ZK receipts?**
+Why ZK receipts?
 • Prove payment without revealing sender identity
 • Earn privacy rewards for stealth transactions
 • Build reputation in privacy-first economy`;
 
         case 'create-another':
-          return `➕ **Create Another Payment Link**
+          return `➕ Create Another Payment Link
 
 Ready to create another payment link?
 
-**Examples:**
+Examples:
 • "create payment link for $25"
 • "create payment link for $100"
 • "create payment link for $500"
 
-**Features:**
-• 🥷 **Anonymous sender privacy**
-• ⚡ **Direct to stealth address**
-• 🎯 **Earn privacy rewards**
-• 🧾 **ZK proof receipts**
+Features:
+• 🥷 Anonymous sender privacy
+• ⚡ Direct to stealth address
+• 🎯 Earn privacy rewards
+• 🧾 ZK proof receipts
 
-**Just say the amount**: "create payment link for $X"`;
+Just say the amount: "create payment link for $X"`;
+
+        case 'send-transaction':
+          return `💰 Send Transaction
+
+Ready to send your transaction? Use Coinbase Wallet to complete the payment:
+
+📱 Open Coinbase Wallet
+💳 Navigate to your payment
+🚀 Confirm and send
+
+Features:
+• 🥷 Anonymous sender privacy
+• ⚡ Direct to stealth address
+• 🧾 ZK proof receipt
+• 🎯 Earn privacy rewards
+
+Your transaction will be processed securely through the stealth protocol.`;
+
+        case 'open-daimo-link':
+          return `🔗 Open Daimo Payment Link
+
+The Daimo payment link has been created! You can:
+
+📋 Copy the link from the previous message
+🌐 Open it in any browser
+💳 Complete payment with any wallet
+📱 Share with others to receive payments
+
+Daimo Features:
+• ⚡ Fast Base network payments
+• 💰 USDC transactions
+• 🔗 Universal payment links
+• 🛡️ Secure transactions
+
+The link works with any wallet that supports Base network.`;
 
         // Legacy support for old simple IDs (just in case)
         case 'test':
@@ -1811,32 +1846,32 @@ Ready to create another payment link?
 
         default:
           console.log(`❓ Unknown base action ID: "${baseActionId}" from full ID: "${actionId}"`);
-          return `❓ **Unknown Action: ${baseActionId}**
+          return `❓ Unknown Action: ${baseActionId}
 
 This action isn't recognized. Available actions:
-• 🧪 **Test Button** (test-simple)
-• 💰 **Check Balance** (check-balance)
-• 💳 **Create Payment Link** (create-payment-link)
-• 🔑 **Setup fkey.id** (setup-fkey)
-• 🔗 **Manage Links** (manage-links)
-• 📊 **Check Status** (check-status)
-• ❓ **Get Help** (get-help)
+• 🧪 Test Button (test-simple)
+• 💰 Check Balance (check-balance)
+• 💳 Create Payment Link (create-payment-link)
+• 🔑 Setup fkey.id (setup-fkey)
+• 🔗 Manage Links (manage-links)
+• 📊 Check Status (check-status)
+• ❓ Get Help (get-help)
 
-**Debug Info:**
+Debug Info:
 • Full Action ID: ${actionId}
 • Extracted Base ID: ${baseActionId}
 
-**Need help?** Type \`/help\` for all commands!`;
+Need help? Type /help for all commands!`;
       }
     } catch (error) {
       console.error("❌ Error handling Intent message:", error);
-      return `❌ **Error Processing Action**
+      return `❌ Error Processing Action
 
 Something went wrong processing your action. Please try:
-• Type \`/help\` for available commands
+• Type /help for available commands
 • Contact support if the issue persists
 
-**Error**: ${error instanceof Error ? error.message : "Unknown error"}`;
+Error: ${error instanceof Error ? error.message : "Unknown error"}`;
     }
   }
 
@@ -1994,22 +2029,23 @@ Something went wrong processing your action. Please try:
   /**
    * 🔧 TBA PATTERN: Send payment-related actions
    */
-  private async sendActionsMessage(
+  private async sendTransactionActions(
     conversationId: string,
     amount: string,
     fkeyId: string,
-    coinbaseWalletUrl: string
+    daimoLink: string,
+    stealthAddress: string
   ): Promise<void> {
     try {
       if (!this.client) {
-        console.log("⚠️ Base agent not available, skipping payment Actions");
+        console.log("⚠️ Base agent not available, skipping Transaction Actions");
         return;
       }
 
       const conversation = await this.client.conversations.getConversationById(conversationId);
       
       if (!conversation) {
-        console.log("⚠️ Conversation not found, skipping payment Actions");
+        console.log("⚠️ Conversation not found, skipping Transaction Actions");
         return;
       }
 
@@ -2017,25 +2053,25 @@ Something went wrong processing your action. Please try:
       const renderTimestamp = Date.now();
       const randomSuffix = Math.random().toString(36).substring(2, 8);
 
-      // Create payment-related Actions content with unique everything
+      // Create transaction-related Actions content with unique everything
       const actionsContent: ActionsContent = {
-        id: `payment-actions-${renderTimestamp}-${randomSuffix}`,
+        id: `transaction-actions-${renderTimestamp}-${randomSuffix}`,
         description: `💳 Payment Link Created for ${fkeyId}.fkey.id ($${amount} USDC) - ${new Date().toLocaleTimeString()}`,
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours from now
         actions: [
           {
-            id: `open-coinbase-wallet-${renderTimestamp}-${randomSuffix}`,
-            label: "🔗 Open in Coinbase Wallet",
+            id: `send-transaction-${renderTimestamp}-${randomSuffix}`,
+            label: "💰 Send Transaction",
             style: "primary"
+          },
+          {
+            id: `open-daimo-link-${renderTimestamp}-${randomSuffix}`,
+            label: "🔗 Open Daimo Link",
+            style: "secondary"
           },
           {
             id: `share-link-${renderTimestamp}-${randomSuffix}`,
             label: "📤 Share Link",
-            style: "secondary"
-          },
-          {
-            id: `view-receipt-${renderTimestamp}-${randomSuffix}`,
-            label: "🧾 View Receipt",
             style: "secondary"
           },
           {
@@ -2048,10 +2084,10 @@ Something went wrong processing your action. Please try:
 
       // Send actions using the ActionsCodec
       await conversation.send(actionsContent, ContentTypeActions);
-      console.log(`✅ Payment Actions sent with unique ID: ${actionsContent.id}`);
+      console.log(`✅ Transaction Actions sent with unique ID: ${actionsContent.id}`);
 
     } catch (error) {
-      console.error("❌ Error sending Payment Actions:", error);
+      console.error("❌ Error sending Transaction Actions:", error);
     }
   }
 }
