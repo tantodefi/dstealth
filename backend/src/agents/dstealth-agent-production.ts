@@ -553,41 +553,41 @@ export class DStealthAgentProduction {
           const userData = await agentDb.getStealthDataByUser(senderInboxId);
       
       if (!userData?.fkeyId) {
-        return `🔍 **No fkey.id Set**
+        return `🔍 No fkey.id Set
 
 You haven't set up your fkey.id yet!
 
-**🚀 Get Started:**
-1. 🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
-2. 📝 **Set your fkey.id**: \`/set yourUsername\`
-3. 🚀 **Complete setup**: ${this.DSTEALTH_APP_URL}
+🚀 Get Started:
+1. 🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+2. 📝 Set your fkey.id: \`/set yourUsername\`
+3. 🚀 Complete setup: ${this.DSTEALTH_APP_URL}
 
-**Examples:**
+Examples:
 • \`/set tantodefi\`
 • \`my fkey is tantodefi\`
 
-**Need help?** Type \`/help\` for all commands!`;
+Need help? Type \`/help\` for all commands!`;
       }
 
       // 🔧 SECURITY: Get fresh user data with current address verification
       const freshData = await this.getFreshUserStealthData(senderInboxId);
       
       if (!freshData) {
-        return `❌ **Setup Issues**
+        return `❌ Setup Issues
 
-Your fkey.id **${userData.fkeyId}** needs verification.
+Your fkey.id ${userData.fkeyId} needs verification.
 
-**Please re-verify**: \`/set ${userData.fkeyId}\`
-**Or get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}`;
+Please re-verify: \`/set ${userData.fkeyId}\`
+Or get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}`;
       }
 
       if (freshData.error) {
-        return `❌ **fkey.id Verification Failed**
+        return `❌ fkey.id Verification Failed
 
-**Your fkey.id**: ${userData.fkeyId}  
-**Error**: ${freshData.error}
+Your fkey.id: ${userData.fkeyId}  
+Error: ${freshData.error}
 
-**Fix this by:**
+Fix this by:
 • Re-verify: \`/set ${userData.fkeyId}\`
 • Check your FluidKey profile is public
 • Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}`;
@@ -598,27 +598,27 @@ Your fkey.id **${userData.fkeyId}** needs verification.
       const setupStatus = currentAddress ? "✅ Complete" : "⏳ Pending";
       
       const addressUpdateNotice = isAddressUpdated 
-        ? `\n🔄 **Address Updated**: Your stealth address was refreshed.`
+        ? `\n🔄 Address Updated: Your stealth address was refreshed.`
         : '';
 
-      return `🔍 **Your fkey.id Status**
+      return `🔍 Your fkey.id Status
 
-**Username**: ${currentData.fkeyId}.fkey.id  
-**Setup**: ${setupStatus}
-**ZK Proof**: ${zkProofStatus}
-**Address**: ${currentAddress ? `${currentAddress.slice(0, 8)}...${currentAddress.slice(-6)}` : 'Pending'}${addressUpdateNotice}
+Username: ${currentData.fkeyId}.fkey.id  
+Setup: ${setupStatus}
+ZK Proof: ${zkProofStatus}
+Address: ${currentAddress ? `${currentAddress.slice(0, 8)}...${currentAddress.slice(-6)}` : 'Pending'}${addressUpdateNotice}
 
-**🚀 Quick Actions:**
-• **Create payment link**: "create payment link for $25"
-• **Check balance**: \`/balance\`
-• **Manage links**: \`/links\`
-• **Help**: \`/help\`
+🚀 Quick Actions:
+• Create payment link: "create payment link for $25"
+• Check balance: \`/balance\`
+• Manage links: \`/links\`
+• Help: \`/help\`
 
-${setupStatus === "⏳ Pending" ? `**Complete Setup**: ${this.DSTEALTH_APP_URL}` : ""}`;
+${setupStatus === "⏳ Pending" ? `Complete Setup: ${this.DSTEALTH_APP_URL}` : ""}`;
 
     } catch (error) {
       console.error("Error handling fkey status query:", error);
-      return `❌ **Error Checking fkey Status**
+      return `❌ Error Checking fkey Status
 
 Something went wrong. Please try:
 • \`/set yourUsername\` to reset
@@ -664,7 +664,7 @@ Something went wrong. Please try:
       return this.getBasicResponse(content, userData);
     } catch (error) {
       console.error("Error processing general message:", error);
-      return `❌ **Error Processing Message**
+      return `❌ Error Processing Message
 
 Something went wrong. Please try:
 • \`/help\` for all commands
@@ -701,16 +701,16 @@ Something went wrong. Please try:
       username = username.toLowerCase().trim();
 
       if (!username || username.length < 2) {
-        return `❌ **Invalid Username**
+        return `❌ Invalid Username
 
 Please provide a valid fkey.id username.
 
-**Examples:**
+Examples:
 • \`/set tantodefi\`
 • \`/set tantodefi.fkey.id\`
 • \`my fkey is tantodefi\`
 
-**Need FluidKey?** Get it here: ${this.FLUIDKEY_REFERRAL_URL}`;
+Need FluidKey? Get it here: ${this.FLUIDKEY_REFERRAL_URL}`;
       }
 
       // 🔧 ONLY NOW: Call fkey.id lookup API
@@ -718,11 +718,11 @@ Please provide a valid fkey.id username.
       const lookupResult = await this.callFkeyLookupAPI(username);
 
       if (lookupResult.error) {
-        return `❌ **fkey.id Setup Failed**
+        return `❌ fkey.id Setup Failed
 
 Could not verify \`${username}.fkey.id\`: ${lookupResult.error}
 
-**Please ensure:**
+Please ensure:
 1. 🔑 You have FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
 2. 📝 Your username is correct (e.g., "tantodefi")
 3. 🌐 Your fkey.id profile is publicly accessible
@@ -744,18 +744,18 @@ Try: \`/set yourUsername\``;
 
       const proofStatus = lookupResult.proof ? "✅ ZK Proof Verified" : "⚠️ No ZK Proof Available";
 
-      return `✅ **fkey.id Set Successfully!** 
+      return `✅ fkey.id Set Successfully! 
 
-**Your Profile**: \`${username}.fkey.id\`
-**Address**: \`${lookupResult.address?.slice(0, 6)}...${lookupResult.address?.slice(-4)}\`
-**Status**: ${proofStatus}
+Your Profile: \`${username}.fkey.id\`
+Address: \`${lookupResult.address?.slice(0, 6)}...${lookupResult.address?.slice(-4)}\`
+Status: ${proofStatus}
 
-**Now you can:**
+Now you can:
 • 💳 Create payment links: "create payment link for $25"
 • 🔍 Check balance: \`/balance\`
 • 📊 View links: \`/links\`
 
-**Complete Setup**: ${this.DSTEALTH_APP_URL}`;
+Complete Setup: ${this.DSTEALTH_APP_URL}`;
 
     } catch (error) {
       console.error("Error setting fkey.id:", error);
@@ -782,21 +782,21 @@ Try: \`/set yourUsername\``;
           return undefined;
           } else {
           // In DMs, ask them to set fkey.id
-          return `👋 **Welcome to dStealth!** 🥷
+          return `👋 Welcome to dStealth! 🥷
 
 To use the dStealth agent, please first set your fkey.id:
 
-**Step 1**: 🔑 **Get FluidKey** (if you don't have it)
+Step 1: 🔑 Get FluidKey (if you don't have it)
 ${this.FLUIDKEY_REFERRAL_URL}
 
-**Step 2**: 📝 **Set your fkey.id**
+Step 2: 📝 Set your fkey.id
 • \`/set yourUsername\`
 • \`my fkey is yourUsername\`
 
-**Step 3**: 🚀 **Complete setup**
+Step 3: 🚀 Complete setup
 ${this.DSTEALTH_APP_URL}
 
-**Need help?** Type \`/help\` for commands!`;
+Need help? Type \`/help\` for commands!`;
         }
       }
 
@@ -882,11 +882,11 @@ ${this.DSTEALTH_APP_URL}
    * 🔧 NEW: Group introduction message
    */
   private getGroupIntroMessage(): string {
-    return `👋 **Hello! I'm dStealth** 🥷
+    return `👋 Hello! I'm dStealth 🥷
 
-I help with **anonymous payments** and **privacy tools**.
+I help with anonymous payments and privacy tools.
 
-**To get started:**
+To get started:
 • DM me to set your fkey.id: \`/set yourUsername\`
 • Create payment links: "create payment link for $25" 
 • Get help: \`/help\`
@@ -922,13 +922,13 @@ I only respond when @mentioned or for payment requests!`;
       if (isGroup) {
         return "🔒 Please DM me to set your fkey.id first: `/set yourUsername`";
       } else {
-        return `🔒 **Please set your fkey.id first**
+        return `🔒 Please set your fkey.id first
 
-**Set your fkey.id:**
+Set your fkey.id:
 • \`/set yourUsername\`
 • \`my fkey is yourUsername\`
 
-**Need FluidKey?** ${this.FLUIDKEY_REFERRAL_URL}`;
+Need FluidKey? ${this.FLUIDKEY_REFERRAL_URL}`;
       }
     }
 
@@ -1159,14 +1159,14 @@ I only respond when @mentioned or for payment requests!`;
         if (isGroup) {
           return "🔒 Please DM me to set your fkey.id first: `/set yourUsername`";
         } else {
-        return `🔒 **Payment Link Setup Required**
+        return `🔒 Payment Link Setup Required
 
 To create payment links, please set your fkey.id first:
 
-**Step 1**: \`/set yourUsername\`
-**Step 2**: Complete setup at ${this.DSTEALTH_APP_URL}
+Step 1: \`/set yourUsername\`
+Step 2: Complete setup at ${this.DSTEALTH_APP_URL}
 
-**Need FluidKey?** ${this.FLUIDKEY_REFERRAL_URL}`;
+Need FluidKey? ${this.FLUIDKEY_REFERRAL_URL}`;
         }
       }
 
@@ -1174,13 +1174,13 @@ To create payment links, please set your fkey.id first:
       const freshData = await this.getFreshUserStealthData(senderInboxId);
 
       if (!freshData) {
-        return `❌ **Setup Incomplete**
+        return `❌ Setup Incomplete
 
 Please complete your setup at ${this.DSTEALTH_APP_URL}`;
       }
 
       if (freshData.error) {
-        return `❌ **Security Error**
+        return `❌ Security Error
 
 Could not verify your fkey.id: ${freshData.error}
 
@@ -1194,18 +1194,18 @@ Please re-verify: \`/set ${userData.fkeyId}\``;
       
       // 🔧 VALIDATION: Check Daimo API limits (max $4000)
       if (amountInDollars > 4000) {
-        return `❌ **Payment Amount Too Large**
+        return `❌ Payment Amount Too Large
 
-**Requested**: $${amount}
-**Daimo Limit**: $4000.00 maximum
+Requested: $${amount}
+Daimo Limit: $4000.00 maximum
 
-**Please try a smaller amount:**
+Please try a smaller amount:
 • "create payment link for $100"
 • "create payment link for $500"
 • "create payment link for $1000"
 
-**Why the limit?** Daimo has security limits for payment links.
-**Need larger amounts?** Visit ${this.DSTEALTH_APP_URL} for alternatives.`;
+Why the limit? Daimo has security limits for payment links.
+Need larger amounts? Visit ${this.DSTEALTH_APP_URL} for alternatives.`;
       }
       
       // Format as decimal string (e.g., "50.00") as required by Daimo API docs
@@ -1232,7 +1232,7 @@ Please re-verify: \`/set ${userData.fkeyId}\``;
       const coinbaseWalletUrl = this.generateCoinbaseWalletLink(currentAddress, amount, "USDC");
 
       const addressChangeWarning = isAddressUpdated 
-        ? `\n⚠️ **Address Updated**: Your stealth address was refreshed.`
+        ? `\n⚠️ Address Updated: Your stealth address was refreshed.`
         : '';
 
       // 🔧 FIXED: Send Transaction Actions for the payment link - now uses senderInboxId
@@ -1266,11 +1266,11 @@ Please re-verify: \`/set ${userData.fkeyId}\``;
       const lookupResult = await this.callFkeyLookupAPI(fkeyId);
 
       if (lookupResult.error) {
-        return `❌ **fkey.id Lookup Failed**
+        return `❌ fkey.id Lookup Failed
 
 Could not verify ${fkeyId}.fkey.id: ${lookupResult.error}
 
-**Please ensure:**
+Please ensure:
 1. 🔑 You have a FluidKey account: ${this.FLUIDKEY_REFERRAL_URL}
 2. 📝 Your username is correct (e.g., "tantodefi.fkey.id")
 3. 🌐 Your fkey.id profile is publicly accessible
@@ -1294,24 +1294,24 @@ Try again with the correct username, or get FluidKey first!`;
         ? "✅ ZK Proof Verified"
         : "⚠️ No ZK Proof Available";
 
-      return `✅ **fkey.id Connected!** 
+      return `✅ fkey.id Connected! 
 
-**Your Profile**: ${fkeyId}.fkey.id
-**Address**: ${lookupResult.address?.slice(0, 6)}...${lookupResult.address?.slice(-4)}
-**ZK Proof**: ${proofStatus}
+Your Profile: ${fkeyId}.fkey.id
+Address: ${lookupResult.address?.slice(0, 6)}...${lookupResult.address?.slice(-4)}
+ZK Proof: ${proofStatus}
 
-**🚀 Next Steps:**
-1. **Complete Setup**: ${this.DSTEALTH_APP_URL}
-2. **Generate Stealth Address** 
-3. **Create Payment Links**: "create payment link for $X"
+🚀 Next Steps:
+1. Complete Setup: ${this.DSTEALTH_APP_URL}
+2. Generate Stealth Address 
+3. Create Payment Links: "create payment link for $X"
 
-**💡 Your ZK proof enables:**
+💡 Your ZK proof enables:
 • Generate anonymous payment links
 • Receive cryptographic receipts for transactions
 • Earn privacy rewards
 • Access advanced stealth features
 
-**Ready to finish setup?** Visit ${this.DSTEALTH_APP_URL} now!`;
+Ready to finish setup? Visit ${this.DSTEALTH_APP_URL} now!`;
     } catch (error) {
       console.error("Error handling fkey.id submission:", error);
       return "❌ Failed to save fkey.id. Please try again.";
@@ -1365,52 +1365,52 @@ Questions? Just ask me anything about stealth payments!`;
         const zkProofStatus = userData.zkProof ? "✅ Verified" : "⚠️ Pending";
 
         const addressUpdateWarning = isAddressUpdated 
-          ? `\n🔄 **Address Updated**: Your stealth address was refreshed from fkey.id.`
+          ? `\n🔄 Address Updated: Your stealth address was refreshed from fkey.id.`
           : '';
 
-        return `👋 **Welcome back, ${userData.fkeyId}!** 🥷
+        return `👋 Welcome back, ${userData.fkeyId}! 🥷
 
-**Setup Status**: ${setupStatus === "complete" ? "✅ Complete" : "⏳ Pending"}
-**ZK Proof**: ${zkProofStatus}${addressUpdateWarning}
+Setup Status: ${setupStatus === "complete" ? "✅ Complete" : "⏳ Pending"}
+ZK Proof: ${zkProofStatus}${addressUpdateWarning}
 
-**Quick Actions:**
-• **"create payment link for $X"** - Generate payment links
-• **"/balance"** - Check your earnings
-• **"/links"** - Manage your links
+Quick Actions:
+• "create payment link for $X" - Generate payment links
+• "/balance" - Check your earnings
+• "/links" - Manage your links
 
-${setupStatus === "pending" ? `**Complete Setup**: ${this.DSTEALTH_APP_URL}` : ""}
+${setupStatus === "pending" ? `Complete Setup: ${this.DSTEALTH_APP_URL}` : ""}
 
-**Need help?** Type "/help" for all commands!`;
+Need help? Type "/help" for all commands!`;
       }
 
       // New user - Core Feature #1: FluidKey signup promotion
-      return `👋 **Welcome to dStealth!** 🥷
+      return `👋 Welcome to dStealth! 🥷
 
-I'm your **privacy assistant** for anonymous payments & rewards.
+I'm your privacy assistant for anonymous payments & rewards.
 
-**🚀 Get Started (2 minutes):**
+🚀 Get Started (2 minutes):
 
-**Step 1**: 🔑 **Get FluidKey** (free privacy wallet)
+Step 1: 🔑 Get FluidKey (free privacy wallet)
 ${this.FLUIDKEY_REFERRAL_URL}
 
-**Step 2**: 📝 **Tell me your fkey.id** 
+Step 2: 📝 Tell me your fkey.id 
 Example: "tantodefi.fkey.id"
 
-**Step 3**: 🚀 **Complete setup**
+Step 3: 🚀 Complete setup
 ${this.DSTEALTH_APP_URL}
 
-**💰 What you'll get:**
-• 🥷 **Anonymous payment links**
-• 🧾 **ZK receipts** for transactions  
-• 🎯 **Privacy rewards** & points
-• 🔒 **Stealth addresses** for privacy
+💰 What you'll get:
+• 🥷 Anonymous payment links
+• 🧾 ZK receipts for transactions  
+• 🎯 Privacy rewards & points
+• 🔒 Stealth addresses for privacy
 
-**Try saying**: "tantodefi.fkey.id" or "/help"
+Try saying: "tantodefi.fkey.id" or "/help"
 
 *Start earning privacy rewards today!*`;
     } catch (error) {
       console.error("Error in user welcome:", error);
-      return `👋 **Welcome to dStealth!** 🥷
+      return `👋 Welcome to dStealth! 🥷
 
 Get started with FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
 Then tell me your fkey.id username!`;
@@ -1461,21 +1461,21 @@ Need help? Just ask me anything about privacy payments!`;
 
     const status = this.getStatus();
 
-    return `📊 **Agent Status**
+    return `📊 Agent Status
 
-**Status**: ${status.isRunning ? "🟢 Active" : "🔴 Inactive"}
-**Messages Processed**: ${status.processedMessageCount}
-**Stream Restarts**: ${status.streamRestartCount}
-**Installations**: ${status.installationCount}/5
+Status: ${status.isRunning ? "🟢 Active" : "🔴 Inactive"}
+Messages Processed: ${status.processedMessageCount}
+Stream Restarts: ${status.streamRestartCount}
+Installations: ${status.installationCount}/5
 
-**Core Features**: ✅ All operational
+Core Features: ✅ All operational
 • FluidKey referral system
 • fkey.id profile management with ZK proofs
 • Payment link generation
 • ZK receipt creation
 
-**XMTP SDK**: v3.1.0+ with enhanced reliability
-**Agent Address**: ${status.agentAddress}
+XMTP SDK: v3.1.2 with enhanced reliability
+Agent Address: ${status.agentAddress}
 
 Agent is running optimally! 🚀`;
   }
@@ -1488,29 +1488,29 @@ Agent is running optimally! 🚀`;
       const userData = await agentDb.getStealthDataByUser(senderInboxId);
 
       if (!userData || !userData.fkeyId) {
-        return `💰 **Balance Check - Setup Required**
+        return `💰 Balance Check - Setup Required
 
 To check your balance, complete your setup:
 
-1. 🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
-2. 📝 **Tell me your fkey.id**: (e.g., "tantodefi.fkey.id")
-3. 🚀 **Complete setup**: ${this.DSTEALTH_APP_URL}
+1. 🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+2. 📝 Tell me your fkey.id: (e.g., "tantodefi.fkey.id")
+3. 🚀 Complete setup: ${this.DSTEALTH_APP_URL}
 
 Once setup is complete, I can show your privacy rewards balance!`;
       }
 
-      return `💰 **Balance Overview** 
+      return `💰 Balance Overview 
 
-**Profile**: ${userData.fkeyId}.fkey.id
-**Privacy Points**: Coming soon...
-**Rewards**: Coming soon...
+Profile: ${userData.fkeyId}.fkey.id
+Privacy Points: Coming soon...
+Rewards: Coming soon...
 
-**💡 Earn More:**
+💡 Earn More:
 • Generate payment links
 • Receive stealth payments
 • Complete privacy challenges
 
-**Full Dashboard**: ${this.DSTEALTH_APP_URL}`;
+Full Dashboard: ${this.DSTEALTH_APP_URL}`;
     } catch (error) {
       console.error("Error checking balance:", error);
       return "❌ Failed to check balance. Please try again.";
@@ -1526,44 +1526,44 @@ Once setup is complete, I can show your privacy rewards balance!`;
       const freshData = await this.getFreshUserStealthData(senderInboxId);
 
       if (!freshData) {
-        return `🔗 **Links Management - Setup Required**
+        return `🔗 Links Management - Setup Required
 
 To manage your payment links:
 
-1. 🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
-2. 📝 **Tell me your fkey.id**: (e.g., "tantodefi.fkey.id")
-3. 🚀 **Complete setup**: ${this.DSTEALTH_APP_URL}
+1. 🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+2. 📝 Tell me your fkey.id: (e.g., "tantodefi.fkey.id")
+3. 🚀 Complete setup: ${this.DSTEALTH_APP_URL}
 
 Then you can create and manage payment links!`;
       }
 
       if (freshData.error) {
-        return `❌ **Links Management Error: fkey.id Verification Failed**
+        return `❌ Links Management Error: fkey.id Verification Failed
 
 Could not verify your current fkey.id address: ${freshData.error}
 
-**This could mean:**
+This could mean:
 • Your fkey.id profile is no longer accessible
 • Your FluidKey account has issues
 • Network connectivity problems
 
-**Please re-verify your fkey.id**: "${freshData.userData.fkeyId}.fkey.id"
-**Or get support**: ${this.FLUIDKEY_REFERRAL_URL}`;
+Please re-verify your fkey.id: "${freshData.userData.fkeyId}.fkey.id"
+Or get support: ${this.FLUIDKEY_REFERRAL_URL}`;
       }
 
       const { userData, currentAddress, isAddressUpdated } = freshData;
 
-      return `🔗 **Payment Links Management**
+      return `🔗 Payment Links Management
 
-**Profile**: ${userData.fkeyId}.fkey.id
-**Active Links**: View in dashboard
-**Analytics**: View in dashboard
+Profile: ${userData.fkeyId}.fkey.id
+Active Links: View in dashboard
+Analytics: View in dashboard
 
-**🚀 Quick Actions:**
-• **"create payment link for $X"** - Generate new link
-• **Full Dashboard**: ${this.DSTEALTH_APP_URL}
+🚀 Quick Actions:
+• "create payment link for $X" - Generate new link
+• Full Dashboard: ${this.DSTEALTH_APP_URL}
 
-**💡 Pro Tip**: Share your payment links to earn privacy rewards!`;
+💡 Pro Tip: Share your payment links to earn privacy rewards!`;
     } catch (error) {
       console.error("Error managing links:", error);
       return "❌ Failed to manage links. Please try again.";
@@ -1586,17 +1586,17 @@ Could not verify your current fkey.id address: ${freshData.error}
       const lookupResult = await this.callFkeyLookupAPI(cleanFkeyId);
 
       if (lookupResult.error) {
-        return `❌ **fkey.id Lookup Failed**
+        return `❌ fkey.id Lookup Failed
 
 Could not find ${cleanFkeyId}.fkey.id: ${lookupResult.error}
 
-**Common Issues:**
+Common Issues:
 • Username might be incorrect
 • Profile might be private
 • FluidKey account might not exist
 
-**🔗 Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
-**💡 Want your own fkey.id?** Get FluidKey first!`;
+🔗 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+💡 Want your own fkey.id? Get FluidKey first!`;
       }
 
       const hasZkProof = lookupResult.proof
@@ -1604,27 +1604,27 @@ Could not find ${cleanFkeyId}.fkey.id: ${lookupResult.error}
         : "⚠️ No ZK Proof";
       const address = lookupResult.address || "Unknown";
 
-      return `🔍 **fkey.id Lookup Result**
+      return `🔍 fkey.id Lookup Result
 
-**Profile**: ${cleanFkeyId}.fkey.id
-**Address**: ${address.slice(0, 6)}...${address.slice(-4)}
-**ZK Proof**: ${hasZkProof}
-**Status**: ✅ Verified
+Profile: ${cleanFkeyId}.fkey.id
+Address: ${address.slice(0, 6)}...${address.slice(-4)}
+ZK Proof: ${hasZkProof}
+Status: ✅ Verified
 
-**🚀 Profile Features**:
+🚀 Profile Features:
 • Anonymous payment links
 • Cryptographic identity verification
 • Privacy-preserving transactions
 
-**Want to connect this profile?** Just say "${cleanFkeyId}.fkey.id"
-**Get your own FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}`;
+Want to connect this profile? Just say "${cleanFkeyId}.fkey.id"
+Get your own FluidKey: ${this.FLUIDKEY_REFERRAL_URL}`;
     } catch (error) {
       console.error("Error in fkey lookup:", error);
-      return `❌ **Lookup Error**
+      return `❌ Lookup Error
 
 Failed to lookup ${cleanFkeyId}.fkey.id. Please try again.
 
-**Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}`;
+Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}`;
     }
   }
 
