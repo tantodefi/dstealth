@@ -259,30 +259,8 @@ export default function WalletConnection() {
     }
   }, [isConnected, address, isInFarcasterContext, context, connect, connectors]);
 
-  // Auto-connection for Coinbase Wallet context
-  useEffect(() => {
-    if (isInCoinbaseWalletContext && !isConnected && !client && !initializing && !localInitializing) {
-      console.log("🔗 Coinbase Wallet context detected - auto-connecting wallet");
-      
-      // Connect to Coinbase Wallet first
-      const coinbaseConnector = connectors.find(c => 
-        c.id === 'coinbaseWalletSDK' || 
-        c.name?.includes('Coinbase')
-      );
-      
-      if (coinbaseConnector) {
-        connect({ connector: coinbaseConnector });
-      } else {
-        // Fallback to creating new connector
-        connect({
-          connector: coinbaseWallet({
-            appName: "XMTP Mini App",
-            preference: "all",
-          }),
-        });
-      }
-    }
-  }, [isInCoinbaseWalletContext, isConnected, client, initializing, localInitializing, connect, connectors]);
+  // Note: Auto-connection for Coinbase Wallet context is now handled in the main page component
+  // to ensure proper coordination with ephemeral XMTP initialization
 
   // Auto-initialize XMTP when wallet connects after user chose connection type
   useEffect(() => {
@@ -639,7 +617,7 @@ export default function WalletConnection() {
       {/* Context indicator */}
       {isInCoinbaseWalletContext && (
         <div className="bg-blue-900/20 border border-blue-600/30 rounded-lg p-3 text-xs text-blue-200">
-          📱 Coinbase Wallet detected - Auto-connecting...
+          📱 Coinbase Wallet detected - {!isConnected ? "Auto-connecting..." : !client ? "Initializing XMTP..." : "Ready"}
         </div>
       )}
       {isInFarcasterContext && (
@@ -718,14 +696,39 @@ export default function WalletConnection() {
 
         {/* Show context-appropriate connection options */}
         {isInCoinbaseWalletContext ? (
-          // Coinbase Wallet context - show auto-connecting message
+          // Coinbase Wallet context - show auto-connecting message or connecting XMTP
           <div className="bg-blue-900/20 border border-blue-600/30 rounded-lg p-4 text-center">
-            <div className="text-blue-300 text-lg font-medium mb-2">
-              🔗 Auto-connecting to Coinbase Wallet
-            </div>
-            <div className="text-blue-200 text-sm">
-              Using ephemeral XMTP connection for privacy
-            </div>
+            {!isConnected ? (
+              <>
+                <div className="text-blue-300 text-lg font-medium mb-2">
+                  🔗 Auto-connecting to Coinbase Wallet
+                </div>
+                <div className="text-blue-200 text-sm">
+                  Please approve the connection in your wallet
+                </div>
+              </>
+            ) : !client ? (
+              <>
+                <div className="text-blue-300 text-lg font-medium mb-2">
+                  🚀 Initializing XMTP Connection
+                </div>
+                <div className="text-blue-200 text-sm">
+                  Using ephemeral XMTP connection for privacy
+                </div>
+                <div className="mt-3">
+                  <div className="animate-spin inline-block w-4 h-4 border-2 border-blue-300 border-t-transparent rounded-full"></div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-green-300 text-lg font-medium mb-2">
+                  ✅ Connected to Coinbase Wallet
+                </div>
+                <div className="text-green-200 text-sm">
+                  Ephemeral XMTP connection ready
+                </div>
+              </>
+            )}
           </div>
         ) : isInFarcasterContext ? (
           // Farcaster context - show prompt for wallet connection

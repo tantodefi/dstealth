@@ -74,7 +74,7 @@ export default function Home() {
 
     // Auto-connect for Coinbase Wallet context
     if (isInCoinbaseWalletContext && !client && !isConnected) {
-      console.log("🔗 Coinbase Wallet context detected - auto-connecting wallet and ephemeral XMTP");
+      console.log("🔗 Coinbase Wallet context detected - auto-connecting wallet");
       setAutoConnectionAttempted(true);
       
       // First connect to Coinbase Wallet
@@ -86,7 +86,7 @@ export default function Home() {
       if (coinbaseConnector) {
         connect({ connector: coinbaseConnector });
       } else {
-        // Fallback to creating new connector and initialize ephemeral XMTP
+        // Fallback to ephemeral XMTP directly if no Coinbase connector
         console.log("🔗 No Coinbase connector found, using ephemeral XMTP directly");
         initialize({
           connectionType: "ephemeral",
@@ -125,6 +125,42 @@ export default function Home() {
     initialize,
     connect,
     connectors,
+  ]);
+
+  // Auto-initialize ephemeral XMTP when Coinbase Wallet connects
+  useEffect(() => {
+    // Only proceed if:
+    // 1. We're in Coinbase Wallet context
+    // 2. Wallet is connected  
+    // 3. No XMTP client exists yet
+    // 4. Auto-connection was attempted (to avoid race conditions)
+    if (
+      isInCoinbaseWalletContext && 
+      isConnected && 
+      !client && 
+      autoConnectionAttempted &&
+      !frameLoading &&
+      isSDKLoaded
+    ) {
+      console.log("🚀 Coinbase Wallet connected - auto-initializing ephemeral XMTP");
+      
+      initialize({
+        connectionType: "ephemeral",
+        env: process.env.NEXT_PUBLIC_XMTP_ENV as any,
+      }).then(() => {
+        console.log("✅ Ephemeral XMTP connection successful after Coinbase Wallet connection");
+      }).catch((error) => {
+        console.error("❌ Failed to initialize ephemeral XMTP:", error);
+      });
+    }
+  }, [
+    isInCoinbaseWalletContext,
+    isConnected,
+    client,
+    autoConnectionAttempted,
+    frameLoading,
+    isSDKLoaded,
+    initialize,
   ]);
 
   return (
@@ -171,7 +207,11 @@ export default function Home() {
                     </h1>
                     <p className="text-gray-300 text-sm">
                       {isInCoinbaseWalletContext
-                        ? "Auto-connecting with ephemeral XMTP..."
+                        ? (!isConnected 
+                            ? "Auto-connecting to Coinbase Wallet..."
+                            : !client 
+                              ? "Initializing ephemeral XMTP connection..."
+                              : "Connection ready!")
                         : isInFarcasterContext
                           ? "Please connect your wallet to continue"
                           : connectionType === "ephemeral" || connectionType === "Ephemeral Wallet" 
