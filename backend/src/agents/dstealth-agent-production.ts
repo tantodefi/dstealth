@@ -1329,18 +1329,18 @@ Try again with the correct username, or get FluidKey first!`;
       lower.includes("hi") ||
       lower.includes("hey")
     ) {
-      return `👋 **Hello! I'm the dStealth Agent** 🥷
+      return `👋 Hello! I'm the dStealth Agent 🥷
 
-I help you create **anonymous payment links** and earn **privacy rewards**!
+I help you create anonymous payment links and earn privacy rewards!
 
-**🚀 Get Started:**
-1. 🔑 **Get FluidKey**: ${this.FLUIDKEY_REFERRAL_URL}
-2. 📝 **Tell me your fkey.id**: (e.g., "tantodefi.fkey.id")
-3. 🚀 **Complete setup**: ${this.DSTEALTH_APP_URL}
-4. 💳 **Create links**: "create payment link for $X"
+🚀 Get Started:
+1. 🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL} (sign up from a non-wallet browser)
+2. 📝 Tell me your fkey.id: (e.g., "tantodefi.fkey.id")
+3. 🚀 Complete setup: ${this.DSTEALTH_APP_URL}
+4. 💳 Create links: "create payment link for $X"
 
-**Commands**: /help, /status, /balance
-**Questions?** Just ask me anything about stealth payments!`;
+Commands: /help, /status, /balance
+Questions? Just ask me anything about stealth payments!`;
     }
 
     if (lower.includes("help")) {
