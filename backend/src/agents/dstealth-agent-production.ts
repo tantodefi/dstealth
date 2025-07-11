@@ -1741,35 +1741,35 @@ Try again: Type /help now!`;
           const userData = await agentDb.getStealthDataByUser(senderInboxId);
           
           if (!userData?.fkeyId) {
-            return `🔒 **Setup Required for Payment Links**
+            return `🔒 Setup Required for Payment Links
 
 To create payment links, please set your fkey.id first:
 
-**Step 1**: 🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
-**Step 2**: 📝 Set your fkey.id: \`/set yourUsername\`
-**Step 3**: 🚀 Complete setup: ${this.DSTEALTH_APP_URL}
+Step 1: 🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+Step 2: 📝 Set your fkey.id: /set yourUsername
+Step 3: 🚀 Complete setup: ${this.DSTEALTH_APP_URL}
 
 Once setup is complete, you can create payment links instantly!`;
           }
 
           // Return instructions for flexible text-based payment creation
-          return `💳 **Create Payment Link**
+          return `💳 Create Payment Link
 
 To create a payment link, simply specify any amount:
 
-**Examples:**
+Examples:
 • "create payment link for $25"
 • "create payment link for $100" 
 • "create payment link for $1500"
 • "create payment link for $50.50"
 
-**Features:**
+Features:
 • 🥷 Anonymous sender privacy
 • ⚡ Direct to stealth address via Daimo
 • 🧾 ZK proof receipts
 • 🎯 Earn privacy rewards
 
-**Try it now!** Just type the amount you want.`;
+Try it now! Just type the amount you want.`;
 
         case 'get-help':
           return this.getHelpMessage();
@@ -1914,21 +1914,21 @@ Just say the amount: "create payment link for $X"`;
               console.log(`💰 Wallet transaction request sent: $${paymentData.amount} USDC to ${paymentData.stealthAddress}`);
               
               // Return confirmation message
-              return `💰 **Wallet Transaction Request Sent!**
+              return `💰 Wallet Transaction Request Sent!
 
-**Amount**: $${paymentData.amount} USDC
-**Recipient**: ${paymentData.fkeyId}.fkey.id  
-**Stealth Address**: ${paymentData.stealthAddress.slice(0, 8)}...${paymentData.stealthAddress.slice(-6)}
+Amount: $${paymentData.amount} USDC
+Recipient: ${paymentData.fkeyId}.fkey.id  
+Stealth Address: ${paymentData.stealthAddress.slice(0, 8)}...${paymentData.stealthAddress.slice(-6)}
 
-**✅ Please approve the transaction in your wallet**
+✅ Please approve the transaction in your wallet
 
-**Features:**
+Features:
 • 🥷 Anonymous sender privacy
 • ⚡ Direct to stealth address
 • 🧾 ZK proof receipt available
 • 🎯 Earn privacy rewards
 
-**After approval**: Share the transaction reference for ZK receipt!`;
+After approval: Share the transaction reference for ZK receipt!`;
 
             } catch (error) {
               console.error("Error sending wallet transaction request:", error);
@@ -1943,69 +1943,25 @@ Just say the amount: "create payment link for $X"`;
         case 'daimo-pay-link':
           const linkData = this.getPaymentDataForUser(senderInboxId);
           if (linkData) {
-            return `🔗 **Daimo Pay Link**
+            return `🔗 Daimo Pay Link
 
-**Payment Link:** ${linkData.daimoLink}
-
-**Payment Details:**
-• Amount: $${linkData.amount} USDC
-• Recipient: ${linkData.fkeyId}.fkey.id
-• Stealth Address: ${linkData.stealthAddress.slice(0, 8)}...${linkData.stealthAddress.slice(-6)}
-
-**How to use:**
-• 📱 Click the link to open in Daimo app
-• 💰 Complete payment with any Base-compatible wallet
-• 🔗 Share this link with anyone who needs to pay you
-
-**Daimo Features:**
-• ⚡ Fast Base network payments
-• 💰 USDC transactions
-• 🔗 Universal payment links
-• 🛡️ Secure transactions
-
-**Copy this link:** ${linkData.daimoLink}`;
+${linkData.daimoLink}`;
           } else {
-            return `🔗 **Daimo Pay Link**
+            return `🔗 Daimo Pay Link
 
-Your payment link is ready! Use the Daimo link from your recent payment creation.
-
-**Need a new link?** Create another payment link by typing an amount like "create payment link for $25"
-
-**Dashboard:** ${this.DSTEALTH_APP_URL}`;
+Your payment link is ready! Use the Daimo link from your recent payment creation.`;
           }
 
         case 'cbw-request-link':
           const cbwLinkData = this.getPaymentDataForUser(senderInboxId);
           if (cbwLinkData) {
-            return `📱 **Coinbase Wallet Request Link**
+            return `📱 CBW Request Link
 
-**CBW Payment Link:** ${cbwLinkData.cbwLink}
-
-**Payment Details:**
-• Amount: $${cbwLinkData.amount} USDC
-• Recipient: ${cbwLinkData.fkeyId}.fkey.id
-• Stealth Address: ${cbwLinkData.stealthAddress.slice(0, 8)}...${cbwLinkData.stealthAddress.slice(-6)}
-
-**How to use:**
-• 📱 Click the link to open in Coinbase Wallet
-• 💰 Complete payment directly from Coinbase Wallet
-• 🔗 Share this link with Coinbase Wallet users
-
-**CBW Features:**
-• ⚡ Direct Coinbase Wallet integration
-• 💰 USDC transactions on Base
-• 🔗 One-click payment requests
-• 🛡️ Secure wallet-to-wallet transfers
-
-**Copy this link:** ${cbwLinkData.cbwLink}`;
+${cbwLinkData.cbwLink}`;
           } else {
-            return `📱 **Coinbase Wallet Request Link**
+            return `📱 CBW Request Link
 
-Your CBW payment link is ready! Use the CBW link from your recent payment creation.
-
-**Need a new link?** Create another payment link by typing an amount like "create payment link for $25"
-
-**Dashboard:** ${this.DSTEALTH_APP_URL}`;
+Your CBW payment link is ready! Use the CBW link from your recent payment creation.`;
           }
 
         case 'share-link':
@@ -2042,25 +1998,17 @@ Dashboard: ${this.DSTEALTH_APP_URL}`;
 
         case 'create-another':
         case 'create-new-link':
-          return `➕ **Create Another Payment Link**
+          return `➕ Create Another Payment Link
 
 Ready to create another payment link?
 
-**Examples:**
+Examples:
 • "create payment link for $25"
 • "create payment link for $100"
 • "create payment link for $500"
 • "create payment link for $50.50"
 
-**Features:**
-• 🥷 Anonymous sender privacy
-• ⚡ Direct to stealth address via Daimo
-• 🎯 Earn privacy rewards
-• 🧾 ZK proof receipts
-
-**Just type the amount:** "create payment link for $X"
-
-**Dashboard:** ${this.DSTEALTH_APP_URL}`;
+Just type the amount: "create payment link for $X"`;
 
         // Legacy support for old simple IDs (just in case)
         case 'test':
@@ -2330,7 +2278,7 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
 Amount: $${amount} USDC
 Stealth Address: ${stealthAddress.slice(0, 8)}...${stealthAddress.slice(-6)}
 
-**Available Links:**
+Available Links:
 • Daimo Pay: ${daimoLink}
 • CBW Request: Ready
 
