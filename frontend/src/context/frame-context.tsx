@@ -17,6 +17,10 @@ interface FrameContextValue {
   error: string | null;
   actions: any | null;
   isLoading: boolean;
+  clientFid: number | null;
+  isInFarcasterContext: boolean;
+  isInCoinbaseWalletContext: boolean;
+  isBrowserContext: boolean;
 }
 
 const FrameProviderContext = createContext<FrameContextValue | undefined>(
@@ -34,7 +38,13 @@ export function FrameProvider({ children }: FrameProviderProps) {
   const [isInMiniApp, setIsInMiniApp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [clientFid, setClientFid] = useState<number | null>(null);
   const initializationAttempted = useRef(false);
+
+  // Derived context states based on clientFid
+  const isInFarcasterContext = clientFid === 9152;
+  const isInCoinbaseWalletContext = clientFid === 309857;
+  const isBrowserContext = !isInMiniApp || (!isInFarcasterContext && !isInCoinbaseWalletContext);
 
   useEffect(() => {
     const initializeFarcasterSDK = async () => {
@@ -65,6 +75,23 @@ export function FrameProvider({ children }: FrameProviderProps) {
             setContext(frameContext as FrameContext);
             setActions(sdk.actions);
             
+            // Detect clientFid for context identification
+            const detectedClientFid = (frameContext as any)?.client?.clientFid;
+            console.log("🎯 Farcaster: ClientFid detected:", detectedClientFid);
+            
+            if (detectedClientFid) {
+              setClientFid(detectedClientFid);
+              
+              // Log the context type for debugging
+              if (detectedClientFid === 9152) {
+                console.log("🎯 Farcaster: Detected Farcaster context");
+              } else if (detectedClientFid === 309857) {
+                console.log("🎯 Farcaster: Detected Coinbase Wallet context");
+              } else {
+                console.log("🎯 Farcaster: Unknown clientFid:", detectedClientFid);
+              }
+            }
+            
             // Mark SDK as ready
             await sdk.actions.ready({
               disableNativeGestures: true,
@@ -73,6 +100,7 @@ export function FrameProvider({ children }: FrameProviderProps) {
             console.log("🎯 Farcaster: SDK ready with context:", {
               user: frameContext.user,
               location: frameContext.location,
+              clientFid: detectedClientFid,
             });
           } else {
             console.log("🎯 Farcaster: No context received despite being in mini app");
@@ -116,8 +144,12 @@ export function FrameProvider({ children }: FrameProviderProps) {
       hasActions: !!actions,
       error,
       isLoading,
+      clientFid,
+      isInFarcasterContext,
+      isInCoinbaseWalletContext,
+      isBrowserContext,
     });
-  }, [isSDKLoaded, isInMiniApp, context, actions, error, isLoading]);
+  }, [isSDKLoaded, isInMiniApp, context, actions, error, isLoading, clientFid, isInFarcasterContext, isInCoinbaseWalletContext, isBrowserContext]);
 
   const value = {
     context,
@@ -126,6 +158,10 @@ export function FrameProvider({ children }: FrameProviderProps) {
     isInMiniApp,
     error,
     isLoading,
+    clientFid,
+    isInFarcasterContext,
+    isInCoinbaseWalletContext,
+    isBrowserContext,
   };
 
   return (

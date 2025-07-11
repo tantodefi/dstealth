@@ -39,14 +39,20 @@ const XMTP_CONNECTION_TYPE_KEY = "xmtp:connectionType";
 const XMTP_EPHEMERAL_KEY = "xmtp:ephemeralKey";
 
 export default function WalletConnection() {
-  const { context, isInMiniApp } = useFrame();
+  const { 
+    context, 
+    isInMiniApp, 
+    clientFid, 
+    isInFarcasterContext, 
+    isInCoinbaseWalletContext, 
+    isBrowserContext 
+  } = useFrame();
   const { 
     initialize, 
     initializing, 
     client, 
     error, 
     connectionType: xmtpConnectionType,
-    isInFarcasterContext,
     farcasterUser,
     clearErrorAndRetry
   } = useXMTP();
@@ -252,6 +258,31 @@ export default function WalletConnection() {
       }
     }
   }, [isConnected, address, isInFarcasterContext, context, connect, connectors]);
+
+  // Auto-connection for Coinbase Wallet context
+  useEffect(() => {
+    if (isInCoinbaseWalletContext && !isConnected && !client && !initializing && !localInitializing) {
+      console.log("🔗 Coinbase Wallet context detected - auto-connecting wallet");
+      
+      // Connect to Coinbase Wallet first
+      const coinbaseConnector = connectors.find(c => 
+        c.id === 'coinbaseWalletSDK' || 
+        c.name?.includes('Coinbase')
+      );
+      
+      if (coinbaseConnector) {
+        connect({ connector: coinbaseConnector });
+      } else {
+        // Fallback to creating new connector
+        connect({
+          connector: coinbaseWallet({
+            appName: "XMTP Mini App",
+            preference: "all",
+          }),
+        });
+      }
+    }
+  }, [isInCoinbaseWalletContext, isConnected, client, initializing, localInitializing, connect, connectors]);
 
   // Auto-initialize XMTP when wallet connects after user chose connection type
   useEffect(() => {
@@ -605,7 +636,22 @@ export default function WalletConnection() {
   // Show connection buttons only if not fully connected
   return (
     <div className="w-full flex flex-col gap-4">
-      {/* Environment indicator */}
+      {/* Context indicator */}
+      {isInCoinbaseWalletContext && (
+        <div className="bg-blue-900/20 border border-blue-600/30 rounded-lg p-3 text-xs text-blue-200">
+          📱 Coinbase Wallet detected - Auto-connecting...
+        </div>
+      )}
+      {isInFarcasterContext && (
+        <div className="bg-purple-900/20 border border-purple-600/30 rounded-lg p-3 text-xs text-purple-200">
+          🎯 Farcaster Frame detected - Auto-prompting wallet connection
+        </div>
+      )}
+      {isBrowserContext && (
+        <div className="bg-green-900/20 border border-green-600/30 rounded-lg p-3 text-xs text-green-200">
+          🌐 Browser context - Choose your connection method
+        </div>
+      )}
       {walletEnvironment.isMobile && (
         <div className="bg-blue-900/20 border border-blue-600/30 rounded-lg p-3 text-xs text-blue-200">
           📱 Mobile detected - optimized connection flow active
@@ -628,6 +674,9 @@ export default function WalletConnection() {
           <div>Environment: {env.NEXT_PUBLIC_XMTP_ENV}</div>
           <div>Has Encryption Key: {env.NEXT_PUBLIC_ENCRYPTION_KEY ? "Yes" : "No"}</div>
           <div>In Farcaster Context: {isInFarcasterContext ? "Yes" : "No"}</div>
+          <div>In Coinbase Wallet Context: {isInCoinbaseWalletContext ? "Yes" : "No"}</div>
+          <div>In Browser Context: {isBrowserContext ? "Yes" : "No"}</div>
+          <div>Client FID: {clientFid || "None"}</div>
           <div>Connection Attempt: {connectionAttemptRef.current || "None"}</div>
           <div>Fully Connected: {isFullyConnected ? "Yes" : "No"}</div>
           <div>Available Connectors: {connectors.map(c => c.id).join(", ")}</div>
@@ -667,35 +716,72 @@ export default function WalletConnection() {
           </div>
         )}
 
-        <Button
-          className="w-full bg-transparent text-white hover:bg-gray-100 hover:text-black "
-          size="lg"
-          onClick={connectWithEOA}
-          disabled={initializing || localInitializing}>
-          {(initializing || localInitializing) && localConnectionType === "eoa"
-            ? "Connecting EOA Wallet..."
-            : "Connect with EOA Wallet"}
-        </Button>
+        {/* Show context-appropriate connection options */}
+        {isInCoinbaseWalletContext ? (
+          // Coinbase Wallet context - show auto-connecting message
+          <div className="bg-blue-900/20 border border-blue-600/30 rounded-lg p-4 text-center">
+            <div className="text-blue-300 text-lg font-medium mb-2">
+              🔗 Auto-connecting to Coinbase Wallet
+            </div>
+            <div className="text-blue-200 text-sm">
+              Using ephemeral XMTP connection for privacy
+            </div>
+          </div>
+        ) : isInFarcasterContext ? (
+          // Farcaster context - show prompt for wallet connection
+          <div className="flex flex-col gap-3">
+            <div className="bg-purple-900/20 border border-purple-600/30 rounded-lg p-4 text-center">
+              <div className="text-purple-300 text-lg font-medium mb-2">
+                🎯 Farcaster Frame Detected
+              </div>
+              <div className="text-purple-200 text-sm">
+                Please connect your wallet to continue
+              </div>
+            </div>
+            <Button
+              className="w-full bg-transparent text-white hover:bg-gray-100 hover:text-black "
+              size="lg"
+              onClick={connectWithEOA}
+              disabled={initializing || localInitializing}>
+              {(initializing || localInitializing) && localConnectionType === "eoa"
+                ? "Connecting Wallet..."
+                : "Connect Wallet"}
+            </Button>
+          </div>
+        ) : (
+          // Browser context - show all connection options
+          <div className="flex flex-col gap-3">
+            <Button
+              className="w-full bg-transparent text-white hover:bg-gray-100 hover:text-black "
+              size="lg"
+              onClick={connectWithEOA}
+              disabled={initializing || localInitializing}>
+              {(initializing || localInitializing) && localConnectionType === "eoa"
+                ? "Connecting EOA Wallet..."
+                : "Connect with EOA Wallet"}
+            </Button>
 
-        <Button
-          className="w-full bg-transparent text-white hover:bg-gray-100 hover:text-black "
-          size="lg"
-          onClick={connectWithEphemeral}
-          disabled={initializing || localInitializing}>
-          {(initializing || localInitializing) && localConnectionType === "ephemeral"
-            ? "Connecting Ephemeral Wallet..."
-            : "Connect with Ephemeral Wallet"}
-        </Button>
+            <Button
+              className="w-full bg-transparent text-white hover:bg-gray-100 hover:text-black "
+              size="lg"
+              onClick={connectWithEphemeral}
+              disabled={initializing || localInitializing}>
+              {(initializing || localInitializing) && localConnectionType === "ephemeral"
+                ? "Connecting Ephemeral Wallet..."
+                : "Connect with Ephemeral Wallet"}
+            </Button>
 
-        <Button
-          className="w-full bg-transparent text-white hover:bg-gray-100 hover:text-black "
-          size="lg"
-          onClick={connectWithCoinbaseSmartWallet}
-          disabled={initializing || localInitializing}>
-          {(initializing || localInitializing) && (localConnectionType === "scw" || localConnectionType === "eoa")
-            ? `Connecting ${localConnectionType.toUpperCase()} Wallet...`
-            : "Connect with Coinbase Smart Wallet"}
-        </Button>
+            <Button
+              className="w-full bg-transparent text-white hover:bg-gray-100 hover:text-black "
+              size="lg"
+              onClick={connectWithCoinbaseSmartWallet}
+              disabled={initializing || localInitializing}>
+              {(initializing || localInitializing) && (localConnectionType === "scw" || localConnectionType === "eoa")
+                ? `Connecting ${localConnectionType.toUpperCase()} Wallet...`
+                : "Connect with Coinbase Smart Wallet"}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

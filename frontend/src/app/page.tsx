@@ -1,21 +1,33 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { useAccount } from 'wagmi';
+import { useAccount, useConnect } from 'wagmi';
 import { SafeAreaContainer } from "@/components/SafeAreaContainer";
 import { Header } from "@/components/Header";
 import WalletConnection from "@/examples/WalletConnection";
 import MainInterface from "@/components/MainInterface";
 import FAQ from '@/components/FAQ';
 import { useXMTP } from "@/context/xmtp-context";
+import { useFrame } from "@/context/frame-context";
 import { useMiniKit } from '@coinbase/onchainkit/minikit';
+import { coinbaseWallet } from 'wagmi/connectors';
 
 export default function Home() {
   const { isConnected } = useAccount();
-  const { client, connectionType } = useXMTP();
+  const { connect, connectors } = useConnect();
+  const { client, connectionType, initialize } = useXMTP();
+  const { 
+    clientFid, 
+    isInFarcasterContext, 
+    isInCoinbaseWalletContext, 
+    isBrowserContext,
+    isSDKLoaded,
+    isLoading: frameLoading 
+  } = useFrame();
   const [showLoader, setShowLoader] = useState(true);
   const [isFaqOpen, setIsFaqOpen] = useState(false);
   const [showEarningsChart, setShowEarningsChart] = useState(false);
+  const [autoConnectionAttempted, setAutoConnectionAttempted] = useState(false);
   const { setFrameReady, isFrameReady } = useMiniKit();
 
   // Determine if user is fully connected (wallet + XMTP)
@@ -43,6 +55,77 @@ export default function Home() {
       setFrameReady();
     }
   }, [setFrameReady, isFrameReady]);
+
+  // Auto-connection logic based on detected context
+  useEffect(() => {
+    // Don't proceed if we're still loading or already attempted connection
+    if (frameLoading || autoConnectionAttempted || !isSDKLoaded || client) {
+      return;
+    }
+
+    console.log("🎯 Context Detection:", {
+      clientFid,
+      isInFarcasterContext,
+      isInCoinbaseWalletContext,
+      isBrowserContext,
+      isConnected,
+      connectionType,
+    });
+
+    // Auto-connect for Coinbase Wallet context
+    if (isInCoinbaseWalletContext && !client && !isConnected) {
+      console.log("🔗 Coinbase Wallet context detected - auto-connecting wallet and ephemeral XMTP");
+      setAutoConnectionAttempted(true);
+      
+      // First connect to Coinbase Wallet
+      const coinbaseConnector = connectors.find(c => 
+        c.id === 'coinbaseWalletSDK' || 
+        c.name?.includes('Coinbase')
+      );
+      
+      if (coinbaseConnector) {
+        connect({ connector: coinbaseConnector });
+      } else {
+        // Fallback to creating new connector and initialize ephemeral XMTP
+        console.log("🔗 No Coinbase connector found, using ephemeral XMTP directly");
+        initialize({
+          connectionType: "ephemeral",
+          env: process.env.NEXT_PUBLIC_XMTP_ENV as any,
+        }).then(() => {
+          console.log("✅ Coinbase Wallet ephemeral connection successful");
+        }).catch((error) => {
+          console.error("❌ Coinbase Wallet auto-connection failed:", error);
+          setAutoConnectionAttempted(false); // Allow retry
+        });
+      }
+    }
+    
+    // Auto-prompt for Farcaster context (handled by WalletConnection component)
+    else if (isInFarcasterContext && !isConnected && !client) {
+      console.log("🔗 Farcaster context detected - wallet connection will be auto-prompted");
+      setAutoConnectionAttempted(true);
+    }
+    
+    // Browser context - no auto-connection, show options
+    else if (isBrowserContext) {
+      console.log("🌐 Browser context detected - showing connection options");
+      setAutoConnectionAttempted(true);
+    }
+  }, [
+    frameLoading,
+    autoConnectionAttempted,
+    isSDKLoaded,
+    client,
+    clientFid,
+    isInFarcasterContext,
+    isInCoinbaseWalletContext,
+    isBrowserContext,
+    isConnected,
+    connectionType,
+    initialize,
+    connect,
+    connectors,
+  ]);
 
   return (
     <SafeAreaContainer>
@@ -79,12 +162,27 @@ export default function Home() {
               <div className="p-4 pb-24 min-h-full"> {/* Extra bottom padding for scroll space */}
                 {!isFullyConnected ? (
                   <div className="text-center py-8">
-                    <h1 className="text-xl font-bold text-white mb-2">Welcome to Dstealth</h1>
+                    <h1 className="text-xl font-bold text-white mb-2">
+                      {isInCoinbaseWalletContext 
+                        ? "Welcome to Dstealth (Coinbase Wallet)"
+                        : isInFarcasterContext 
+                          ? "Welcome to Dstealth (Farcaster Frame)"
+                          : "Welcome to Dstealth"}
+                    </h1>
                     <p className="text-gray-300 text-sm">
-                      {connectionType === "ephemeral" || connectionType === "Ephemeral Wallet" 
-                        ? "Setting up your ephemeral connection..." 
-                        : "Connect your wallet to access the app"}
+                      {isInCoinbaseWalletContext
+                        ? "Auto-connecting with ephemeral XMTP..."
+                        : isInFarcasterContext
+                          ? "Please connect your wallet to continue"
+                          : connectionType === "ephemeral" || connectionType === "Ephemeral Wallet" 
+                            ? "Setting up your ephemeral connection..." 
+                            : "Choose your connection method"}
                     </p>
+                    {clientFid && (
+                      <p className="text-gray-400 text-xs mt-2">
+                        Client FID: {clientFid}
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <MainInterface 
