@@ -41,10 +41,28 @@ export function FrameProvider({ children }: FrameProviderProps) {
   const [clientFid, setClientFid] = useState<number | null>(null);
   const initializationAttempted = useRef(false);
 
-  // Derived context states based on clientFid
+  // Enhanced context detection with fallbacks
   const isInFarcasterContext = clientFid === 9152;
-  const isInCoinbaseWalletContext = clientFid === 309857;
-  const isBrowserContext = !isInMiniApp || (!isInFarcasterContext && !isInCoinbaseWalletContext);
+  const isInCoinbaseWalletContext = clientFid === 309857 || isCoinbaseWalletEnvironment();
+  const isBrowserContext = !isInMiniApp && !isInCoinbaseWalletContext && !isInFarcasterContext;
+
+  // Helper function to detect Coinbase Wallet environment
+  function isCoinbaseWalletEnvironment(): boolean {
+    if (typeof window === 'undefined') return false;
+    
+    // Check user agent for Coinbase Wallet
+    const userAgent = navigator.userAgent;
+    const isCoinbaseApp = /CoinbaseWallet|Coinbase/i.test(userAgent);
+    
+    // Check for Coinbase Wallet provider
+    const hasCoinbaseProvider = typeof window.ethereum !== 'undefined' && 
+      (window.ethereum.isCoinbaseWallet || window.ethereum.providers?.some((p: any) => p.isCoinbaseWallet));
+    
+    // Check for Coinbase-specific window properties
+    const hasCoinbaseWindow = 'coinbaseWalletExtension' in window || 'CBW' in window;
+    
+    return isCoinbaseApp || hasCoinbaseProvider || hasCoinbaseWindow;
+  }
 
   useEffect(() => {
     const initializeFarcasterSDK = async () => {
@@ -78,18 +96,21 @@ export function FrameProvider({ children }: FrameProviderProps) {
             // Detect clientFid for context identification
             const detectedClientFid = (frameContext as any)?.client?.clientFid;
             console.log("🎯 Farcaster: ClientFid detected:", detectedClientFid);
+            console.log("🎯 Farcaster: Full context:", frameContext);
             
             if (detectedClientFid) {
               setClientFid(detectedClientFid);
               
               // Log the context type for debugging
               if (detectedClientFid === 9152) {
-                console.log("🎯 Farcaster: Detected Farcaster context");
+                console.log("🎯 Farcaster: Detected Farcaster context via clientFid");
               } else if (detectedClientFid === 309857) {
-                console.log("🎯 Farcaster: Detected Coinbase Wallet context");
+                console.log("🎯 Farcaster: Detected Coinbase Wallet context via clientFid");
               } else {
                 console.log("🎯 Farcaster: Unknown clientFid:", detectedClientFid);
               }
+            } else {
+              console.log("🎯 Farcaster: No clientFid detected, using fallback detection");
             }
             
             // Mark SDK as ready
@@ -137,6 +158,7 @@ export function FrameProvider({ children }: FrameProviderProps) {
 
   // Debug logging
   useEffect(() => {
+    const coinbaseEnvDetection = typeof window !== 'undefined' ? isCoinbaseWalletEnvironment() : false;
     console.log("🎯 Farcaster: State update:", {
       isSDKLoaded,
       isInMiniApp,
@@ -148,6 +170,10 @@ export function FrameProvider({ children }: FrameProviderProps) {
       isInFarcasterContext,
       isInCoinbaseWalletContext,
       isBrowserContext,
+      coinbaseEnvDetection,
+      userAgent: typeof window !== 'undefined' ? navigator.userAgent : 'N/A',
+      hasEthereum: typeof window !== 'undefined' && typeof window.ethereum !== 'undefined',
+      isCoinbaseProvider: typeof window !== 'undefined' && window.ethereum?.isCoinbaseWallet,
     });
   }, [isSDKLoaded, isInMiniApp, context, actions, error, isLoading, clientFid, isInFarcasterContext, isInCoinbaseWalletContext, isBrowserContext]);
 

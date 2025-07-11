@@ -617,7 +617,7 @@ export default function WalletConnection() {
       {/* Context indicator */}
       {isInCoinbaseWalletContext && (
         <div className="bg-blue-900/20 border border-blue-600/30 rounded-lg p-3 text-xs text-blue-200">
-          📱 Coinbase Wallet detected - {!isConnected ? "Auto-connecting..." : !client ? "Initializing XMTP..." : "Ready"}
+          📱 Coinbase Wallet detected - {!client ? "Setting up ephemeral XMTP..." : "Ready"}
         </div>
       )}
       {isInFarcasterContext && (
@@ -655,6 +655,9 @@ export default function WalletConnection() {
           <div>In Coinbase Wallet Context: {isInCoinbaseWalletContext ? "Yes" : "No"}</div>
           <div>In Browser Context: {isBrowserContext ? "Yes" : "No"}</div>
           <div>Client FID: {clientFid || "None"}</div>
+          <div>User Agent: {typeof window !== 'undefined' ? navigator.userAgent.substring(0, 50) + '...' : 'N/A'}</div>
+          <div>Has Ethereum: {typeof window !== 'undefined' && typeof window.ethereum !== 'undefined' ? "Yes" : "No"}</div>
+          <div>Is Coinbase Provider: {typeof window !== 'undefined' && window.ethereum?.isCoinbaseWallet ? "Yes" : "No"}</div>
           <div>Connection Attempt: {connectionAttemptRef.current || "None"}</div>
           <div>Fully Connected: {isFullyConnected ? "Yes" : "No"}</div>
           <div>Available Connectors: {connectors.map(c => c.id).join(", ")}</div>
@@ -696,36 +699,30 @@ export default function WalletConnection() {
 
         {/* Show context-appropriate connection options */}
         {isInCoinbaseWalletContext ? (
-          // Coinbase Wallet context - show auto-connecting message or connecting XMTP
+          // Coinbase Wallet context - show appropriate message based on state
           <div className="bg-blue-900/20 border border-blue-600/30 rounded-lg p-4 text-center">
-            {!isConnected ? (
+            {!client ? (
               <>
                 <div className="text-blue-300 text-lg font-medium mb-2">
-                  🔗 Auto-connecting to Coinbase Wallet
+                  🚀 Coinbase Wallet Detected
                 </div>
                 <div className="text-blue-200 text-sm">
-                  Please approve the connection in your wallet
-                </div>
-              </>
-            ) : !client ? (
-              <>
-                <div className="text-blue-300 text-lg font-medium mb-2">
-                  🚀 Initializing XMTP Connection
-                </div>
-                <div className="text-blue-200 text-sm">
-                  Using ephemeral XMTP connection for privacy
+                  Setting up ephemeral XMTP connection...
                 </div>
                 <div className="mt-3">
                   <div className="animate-spin inline-block w-4 h-4 border-2 border-blue-300 border-t-transparent rounded-full"></div>
+                </div>
+                <div className="text-blue-100 text-xs mt-2">
+                  No wallet signatures required - using privacy-first ephemeral connection
                 </div>
               </>
             ) : (
               <>
                 <div className="text-green-300 text-lg font-medium mb-2">
-                  ✅ Connected to Coinbase Wallet
+                  ✅ Coinbase Wallet Ready
                 </div>
                 <div className="text-green-200 text-sm">
-                  Ephemeral XMTP connection ready
+                  Ephemeral XMTP connection active
                 </div>
               </>
             )}
