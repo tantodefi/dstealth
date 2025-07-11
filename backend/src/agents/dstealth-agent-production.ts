@@ -1235,27 +1235,11 @@ Please re-verify: \`/set ${userData.fkeyId}\``;
         ? `\n⚠️ **Address Updated**: Your stealth address was refreshed.`
         : '';
 
-      // Send main Daimo response
-      const daimoMessage = `💳 Payment Link Created! 🥷
-
-Amount: $${amount} USDC
-Recipient: ${currentData.fkeyId}.fkey.id
-Address: ${currentAddress.slice(0, 6)}...${currentAddress.slice(-4)}${addressChangeWarning}
-
-🔗 Daimo Payment Link: ${daimoResponse.url}
-
-Features:
-• 🥷 Anonymous sender privacy
-• ⚡ Direct to stealth address via Daimo
-• 🎯 Earn privacy rewards
-• 🧾 ZK proof receipt
-
-Share this link to receive payments!`;
-
       // 🔧 FIXED: Send Transaction Actions for the payment link - now uses senderInboxId
       await this.sendTransactionActions(senderInboxId, amount, currentData.fkeyId, daimoResponse.url, currentAddress);
 
-      return daimoMessage;
+      // Return empty string since we're only sending action buttons now
+      return "";
 
     } catch (error) {
       console.error("Error creating payment link:", error);
@@ -2276,11 +2260,6 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
         description: `💳 Payment Link Ready for ${fkeyId}.fkey.id
 
 Amount: $${amount} USDC
-Stealth Address: ${stealthAddress.slice(0, 8)}...${stealthAddress.slice(-6)}
-
-Available Links:
-• Daimo Pay: ${daimoLink}
-• CBW Request: Ready
 
 Choose your next action:`,
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours from now
