@@ -170,6 +170,12 @@ export class DStealthAgentProduction {
   // Track processed intent messages to prevent duplicates
   private processedIntentIds: Set<string> = new Set();
 
+  // Track users who have seen the welcome message to prevent spam
+  private userWelcomesSent: Set<string> = new Set();
+
+  // Track users in fkey.id confirmation flow
+  private userConfirmationPending: Map<string, {fkeyId: string, timestamp: number}> = new Map();
+
   // Configuration
   private readonly FLUIDKEY_REFERRAL_URL = "https://app.fluidkey.com/?ref=62YNSG";
   private readonly DSTEALTH_APP_URL = "https://dstealth.xyz";
@@ -361,7 +367,7 @@ export class DStealthAgentProduction {
         }
 
         // Process the message with our dStealth logic
-        const response = await this.processTextMessage(message.content, senderInboxId, isGroup);
+        const response = await this.processTextMessage(message.content, senderInboxId, isGroup, conversation);
         if (response) {
           await conversation.send(response);
         }
@@ -376,7 +382,7 @@ export class DStealthAgentProduction {
   /**
    * Process text messages with dStealth agent logic
    */
-  private async processTextMessage(messageContent: string, senderInboxId: string, isGroup: boolean): Promise<string | undefined> {
+  private async processTextMessage(messageContent: string, senderInboxId: string, isGroup: boolean, conversation?: any): Promise<string | undefined> {
     try {
       console.log(`📝 Processing text message: "${messageContent}" from ${senderInboxId}`);
       
@@ -403,11 +409,11 @@ export class DStealthAgentProduction {
 
       // Handle fkey.id pattern (e.g., "tantodefi.fkey.id")
       if (this.isFkeyIdPattern(messageContent)) {
-        return await this.handleFkeyIdSubmission(messageContent, senderInboxId);
+        return await this.handleFkeyIdSubmission(messageContent, senderInboxId, conversation);
       }
 
       // Handle general messages with OpenAI or basic responses
-      return await this.processGeneralMessage(messageContent, senderInboxId, isGroup);
+      return await this.processGeneralMessage(messageContent, senderInboxId, isGroup, conversation);
 
     } catch (error) {
       console.error("❌ Error processing text message:", error);
@@ -628,11 +634,51 @@ Something went wrong. Please try:
   }
 
   /**
-   * 🔧 NEW: Process general messages with intelligent responses
+   * 🔧 UPDATED: Process general messages with onboarding flow
    */
-  private async processGeneralMessage(content: string, senderInboxId: string, isGroup: boolean): Promise<string> {
+  private async processGeneralMessage(content: string, senderInboxId: string, isGroup: boolean, conversation?: any): Promise<string> {
     try {
-      // Get user data for context
+      // Check if user is onboarded first
+      const isOnboarded = await this.isUserOnboarded(senderInboxId);
+      
+      // For groups, always check onboarding status
+      if (isGroup) {
+        if (!isOnboarded) {
+          return "🔒 Please DM me to set up your fkey.id first! I can only help users who have completed onboarding.";
+        }
+        
+        // Group intro message if not sent yet
+        if (!this.groupIntroductions.has(senderInboxId)) {
+          this.groupIntroductions.add(senderInboxId);
+          return this.getGroupIntroMessage();
+        }
+      }
+      
+      // For DMs, if user is not onboarded, send welcome flow
+      if (!isGroup && !isOnboarded) {
+        // Check if we haven't sent welcome yet
+        if (!this.userWelcomesSent.has(senderInboxId)) {
+          await this.sendWelcomeWithActions(senderInboxId, conversation);
+          return ""; // Actions message sent, no text response needed
+        }
+        
+        // Check if this is a username entry (for users who clicked "I have an fkey")
+        const trimmedContent = content.trim();
+        if (this.isValidUsername(trimmedContent)) {
+          return await this.handleFkeyConfirmation(trimmedContent, senderInboxId, conversation);
+        }
+        
+        // Return onboarding reminder
+        return `🔑 Complete Your Setup
+
+Please choose one of the options above:
+• ✅ I have an fkey - if you already have FluidKey
+• 🆕 I don't have an fkey - if you need to sign up
+
+Or type your fkey.id username directly (e.g., tantodefi)`;
+      }
+      
+      // User is onboarded, proceed with normal flow
       const userData = await agentDb.getStealthDataByUser(senderInboxId);
       
       // Check for command patterns
@@ -648,16 +694,10 @@ Something went wrong. Please try:
       
       // Try OpenAI integration for intelligent responses
       if (this.OPENAI_API_KEY) {
-        const openAIResponse = await this.handleWithOpenAI(content, senderInboxId, isGroup);
+        const openAIResponse = await this.getOpenAIResponse(content, userData);
         if (openAIResponse) {
           return openAIResponse;
         }
-      }
-      
-      // 🔧 NEW: Group intro message if not sent yet
-      if (isGroup && !this.groupIntroductions.has(senderInboxId)) {
-        this.groupIntroductions.add(senderInboxId);
-        return this.getGroupIntroMessage();
       }
       
       // Fallback to basic response
@@ -670,6 +710,17 @@ Something went wrong. Please try:
 • \`/help\` for all commands
 • Contact support if issues persist`;
     }
+  }
+
+  /**
+   * Check if a string is a valid username (for fkey.id)
+   */
+  private isValidUsername(content: string): boolean {
+    // Remove .fkey.id if present
+    const username = content.toLowerCase().replace('.fkey.id', '');
+    
+    // Username should be 2-30 characters, alphanumeric plus underscore/hyphen
+    return /^[a-zA-Z0-9_-]{2,30}$/.test(username);
   }
 
   /**
@@ -772,35 +823,19 @@ Complete Setup: ${this.DSTEALTH_APP_URL}`;
     isGroup: boolean,
   ): Promise<string | undefined> {
     try {
-      // Check if user has fkey.id set
-          const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      // Check if user is onboarded
+      const isOnboarded = await this.isUserOnboarded(senderInboxId);
       
-      if (!userData?.fkeyId) {
-        // User hasn't set fkey.id
-        if (isGroup) {
-          // In groups, don't respond to users without fkey.id unless specifically mentioned
-          return undefined;
-          } else {
-          // In DMs, ask them to set fkey.id
-          return `👋 Welcome to dStealth! 🥷
-
-To use the dStealth agent, please first set your fkey.id:
-
-Step 1: 🔑 Get FluidKey (if you don't have it)
-${this.FLUIDKEY_REFERRAL_URL}
-
-Step 2: 📝 Set your fkey.id
-• \`/set yourUsername\`
-• \`my fkey is yourUsername\`
-
-Step 3: 🚀 Complete setup
-${this.DSTEALTH_APP_URL}
-
-Need help? Type \`/help\` for commands!`;
-        }
+      if (!isOnboarded) {
+        // User not onboarded - this should be handled by processGeneralMessage
+        // Don't provide responses here to avoid duplicate welcome messages
+        return undefined;
       }
 
-      // 🔧 NEW: Use OpenAI if available
+      // User is onboarded, get their data
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      
+      // Use OpenAI if available
       if (this.OPENAI_API_KEY) {
         return await this.getOpenAIResponse(content, userData);
       } else {
@@ -875,7 +910,7 @@ Need help? Type \`/help\` for commands!`;
       return this.getHelpMessage();
     }
     
-    return `Hi ${userData.fkeyId}! I'm here to help with anonymous payments and privacy tools. Type \`/help\` for available commands.`;
+    return `Hi ${userData.fkeyId}! I'm here to help with anonymous payments and privacy tools. Type /help for available commands.`;
   }
 
   /**
@@ -904,33 +939,62 @@ I only respond when @mentioned or for payment requests!`;
   ): Promise<string> {
     const cmd = command.toLowerCase().trim();
 
-    // /help command - always available - send action buttons
+    // Check if user is onboarded for all commands except /set
+    const isOnboarded = await this.isUserOnboarded(senderInboxId);
+    
+    // /help command - available to all users, but different for onboarded vs non-onboarded
     if (cmd === "/help") {
+      if (isOnboarded) {
         await this.sendHelpActionsMessage(senderInboxId);
         return ""; // Return empty string since we're sending actions
-    }
-
-    // /actions command - send action buttons
-    if (cmd === "/actions") {
-        await this.sendActionsMenu(senderInboxId);
-        return ""; // Return empty string since we're sending actions
-    }
-
-    // Check if user has fkey.id set for other commands
-    const userData = await agentDb.getStealthDataByUser(senderInboxId);
-    if (!userData?.fkeyId && cmd !== "/help") {
-      if (isGroup) {
-        return "🔒 Please DM me to set your fkey.id first: `/set yourUsername`";
       } else {
-        return `🔒 Please set your fkey.id first
+        // For non-onboarded users, show basic help
+        return `🔑 Welcome to dStealth!
 
-Set your fkey.id:
-• \`/set yourUsername\`
-• \`my fkey is yourUsername\`
+To use dStealth, you need to set up your fkey.id first:
 
-Need FluidKey? ${this.FLUIDKEY_REFERRAL_URL}`;
+Option 1: I have FluidKey
+• Type your username (e.g., tantodefi)
+• Or use: /set yourUsername
+
+Option 2: I need FluidKey
+• Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+• Then return and set your username
+
+Commands available:
+• /set username - Set your fkey.id
+• help - Show this help
+
+Once you set your fkey.id, all features will be unlocked! 🚀`;
       }
     }
+
+    // /set command - always available for onboarding
+    if (cmd.startsWith("/set ")) {
+      return await this.handleFkeySetCommand(command, senderInboxId, isGroup);
+    }
+
+    // All other commands require onboarding
+    if (!isOnboarded) {
+      if (isGroup) {
+        return "🔒 Please DM me to set up your fkey.id first! Type /help for instructions.";
+      } else {
+        return `🔑 Setup Required
+
+You need to set your fkey.id to use dStealth features.
+
+Quick Setup:
+• Type your username (e.g., tantodefi)
+• Or use: /set yourUsername
+
+Need FluidKey? ${this.FLUIDKEY_REFERRAL_URL}
+
+Type /help for full setup instructions.`;
+      }
+    }
+
+    // Commands for onboarded users only
+    const userData = await agentDb.getStealthDataByUser(senderInboxId);
 
     switch (cmd) {
       case "/status":
@@ -942,16 +1006,16 @@ Need FluidKey? ${this.FLUIDKEY_REFERRAL_URL}`;
       case "/links":
         return await this.handleLinksManagement(senderInboxId);
 
+      case "/actions":
+        await this.sendActionsMenu(senderInboxId);
+        return ""; // Return empty string since we're sending actions
+
       default:
-        if (cmd.startsWith("/set ")) {
-          // Handle via fkey set command
-          return await this.handleFkeySetCommand(command, senderInboxId, isGroup);
-        }
         if (cmd.startsWith("/fkey ")) {
           const fkeyId = cmd.slice(6).trim();
           return await this.handleFkeyLookup(fkeyId, senderInboxId);
         }
-        return `❌ Unknown command. Type \`/help\` for available commands.`;
+        return `❌ Unknown command. Type /help for available commands.`;
     }
   }
 
@@ -1157,7 +1221,7 @@ Need FluidKey? ${this.FLUIDKEY_REFERRAL_URL}`;
       
       if (!userData?.fkeyId) {
         if (isGroup) {
-          return "🔒 Please DM me to set your fkey.id first: `/set yourUsername`";
+          return "🔒 Please DM me to set your fkey.id first: /set yourUsername";
         } else {
         return `🔒 Payment Link Setup Required
 
@@ -1253,6 +1317,7 @@ Need larger amounts? Visit ${this.DSTEALTH_APP_URL} for alternatives.`;
   private async handleFkeyIdSubmission(
     fkeyInput: string,
     senderInboxId: string,
+    conversation?: any,
   ): Promise<string> {
     try {
       const fkeyId = fkeyInput.replace(".fkey.id", "").toLowerCase().trim();
@@ -1261,65 +1326,18 @@ Need larger amounts? Visit ${this.DSTEALTH_APP_URL} for alternatives.`;
         return 'Please provide a valid fkey.id username (e.g., "tantodefi" or "tantodefi.fkey.id")';
       }
 
-      // 🔧 FIXED: Call fkey.id lookup API to get ZK proof
-      console.log(`🔍 Looking up fkey.id: ${fkeyId}`);
-      const lookupResult = await this.callFkeyLookupAPI(fkeyId);
+      console.log(`🔍 Processing fkey.id submission: ${fkeyId}`);
 
-      if (lookupResult.error) {
-        return `❌ fkey.id Lookup Failed
-
-Could not verify ${fkeyId}.fkey.id: ${lookupResult.error}
-
-Please ensure:
-1. 🔑 You have a FluidKey account: ${this.FLUIDKEY_REFERRAL_URL}
-2. 📝 Your username is correct (e.g., "tantodefi.fkey.id")
-3. 🌐 Your fkey.id profile is publicly accessible
-
-Try again with the correct username, or get FluidKey first!`;
-      }
-
-      // Store fkey.id association with ZK proof
-      const userData = {
-        userId: senderInboxId,
-        fkeyId,
-        stealthAddress: lookupResult.address || "", // Store the verified address
-        zkProof: lookupResult.proof, // 🔧 FIXED: Store the actual ZK proof
-        lastUpdated: Date.now(),
-        requestedBy: senderInboxId,
-      };
-
-      await agentDb.storeUserStealthData(userData);
-
-      const proofStatus = lookupResult.proof
-        ? "✅ ZK Proof Verified"
-        : "⚠️ No ZK Proof Available";
-
-      return `✅ fkey.id Connected! 
-
-Your Profile: ${fkeyId}.fkey.id
-Address: ${lookupResult.address?.slice(0, 6)}...${lookupResult.address?.slice(-4)}
-ZK Proof: ${proofStatus}
-
-🚀 Next Steps:
-1. Complete Setup: ${this.DSTEALTH_APP_URL}
-2. Generate Stealth Address 
-3. Create Payment Links: "create payment link for $X"
-
-💡 Your ZK proof enables:
-• Generate anonymous payment links
-• Receive cryptographic receipts for transactions
-• Earn privacy rewards
-• Access advanced stealth features
-
-Ready to finish setup? Visit ${this.DSTEALTH_APP_URL} now!`;
+      // Use the new confirmation flow instead of directly saving
+      return await this.handleFkeyConfirmation(fkeyId, senderInboxId, conversation);
     } catch (error) {
       console.error("Error handling fkey.id submission:", error);
-      return "❌ Failed to save fkey.id. Please try again.";
+      return "❌ Failed to process fkey.id. Please try again.";
     }
   }
 
   /**
-   * Handle basic keywords and greetings
+   * Handle basic keywords and greetings (for onboarded users only)
    */
   private handleBasicKeywords(content: string): string | null {
     const lower = content.toLowerCase();
@@ -1327,20 +1345,19 @@ Ready to finish setup? Visit ${this.DSTEALTH_APP_URL} now!`;
     if (
       lower.includes("hello") ||
       lower.includes("hi") ||
-      lower.includes("hey")
+      lower.includes("hey") ||
+      lower.includes("gm") ||
+      lower.includes("good morning")
     ) {
-      return `👋 Hello! I'm the dStealth Agent 🥷
+      return `👋 Hello! I'm dStealth, your privacy assistant 🥷
 
-I help you create anonymous payment links and earn privacy rewards!
+What can I help you with today?
+• 💳 Create payment links: "create payment link for $25"
+• 💰 Check balance: \`/balance\`
+• 📊 View links: \`/links\`
+• ❓ Get help: \`/help\`
 
-🚀 Get Started:
-1. 🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL} (sign up from a non-wallet browser)
-2. 📝 Tell me your fkey.id: (e.g., "tantodefi.fkey.id")
-3. 🚀 Complete setup: ${this.DSTEALTH_APP_URL}
-4. 💳 Create links: "create payment link for $X"
-
-Commands: /help, /status, /balance
-Questions? Just ask me anything about stealth payments!`;
+How can I assist with your privacy needs?`;
     }
 
     if (lower.includes("help")) {
@@ -1418,14 +1435,10 @@ Then tell me your fkey.id username!`;
   }
 
   /**
-   * 🔧 UPDATED: Enhanced help message with new commands - No markdown formatting
+   * 🔧 UPDATED: Enhanced help message for onboarded users
    */
   private getHelpMessage(): string {
     return `🤖 dStealth Agent Commands 🥷
-
-🔧 Setup Commands:
-• /set yourUsername - Set your fkey.id (required)
-• my fkey is yourUsername - Alternative way to set fkey.id
 
 💳 Payment Commands:
 • create payment link for $25 - Generate anonymous payment link
@@ -1439,14 +1452,20 @@ Then tell me your fkey.id username!`;
 
 📋 Group Chat Behavior:
 • I only respond to @mentions or payment requests
-• DM me to set up your fkey.id privately
 • Use @dstealth, @dstealth.eth, or @dstealth.base.eth
 
-🚀 Quick Start:
-1. Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
-2. Set fkey.id: /set yourUsername  
-3. Complete setup: ${this.DSTEALTH_APP_URL}
-4. Create payment links!
+🎯 Quick Actions:
+• "create payment link for $50" - Generate payment link
+• "hi" or "hello" - Get personalized greeting
+• Questions about privacy payments
+
+🚀 Features:
+• 🥷 Anonymous sender privacy
+• 🔒 Stealth address technology
+• 🧾 ZK proof receipts
+• 🎯 Privacy rewards
+
+Complete Dashboard: ${this.DSTEALTH_APP_URL}
 
 Need help? Just ask me anything about privacy payments!`;
   }
@@ -1714,6 +1733,19 @@ Try again: Type /help now!`;
       console.log(`🎯 Base Action ID extracted: "${baseActionId}" from "${actionId}"`);
       
       switch (baseActionId) {
+        // New welcome onboarding actions
+        case 'have-fkey':
+          return await this.handleHaveFkeyFlow(senderInboxId);
+
+        case 'no-fkey':
+          return await this.handleNoFkeyFlow(senderInboxId);
+
+        case 'confirm-fkey':
+          return await this.processFkeyConfirmation(senderInboxId, true);
+
+        case 'cancel-fkey':
+          return await this.processFkeyConfirmation(senderInboxId, false);
+
         case 'dstealth-miniapp':
           return `https://dstealth.xyz`;
 
@@ -1860,7 +1892,7 @@ Just say the amount: "create payment link for $X"`;
               // Get sender's wallet address
               const client = this.client;
               if (!client) {
-                return `❌ **Agent Error**: Unable to access client for wallet transaction`;
+                return `❌ Agent Error: Unable to access client for wallet transaction`;
               }
 
               // Get user's wallet address from inbox state
@@ -1868,7 +1900,7 @@ Just say the amount: "create payment link for $X"`;
               const senderWalletAddress = inboxState[0]?.identifiers[0]?.identifier;
               
               if (!senderWalletAddress) {
-                return `❌ **Wallet Error**: Unable to determine your wallet address`;
+                return `❌ Wallet Error: Unable to determine your wallet address`;
               }
 
               // Create wallet send calls for the stealth payment
@@ -1889,7 +1921,7 @@ Just say the amount: "create payment link for $X"`;
               });
 
               if (!userConversation) {
-                return `❌ **Conversation Error**: Unable to find conversation for wallet request`;
+                return `❌ Conversation Error: Unable to find conversation for wallet request`;
               }
 
               // Send the wallet send calls request
@@ -1916,10 +1948,10 @@ After approval: Share the transaction reference for ZK receipt!`;
 
             } catch (error) {
               console.error("Error sending wallet transaction request:", error);
-              return `❌ **Transaction Error**: Failed to create wallet transaction request. Please try again.`;
+              return `❌ Transaction Error: Failed to create wallet transaction request. Please try again.`;
             }
           } else {
-            return `❌ **Payment Data Missing**: No payment information found. Please create a payment link first.`;
+            return `❌ Payment Data Missing: No payment information found. Please create a payment link first.`;
           }
 
         case 'open-daimo-link':
@@ -2441,54 +2473,54 @@ Choose your next action:`,
         // Generate ZK receipt response
         const explorerUrl = this.getExplorerUrl(txHash, networkId?.toString() || "base");
         
-        return `🧾 **ZK Receipt - Stealth Payment Confirmed!**
+        return `🧾 ZK Receipt - Stealth Payment Confirmed!
 
-**Transaction Details:**
+Transaction Details:
 • Hash: ${txHash}
 • Network: ${networkId === "base" ? "Base" : networkId}
 • Type: ${metadata?.transactionType || "Stealth Payment"}
 • Amount: ${metadata?.amount ? `$${(parseFloat(metadata.amount.toString()) / 1000000).toFixed(2)} USDC` : "Unknown"}
 • Recipient: ${(metadata as any)?.stealthRecipient || "Stealth Address"}
 
-**Privacy Features:**
+Privacy Features:
 • 🥷 Anonymous sender protection
 • 🔒 Stealth address technology  
 • 🧾 ZK proof receipt generated
 • 🎯 Privacy rewards earned
 
-**🔗 View Transaction:**
+🔗 View Transaction:
 ${explorerUrl}
 
-**✅ Transaction confirmed!** Your ZK receipt is being processed.
-**🏆 Privacy rewards:** Check your dashboard at ${this.DSTEALTH_APP_URL}
+✅ Transaction confirmed! Your ZK receipt is being processed.
+🏆 Privacy rewards: Check your dashboard at ${this.DSTEALTH_APP_URL}
 
 Thank you for using stealth payments! 🥷`;
       } else {
         // Regular transaction reference
         const explorerUrl = this.getExplorerUrl(txHash, networkId?.toString() || "base");
         
-        return `📋 **Transaction Reference Received**
+        return `📋 Transaction Reference Received
 
-**Transaction Details:**
+Transaction Details:
 • Hash: ${txHash}
 • Network: ${networkId === "base" ? "Base" : networkId}
 • Type: ${metadata?.transactionType || "Transfer"}
 • From: ${metadata?.fromAddress || senderAddress}
 
-**🔗 View Transaction:**
+🔗 View Transaction:
 ${explorerUrl}
 
-**✅ Transaction confirmed!** 
-**Want privacy features?** Set up your fkey.id with \`/set yourUsername\``;
+✅ Transaction confirmed! 
+Want privacy features? Set up your fkey.id with /set yourUsername`;
       }
       
     } catch (error) {
       console.error("Error processing transaction reference:", error);
-      return `❌ **Transaction Processing Error**
+      return `❌ Transaction Processing Error
 
 Failed to process your transaction reference. Please try again.
 
-**Need help?** Contact support at ${this.DSTEALTH_APP_URL}`;
+Need help? Contact support at ${this.DSTEALTH_APP_URL}`;
     }
   }
 
@@ -2512,4 +2544,371 @@ Failed to process your transaction reference. Please try again.
     }
   }
 
+  /**
+   * Check if user has fkey.id set and is fully onboarded
+   */
+  private async isUserOnboarded(senderInboxId: string): Promise<boolean> {
+    try {
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      return !!(userData?.fkeyId && userData.fkeyId.trim().length > 0);
+    } catch (error) {
+      console.error("Error checking user onboarding status:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Send welcome message with action buttons for fkey.id onboarding
+   */
+  private async sendWelcomeWithActions(senderInboxId: string, conversation?: any): Promise<void> {
+    try {
+      if (!this.client) {
+        console.log("⚠️ Client not available, skipping welcome actions");
+        return;
+      }
+
+      let targetConversation = conversation;
+
+      // If no conversation provided, find DM conversation with user
+      if (!targetConversation) {
+        const conversations = await this.client.conversations.list();
+        
+        targetConversation = conversations.find(conv => {
+          // For DMs, check if this is a 1:1 conversation with the user
+          if (!(conv instanceof Group)) {
+            return conv.peerInboxId === senderInboxId;
+          }
+          return false;
+        });
+
+        if (!targetConversation) {
+          console.log("⚠️ User conversation not found, skipping welcome actions");
+          return;
+        }
+      }
+
+      // Generate unique timestamp for this welcome message
+      const renderTimestamp = Date.now();
+      const randomSuffix = Math.random().toString(36).substring(2, 8);
+
+      // Create welcome actions content
+      const welcomeActions: ActionsContent = {
+        id: `welcome-onboarding-${renderTimestamp}-${randomSuffix}`,
+        description: `👋 Welcome to dStealth! 🥷
+
+I'm your privacy assistant for anonymous payments using stealth addresses.
+
+🎯 What I Do:
+• Generate stealth addresses for private payments
+• Create anonymous payment links
+• Provide ZK receipts for transactions
+• Help you earn privacy rewards
+
+🔑 To unlock all features, you need to set your fkey.id from FluidKey:
+
+Choose your path:`,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
+        actions: [
+          {
+            id: `have-fkey-${renderTimestamp}-${randomSuffix}`,
+            label: "✅ I have an fkey",
+            style: "primary"
+          },
+          {
+            id: `no-fkey-${renderTimestamp}-${randomSuffix}`,
+            label: "🆕 I don't have an fkey",
+            style: "secondary"
+          }
+        ]
+      };
+
+      // Send welcome actions
+      await targetConversation.send(welcomeActions, ContentTypeActions);
+      console.log(`✅ Welcome actions sent to user: ${senderInboxId}`);
+      
+      // Track this action set
+      this.addRecentActionSet(senderInboxId, welcomeActions.id);
+
+      // Mark welcome as sent
+      this.userWelcomesSent.add(senderInboxId);
+
+    } catch (error) {
+      console.error("❌ Error sending welcome actions:", error);
+    }
+  }
+
+  /**
+   * Handle "I have an fkey" flow - prompt for username
+   */
+  private async handleHaveFkeyFlow(senderInboxId: string): Promise<string> {
+    return `🔑 Set Your fkey.id
+
+Please enter your fkey.id username (without .fkey.id):
+
+Examples:
+• tantodefi
+• alice
+• myusername
+
+Just type your username and I'll verify it! 🚀`;
+  }
+
+  /**
+   * Handle "I don't have an fkey" flow - send signup instructions
+   */
+  private async handleNoFkeyFlow(senderInboxId: string): Promise<string> {
+    return `🆕 Get Your FluidKey Account
+
+FluidKey is a privacy-focused wallet that creates stealth addresses for anonymous payments.
+
+📝 Sign Up Steps:
+1. Visit: ${this.FLUIDKEY_REFERRAL_URL}
+2. Create your account (use a non-wallet browser)
+3. Choose your unique username
+4. Complete profile setup
+
+✅ After signup, return here and:
+• Type your username (e.g., tantodefi)
+• Or use the command: /set yourUsername
+
+🎯 Why FluidKey?
+• Generate stealth addresses
+• Receive payments anonymously  
+• Protect your privacy
+• Earn rewards with dStealth
+
+Ready to get started? Visit the link above! 🚀`;
+  }
+
+  /**
+   * Handle fkey.id confirmation flow
+   */
+  private async handleFkeyConfirmation(fkeyId: string, senderInboxId: string, conversation?: any): Promise<string> {
+    // Store pending confirmation
+    this.userConfirmationPending.set(senderInboxId, {
+      fkeyId: fkeyId,
+      timestamp: Date.now()
+    });
+
+    // Send confirmation actions
+    await this.sendFkeyConfirmationActions(senderInboxId, fkeyId, conversation);
+
+    return `🔍 Confirm Your fkey.id
+
+Is this correct: ${fkeyId}.fkey.id ?
+
+Please confirm using the buttons below:`;
+  }
+
+  /**
+   * Send fkey.id confirmation action buttons
+   */
+  private async sendFkeyConfirmationActions(senderInboxId: string, fkeyId: string, conversation?: any): Promise<void> {
+    try {
+      if (!this.client) {
+        console.log("⚠️ Client not available, skipping confirmation actions");
+        return;
+      }
+
+      let targetConversation = conversation;
+
+      // If no conversation provided, find DM conversation with user
+      if (!targetConversation) {
+        const conversations = await this.client.conversations.list();
+        
+        targetConversation = conversations.find(conv => {
+          // For DMs, check if this is a 1:1 conversation with the user
+          if (!(conv instanceof Group)) {
+            return conv.peerInboxId === senderInboxId;
+          }
+          return false;
+        });
+
+        if (!targetConversation) {
+          console.log("⚠️ User conversation not found, skipping confirmation actions");
+          return;
+        }
+      }
+
+      // Generate unique timestamp for this confirmation
+      const renderTimestamp = Date.now();
+      const randomSuffix = Math.random().toString(36).substring(2, 8);
+
+      // Create confirmation actions content
+      const confirmationActions: ActionsContent = {
+        id: `fkey-confirmation-${renderTimestamp}-${randomSuffix}`,
+        description: `🔍 Confirm your fkey.id: ${fkeyId}.fkey.id`,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(), // 10 minutes
+        actions: [
+          {
+            id: `confirm-fkey-${renderTimestamp}-${randomSuffix}`,
+            label: "✅ Yes, that's correct",
+            style: "primary"
+          },
+          {
+            id: `cancel-fkey-${renderTimestamp}-${randomSuffix}`,
+            label: "❌ No, let me try again",
+            style: "secondary"
+          }
+        ]
+      };
+
+      // Send confirmation actions
+      await targetConversation.send(confirmationActions, ContentTypeActions);
+      console.log(`✅ Confirmation actions sent for fkey: ${fkeyId}`);
+      
+      // Track this action set
+      this.addRecentActionSet(senderInboxId, confirmationActions.id);
+
+    } catch (error) {
+      console.error("❌ Error sending confirmation actions:", error);
+    }
+  }
+
+  /**
+   * Process fkey.id confirmation and save to database
+   */
+  private async processFkeyConfirmation(senderInboxId: string, confirmed: boolean): Promise<string> {
+    try {
+      const pendingConfirmation = this.userConfirmationPending.get(senderInboxId);
+      
+      if (!pendingConfirmation) {
+        return `❌ No Pending Confirmation
+
+I don't have a pending fkey.id confirmation for you. Please start over by typing your username.`;
+      }
+
+      // Clear pending confirmation
+      this.userConfirmationPending.delete(senderInboxId);
+
+      if (!confirmed) {
+        return `🔄 Try Again
+
+No problem! Please enter your fkey.id username again:
+
+Examples:
+• tantodefi
+• alice
+• myusername`;
+      }
+
+      // Confirmed - now verify and save the fkey.id
+      const fkeyId = pendingConfirmation.fkeyId;
+      
+      // Call the existing fkey verification logic
+      const verificationResult = await this.callFkeyLookupAPI(fkeyId);
+      
+      if (verificationResult.error) {
+        return `❌ Verification Failed
+
+Your fkey.id "${fkeyId}" could not be verified:
+${verificationResult.error}
+
+Please check:
+• Is your FluidKey profile public?
+• Did you spell your username correctly?
+• Is your FluidKey account fully set up?
+
+Try again with: /set ${fkeyId}`;
+      }
+
+      // Save to database
+      const stealthData = {
+        userId: senderInboxId,
+        fkeyId: fkeyId,
+        stealthAddress: verificationResult.address || "",
+        zkProof: verificationResult.proof || null,
+        lastUpdated: Date.now(),
+        requestedBy: this.client?.inboxId || "",
+        setupStatus: "fkey_set" as const
+      };
+
+      await agentDb.storeUserStealthData(stealthData);
+
+      // Send success message and help menu
+      await this.sendPostOnboardingHelp(senderInboxId, fkeyId);
+
+      return `✅ fkey.id Set Successfully!
+
+Your fkey.id ${fkeyId}.fkey.id is now verified and saved!
+
+🎉 All features unlocked:
+• Create anonymous payment links
+• Generate stealth addresses
+• Receive ZK receipts
+• Earn privacy rewards
+
+🚀 Quick Start:
+Check the actions below to get started!`;
+
+    } catch (error) {
+      console.error("❌ Error processing fkey confirmation:", error);
+      return `❌ Error Saving fkey.id
+
+Something went wrong while saving your fkey.id. Please try again or contact support.`;
+    }
+  }
+
+  /**
+   * Send post-onboarding help menu
+   */
+  private async sendPostOnboardingHelp(senderInboxId: string, fkeyId: string, conversation?: any): Promise<void> {
+    try {
+      if (!this.client) return;
+
+      let targetConversation = conversation;
+
+      // If no conversation provided, find DM conversation with user
+      if (!targetConversation) {
+        const conversations = await this.client.conversations.list();
+        targetConversation = conversations.find(conv => {
+          if (!(conv instanceof Group)) {
+            return conv.peerInboxId === senderInboxId;
+          }
+          return false;
+        });
+
+        if (!targetConversation) return;
+      }
+
+      // Generate unique timestamp
+      const renderTimestamp = Date.now();
+      const randomSuffix = Math.random().toString(36).substring(2, 8);
+
+      // Create help actions
+      const helpActions: ActionsContent = {
+        id: `post-onboarding-help-${renderTimestamp}-${randomSuffix}`,
+        description: `🎉 Welcome ${fkeyId}! Your dStealth account is ready. What would you like to do?`,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
+        actions: [
+          {
+            id: `create-payment-link-${renderTimestamp}-${randomSuffix}`,
+            label: "💳 Create Payment Link",
+            style: "primary"
+          },
+          {
+            id: `check-balance-${renderTimestamp}-${randomSuffix}`,
+            label: "💰 Check Balance",
+            style: "secondary"
+          },
+          {
+            id: `get-help-${renderTimestamp}-${randomSuffix}`,
+            label: "❓ Get Help",
+            style: "secondary"
+          },
+          {
+            id: `dstealth-miniapp-${renderTimestamp}-${randomSuffix}`,
+            label: "🌐 dStealth App",
+            style: "secondary"
+          }
+        ]
+      };
+
+      await targetConversation.send(helpActions, ContentTypeActions);
+      this.addRecentActionSet(senderInboxId, helpActions.id);
+
+    } catch (error) {
+      console.error("❌ Error sending post-onboarding help:", error);
+    }
+  }
 }
