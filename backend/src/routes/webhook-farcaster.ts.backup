@@ -154,15 +154,7 @@ router.post('/farcaster/cast', async (req, res) => {
       // 🔧 SECOND: Handle fkey.id lookup requests on Farcaster (no .fkey.id suffix)
       const fkeyLookupMatch = cast.text.match(/@dstealth\s+@?([a-zA-Z0-9_.-]+)$/i);
       if (fkeyLookupMatch) {
-        let searchQuery = fkeyLookupMatch[1];
-        
-        // Handle Farcaster username patterns: @tantodefi.base.eth -> tantodefi
-        if (searchQuery.includes('.base.eth')) {
-          searchQuery = searchQuery.replace('.base.eth', '');
-        } else if (searchQuery.includes('.eth')) {
-          searchQuery = searchQuery.replace('.eth', '');
-        }
-        
+        const searchQuery = fkeyLookupMatch[1];
         console.log(`🔍 Farcaster fkey.id lookup request: ${searchQuery}`);
         
         // Search for the user's fkey.id
@@ -219,28 +211,14 @@ router.post('/farcaster/cast', async (req, res) => {
       }
     }
 
-    // Extract fkey.id from the cast text for setup
-    const fkeyPattern = /([a-zA-Z0-9_-]+(?:\.fkey\.id)?)/g;
-    const matches = cast.text.match(fkeyPattern);
+    // 🔧 NEW: Handle general conversation with the dStealth agent
+    // If we get here, it's not a fkey.id setting or lookup request
+    // Check if this looks like a general conversation rather than a fkey.id setting attempt
+    const isGeneralConversation = !cast.text.includes('.fkey.id') && 
+                                  !cast.text.match(/^@dstealth\s+[a-zA-Z0-9_-]+$/);
     
-    let fkeyId = null;
-    
-    if (matches) {
-      for (const match of matches) {
-        // Skip @dstealth itself
-        if (match.toLowerCase().includes('dstealth')) continue;
-        
-        // Check if it looks like a fkey.id
-        const cleanMatch = match.replace('.fkey.id', '').toLowerCase().trim();
-        if (cleanMatch.length >= 2 && cleanMatch.length <= 30) {
-          fkeyId = cleanMatch;
-          break;
-        }
-      }
-    }
-
-    if (!fkeyId) {
-      console.log('💬 No valid fkey.id found - treating as general conversation');
+    if (isGeneralConversation) {
+      console.log('💬 Detected general conversation request');
       
       // Check if user already has fkey.id set
       const primaryAddressResult = resolvePrimaryFromFarcaster(cast.author);
@@ -289,6 +267,47 @@ router.post('/farcaster/cast', async (req, res) => {
         hasOpenAI: !!env.OPENAI_API_KEY,
         userHasFkey: userHasFkey
       });
+    }
+
+    // Extract fkey.id from the cast text for setup
+    const fkeyPattern = /([a-zA-Z0-9_-]+(?:\.fkey\.id)?)/g;
+    const matches = cast.text.match(fkeyPattern);
+    
+    let fkeyId = null;
+    
+    if (matches) {
+      for (const match of matches) {
+        // Skip @dstealth itself
+        if (match.toLowerCase().includes('dstealth')) continue;
+        
+        // Check if it looks like a fkey.id
+        const cleanMatch = match.replace('.fkey.id', '').toLowerCase().trim();
+        if (cleanMatch.length >= 2 && cleanMatch.length <= 30) {
+          fkeyId = cleanMatch;
+          break;
+        }
+      }
+    }
+
+    if (!fkeyId) {
+      console.log('❌ No valid fkey.id found in cast');
+      // Reply to cast with instructions
+      try {
+        const replyResult = await replyToCast(
+          cast.hash,
+          `I couldn't find a valid fkey.id in your cast. Please mention me with your fkey.id like: @dstealth yourname.fkey.id`
+        );
+        
+        if (replyResult.success) {
+          console.log(`✅ Successfully replied to invalid cast: ${replyResult.castHash}`);
+        } else {
+          console.warn(`⚠️ Failed to reply to invalid cast: ${replyResult.error}`);
+        }
+      } catch (replyError) {
+        console.error('❌ Error replying to invalid cast:', replyError);
+      }
+      
+      return res.status(200).json({ message: 'No valid fkey.id found' });
     }
 
     console.log(`🔍 Found fkey.id: ${fkeyId} from @${cast.author.username}`);
@@ -547,51 +566,23 @@ async function replyToCast(parentCastHash: string, message: string): Promise<{su
     if (!response.ok) {
       const errorData = await response.json();
       console.log(`❌ Neynar cast reply error: ${response.status}`, errorData);
-      return {success: false, error: `API error: ${response.status}`};
-    }
-
-    const data = await response.json() as {cast: {hash: string}};
-    console.log(`✅ Cast reply posted successfully! Hash: ${data.cast.hash}`);
-    
-    return {success: true, castHash: data.cast.hash};
-
-  } catch (error) {
-    console.error('Error posting cast reply:', error);
-    return {success: false, error: error instanceof Error ? error.message : 'Unknown error'};
-  }
-}
-
-/**
- * Test endpoint to verify webhook is working
- */
-router.get('/farcaster/test', (req, res) => {
-  res.json({ 
-    message: 'Farcaster webhook endpoint is active',
-    timestamp: new Date().toISOString(),
-    features: [
-      'Cast mention detection (@dstealth)',
-      'fkey.id extraction and verification',
-      'User lookup by wallet address',
-      'Automatic fkey.id setting'
-    ]
-  });
-});
+      return {success: false, error: `API error: ${response.status}`
 
 /**
  * Generate ChatGPT response for general conversation
  */
 async function generateChatGPTResponse(castText: string, username: string, userHasFkey: boolean): Promise<string> {
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
     headers: {
-      'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
+      "Authorization": `Bearer ${env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: 'gpt-4',
+      model: "gpt-4",
       messages: [
         {
-          role: 'system',
+          role: "system",
           content: `You are dStealth, an AI agent that helps users with anonymous payments and privacy. You are knowledgeable about:
 - FluidKey and fkey.id for anonymous payments
 - The dStealth miniapp for privacy features
@@ -602,12 +593,12 @@ Be helpful, concise, and friendly. Always mention relevant features like the dSt
 
 Current user context:
 - Username: @${username}
-- Has fkey.id set: ${userHasFkey ? 'Yes' : 'No'}
-${!userHasFkey ? '\n- Should be encouraged to set their fkey.id for anonymous payments' : ''}`
+- Has fkey.id set: ${userHasFkey ? "Yes" : "No"}
+${!userHasFkey ? "\n- Should be encouraged to set their fkey.id for anonymous payments" : ""}`
         },
         {
-          role: 'user',
-          content: castText.replace('@dstealth', '').trim()
+          role: "user",
+          content: castText.replace("@dstealth", "").trim()
         }
       ],
       max_tokens: 280, // Tweet-like length for Farcaster
@@ -624,11 +615,11 @@ ${!userHasFkey ? '\n- Should be encouraged to set their fkey.id for anonymous pa
 
   // Add footer with actions
   if (!userHasFkey) {
-    chatGPTResponse += '\n\n🔧 Set your fkey.id: @dstealth yourname.fkey.id';
+    chatGPTResponse += "\n\n🔧 Set your fkey.id: @dstealth yourname.fkey.id";
   }
   
-  chatGPTResponse += '\n\n🌐 dStealth miniapp: https://dstealth.xyz';
-  chatGPTResponse += '\n💬 DM me on XMTP @dstealth.base.eth';
+  chatGPTResponse += "\n\n🌐 dStealth miniapp: https://dstealth.xyz";
+  chatGPTResponse += "\n💬 DM me on XMTP @dstealth.base.eth";
 
   return chatGPTResponse;
 }
@@ -637,21 +628,21 @@ ${!userHasFkey ? '\n- Should be encouraged to set their fkey.id for anonymous pa
  * Generate default response for when ChatGPT is not available
  */
 function getDefaultResponse(username: string, userHasFkey: boolean): string {
-  const greeting = `Hey @${username}! I'm dStealth, your privacy-focused AI agent.`;
+  const greeting = `Hey @${username}! I am dStealth, your privacy-focused AI agent.`;
   
   let response = greeting;
   
   if (!userHasFkey) {
-    response += '\n\n🔧 Get started by setting your fkey.id: @dstealth yourname.fkey.id';
-    response += '\n🥷 This enables anonymous payments!';
+    response += "\n\n🔧 Get started by setting your fkey.id: @dstealth yourname.fkey.id";
+    response += "\n🥷 This enables anonymous payments!";
   } else {
-    response += '\n\n🥷 Anonymous payments are enabled!';
+    response += "\n\n🥷 Anonymous payments are enabled!";
   }
   
-  response += '\n\n🌐 Access full features: https://dstealth.xyz';
-  response += '\n💬 DM me on XMTP @dstealth.base.eth for private messaging';
+  response += "\n\n🌐 Access full features: https://dstealth.xyz";
+  response += "\n💬 DM me on XMTP @dstealth.base.eth for private messaging";
   
   return response;
 }
 
-export default router; 
+export default router;
