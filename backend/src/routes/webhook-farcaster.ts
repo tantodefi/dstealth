@@ -145,61 +145,69 @@ router.post('/farcaster/cast', async (req, res) => {
       return res.status(200).json({ message: 'Cast does not mention @dstealth' });
     }
 
-    // 🔧 NEW: Handle fkey.id lookup requests on Farcaster
-    const fkeyLookupMatch = cast.text.match(/@dstealth\s+@?([a-zA-Z0-9_.-]+)/i);
-    if (fkeyLookupMatch) {
-      const searchQuery = fkeyLookupMatch[1];
-      console.log(`🔍 Farcaster fkey.id lookup request: ${searchQuery}`);
-      
-      // Search for the user's fkey.id
-      const fkeySearchResult = await searchUserForFarcasterResponse(searchQuery);
-      
-      if (fkeySearchResult.found) {
-        // Reply with fkey.id URL only
-        const replyText = `${fkeySearchResult.fkeyId}.fkey.id`;
-        console.log(`✅ Replying with fkey.id: ${replyText}`);
+    // 🔧 FIRST: Check if this is a fkey.id SETTING request (contains .fkey.id)
+    const fkeySettingMatch = cast.text.match(/@dstealth\s+@?([a-zA-Z0-9_.-]+\.fkey\.id)/i);
+    if (fkeySettingMatch) {
+      // This is a setting request - continue to the setting logic below
+      console.log(`🔧 Detected fkey.id setting request: ${fkeySettingMatch[1]}`);
+    } else {
+      // 🔧 SECOND: Handle fkey.id lookup requests on Farcaster (no .fkey.id suffix)
+      const fkeyLookupMatch = cast.text.match(/@dstealth\s+@?([a-zA-Z0-9_.-]+)$/i);
+      if (fkeyLookupMatch) {
+        const searchQuery = fkeyLookupMatch[1];
+        console.log(`🔍 Farcaster fkey.id lookup request: ${searchQuery}`);
         
-        // Send reply to cast using Neynar API
-        try {
-          const replyResult = await replyToCast(cast.hash, replyText);
+        // Search for the user's fkey.id
+        const fkeySearchResult = await searchUserForFarcasterResponse(searchQuery);
+        
+        if (fkeySearchResult.found && fkeySearchResult.fkeyId) {
+          // Reply with fkey.id URL only - ensure we don't double-add .fkey.id
+          const fkeyId = fkeySearchResult.fkeyId;
+          const replyText = fkeyId.endsWith('.fkey.id') ? fkeyId : `${fkeyId}.fkey.id`;
+          console.log(`✅ Replying with fkey.id: ${replyText}`);
           
-          if (replyResult.success) {
-            console.log(`✅ Successfully replied to lookup cast: ${replyResult.castHash}`);
-          } else {
-            console.warn(`⚠️ Failed to reply to lookup cast: ${replyResult.error}`);
+          // Send reply to cast using Neynar API
+          try {
+            const replyResult = await replyToCast(cast.hash, replyText);
+            
+            if (replyResult.success) {
+              console.log(`✅ Successfully replied to lookup cast: ${replyResult.castHash}`);
+            } else {
+              console.warn(`⚠️ Failed to reply to lookup cast: ${replyResult.error}`);
+            }
+          } catch (replyError) {
+            console.error('❌ Error replying to lookup cast:', replyError);
           }
-        } catch (replyError) {
-          console.error('❌ Error replying to lookup cast:', replyError);
-        }
-        
-        return res.status(200).json({ 
-          message: 'fkey.id found',
-          reply: replyText,
-          fkeyId: fkeySearchResult.fkeyId
-        });
-      } else {
-        // Reply with setup instructions
-        const replyText = `Sorry, ${searchQuery} hasn't set their fkey.id yet. They can do so by replying to this cast or if they don't have an fkey.id, they can sign up here: https://app.fluidkey.com/?ref=62YNSG`;
-        console.log(`❌ Replying with setup instructions: ${replyText}`);
-        
-        // Send reply to cast using Neynar API
-        try {
-          const replyResult = await replyToCast(cast.hash, replyText);
           
-          if (replyResult.success) {
-            console.log(`✅ Successfully replied to not-found cast: ${replyResult.castHash}`);
-          } else {
-            console.warn(`⚠️ Failed to reply to not-found cast: ${replyResult.error}`);
+          return res.status(200).json({ 
+            message: 'fkey.id found',
+            reply: replyText,
+            fkeyId: fkeySearchResult.fkeyId
+          });
+        } else {
+          // Reply with setup instructions
+          const replyText = `Sorry, ${searchQuery} hasn't set their fkey.id yet. They can do so by replying to this cast or if they don't have an fkey.id, they can sign up here: https://app.fluidkey.com/?ref=62YNSG`;
+          console.log(`❌ Replying with setup instructions: ${replyText}`);
+          
+          // Send reply to cast using Neynar API
+          try {
+            const replyResult = await replyToCast(cast.hash, replyText);
+            
+            if (replyResult.success) {
+              console.log(`✅ Successfully replied to not-found cast: ${replyResult.castHash}`);
+            } else {
+              console.warn(`⚠️ Failed to reply to not-found cast: ${replyResult.error}`);
+            }
+          } catch (replyError) {
+            console.error('❌ Error replying to not-found cast:', replyError);
           }
-        } catch (replyError) {
-          console.error('❌ Error replying to not-found cast:', replyError);
+          
+          return res.status(200).json({ 
+            message: 'fkey.id not found',
+            reply: replyText,
+            searchQuery: searchQuery
+          });
         }
-        
-        return res.status(200).json({ 
-          message: 'fkey.id not found',
-          reply: replyText,
-          searchQuery: searchQuery
-        });
       }
     }
 
