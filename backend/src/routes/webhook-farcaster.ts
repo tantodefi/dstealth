@@ -219,23 +219,22 @@ router.post('/farcaster/cast', async (req, res) => {
       }
     }
 
-    // Extract fkey.id from the cast text for setup
-    const fkeyPattern = /([a-zA-Z0-9_-]+(?:\.fkey\.id)?)/g;
-    const matches = cast.text.match(fkeyPattern);
+    // Extract fkey.id from the cast text for setup - only for very specific patterns
+    // This should only match when someone is clearly trying to set an fkey.id
+    // Pattern: @dstealth followed by a potential fkey.id (but not handled above)
+    const fkeySettingPattern = /@dstealth\s+([a-zA-Z0-9_-]{2,30})(?:\s|$)/i;
+    const fkeyMatch = cast.text.match(fkeySettingPattern);
     
     let fkeyId = null;
     
-    if (matches) {
-      for (const match of matches) {
-        // Skip @dstealth itself
-        if (match.toLowerCase().includes('dstealth')) continue;
-        
-        // Check if it looks like a fkey.id
-        const cleanMatch = match.replace('.fkey.id', '').toLowerCase().trim();
-        if (cleanMatch.length >= 2 && cleanMatch.length <= 30) {
-          fkeyId = cleanMatch;
-          break;
-        }
+    // Only extract fkey.id if it looks like a direct setting command
+    if (fkeyMatch && cast.text.split(' ').length <= 3) {
+      const potentialFkey = fkeyMatch[1].toLowerCase();
+      
+      // Additional checks to ensure this is actually a fkey.id setting attempt
+      if (potentialFkey.length >= 2 && potentialFkey.length <= 30 && 
+          !['help', 'info', 'status', 'what', 'how', 'why', 'when', 'where', 'introduce', 'yourself', 'channel', 'integration', 'think'].includes(potentialFkey)) {
+        fkeyId = potentialFkey;
       }
     }
 
