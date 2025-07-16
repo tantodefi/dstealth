@@ -159,7 +159,19 @@ router.post('/farcaster/cast', async (req, res) => {
         const replyText = `${fkeySearchResult.fkeyId}.fkey.id`;
         console.log(`✅ Replying with fkey.id: ${replyText}`);
         
-        // TODO: Actually send reply to cast using Neynar API
+        // Send reply to cast using Neynar API
+        try {
+          const replyResult = await replyToCast(cast.hash, replyText);
+          
+          if (replyResult.success) {
+            console.log(`✅ Successfully replied to lookup cast: ${replyResult.castHash}`);
+          } else {
+            console.warn(`⚠️ Failed to reply to lookup cast: ${replyResult.error}`);
+          }
+        } catch (replyError) {
+          console.error('❌ Error replying to lookup cast:', replyError);
+        }
+        
         return res.status(200).json({ 
           message: 'fkey.id found',
           reply: replyText,
@@ -170,7 +182,19 @@ router.post('/farcaster/cast', async (req, res) => {
         const replyText = `Sorry, ${searchQuery} hasn't set their fkey.id yet. They can do so by replying to this cast or if they don't have an fkey.id, they can sign up here: https://app.fluidkey.com/?ref=62YNSG`;
         console.log(`❌ Replying with setup instructions: ${replyText}`);
         
-        // TODO: Actually send reply to cast using Neynar API
+        // Send reply to cast using Neynar API
+        try {
+          const replyResult = await replyToCast(cast.hash, replyText);
+          
+          if (replyResult.success) {
+            console.log(`✅ Successfully replied to not-found cast: ${replyResult.castHash}`);
+          } else {
+            console.warn(`⚠️ Failed to reply to not-found cast: ${replyResult.error}`);
+          }
+        } catch (replyError) {
+          console.error('❌ Error replying to not-found cast:', replyError);
+        }
+        
         return res.status(200).json({ 
           message: 'fkey.id not found',
           reply: replyText,
@@ -201,7 +225,22 @@ router.post('/farcaster/cast', async (req, res) => {
 
     if (!fkeyId) {
       console.log('❌ No valid fkey.id found in cast');
-      // TODO: Reply to cast with instructions
+      // Reply to cast with instructions
+      try {
+        const replyResult = await replyToCast(
+          cast.hash,
+          `I couldn't find a valid fkey.id in your cast. Please mention me with your fkey.id like: @dstealth yourname.fkey.id`
+        );
+        
+        if (replyResult.success) {
+          console.log(`✅ Successfully replied to invalid cast: ${replyResult.castHash}`);
+        } else {
+          console.warn(`⚠️ Failed to reply to invalid cast: ${replyResult.error}`);
+        }
+      } catch (replyError) {
+        console.error('❌ Error replying to invalid cast:', replyError);
+      }
+      
       return res.status(200).json({ message: 'No valid fkey.id found' });
     }
 
@@ -225,7 +264,26 @@ router.post('/farcaster/cast', async (req, res) => {
     
     if (fkeyLookupResult.error) {
       console.log(`❌ fkey.id verification failed: ${fkeyLookupResult.error}`);
-      // TODO: Reply to cast with error message
+      // Reply to cast with error message
+      try {
+        const replyResult = await replyToCast(
+          cast.hash,
+          `I couldn't verify your fkey.id. This might be because:
+1. Your fkey.id is not registered.
+2. Your fkey.id is not linked to your wallet address.
+3. There's an issue with the ZK proof.
+
+Please try again or check your fkey.id on https://app.fluidkey.com`
+        );
+        
+        if (replyResult.success) {
+          console.log(`✅ Successfully replied to verification failed cast: ${replyResult.castHash}`);
+        } else {
+          console.warn(`⚠️ Failed to reply to verification failed cast: ${replyResult.error}`);
+        }
+      } catch (replyError) {
+        console.error('❌ Error replying to verification failed cast:', replyError);
+      }
       return res.status(200).json({ 
         message: 'fkey.id verification failed',
         error: fkeyLookupResult.error 
@@ -251,7 +309,21 @@ router.post('/farcaster/cast', async (req, res) => {
 
     if (!userInboxId) {
       console.log(`❌ No XMTP user found for @${cast.author.username} with addresses`);
-      // TODO: Reply to cast with instructions to connect wallet to XMTP
+      // Reply to cast with instructions to connect wallet to XMTP
+      try {
+        const replyResult = await replyToCast(
+          cast.hash,
+          `I couldn't find your XMTP inbox ID for @${cast.author.username}. Please ensure your wallet is connected to the dStealth agent.`
+        );
+        
+        if (replyResult.success) {
+          console.log(`✅ Successfully replied to no XMTP user cast: ${replyResult.castHash}`);
+        } else {
+          console.warn(`⚠️ Failed to reply to no XMTP user cast: ${replyResult.error}`);
+        }
+      } catch (replyError) {
+        console.error('❌ Error replying to no XMTP user cast:', replyError);
+      }
       return res.status(200).json({ 
         message: 'User not found in XMTP - need to connect wallet to dStealth agent first' 
       });
