@@ -298,45 +298,6 @@ Please try again or check your fkey.id on https://app.fluidkey.com`
       });
     }
 
-    // Find the user in our database by their Farcaster wallet addresses
-    let userInboxId: string | null = null;
-    
-    // Check custody address first
-    const custodyAddress = cast.author.custody_address;
-    if (custodyAddress) {
-      userInboxId = await findUserByWalletAddress(custodyAddress);
-    }
-    
-    // Check verified addresses if not found
-    if (!userInboxId && cast.author.verified_addresses?.eth_addresses) {
-      for (const address of cast.author.verified_addresses.eth_addresses) {
-        userInboxId = await findUserByWalletAddress(address);
-        if (userInboxId) break;
-      }
-    }
-
-    if (!userInboxId) {
-      console.log(`❌ No XMTP user found for @${cast.author.username} with addresses`);
-      // Reply to cast with instructions to connect wallet to XMTP
-      try {
-        const replyResult = await replyToCast(
-          cast.hash,
-          `I couldn't find your XMTP inbox ID for @${cast.author.username}. Please ensure your wallet is connected to the dStealth agent.`
-        );
-        
-        if (replyResult.success) {
-          console.log(`✅ Successfully replied to no XMTP user cast: ${replyResult.castHash}`);
-        } else {
-          console.warn(`⚠️ Failed to reply to no XMTP user cast: ${replyResult.error}`);
-        }
-      } catch (replyError) {
-        console.error('❌ Error replying to no XMTP user cast:', replyError);
-      }
-      return res.status(200).json({ 
-        message: 'User not found in XMTP - need to connect wallet to dStealth agent first' 
-      });
-    }
-
     // Store the fkey.id for the user using primary address
     const stealthData = {
       userId: primaryAddressResult.primaryAddress, // ✅ FIXED: Use Farcaster primary address
@@ -354,15 +315,15 @@ Please try again or check your fkey.id on https://app.fluidkey.com`
         username: cast.author.username,
         castHash: cast.hash,
         timestamp: cast.timestamp,
-        xmtpInboxId: userInboxId // Keep XMTP inbox ID for reference
+        xmtpInboxId: null // No XMTP inbox ID for this case
       }
     };
 
     await agentDb.storeUserStealthData(stealthData);
 
-    console.log(`✅ Successfully set fkey.id ${fkeyId} for user ${userInboxId} via Farcaster cast`);
+    console.log(`✅ Successfully set fkey.id ${fkeyId} for user ${primaryAddressResult.primaryAddress} via Farcaster cast`);
 
-    // 🔧 NEW: Reply to the cast with confirmation
+    // 🔧 NEW: Reply to the cast with confirmation + dStealth miniapp URL
     try {
       const replyResult = await replyToCast(
         cast.hash,
@@ -370,7 +331,9 @@ Please try again or check your fkey.id on https://app.fluidkey.com`
 
 🥷 Anonymous payments are now enabled! 
 
-Try me in DMs for more commands: /help`
+🌐 Access the dStealth miniapp: https://dstealth.xyz
+
+💬 DM me on XMTP @dstealth.base.eth for more features!`
       );
 
       if (replyResult.success) {
@@ -384,10 +347,11 @@ Try me in DMs for more commands: /help`
     }
 
     return res.status(200).json({ 
-      message: 'fkey.id set successfully via Farcaster cast',
+      message: 'fkey.id set successfully via Farcaster cast (standalone onboarding)',
       fkeyId: fkeyId,
       username: cast.author.username,
-      fid: cast.author.fid
+      fid: cast.author.fid,
+      primaryAddress: primaryAddressResult.primaryAddress
     });
 
   } catch (error) {

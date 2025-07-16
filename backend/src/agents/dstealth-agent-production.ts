@@ -9,7 +9,7 @@
  * 5. Smart group chat behavior with @mentions
  */
 
-import { agentDb } from '../lib/agent-database.js';
+import { agentDb, UserStealthData } from '../lib/agent-database.js';
 import { daimoPayClient } from '../lib/daimo-pay.js';
 import { createSigner, getEncryptionKeyFromHex } from '../helper.js';
 import { resolvePrimaryFromXMTP, createStealthDataWithPrimaryAddress } from '../lib/primary-address-resolver.js';
@@ -1902,7 +1902,7 @@ Once you set your fkey.id, all features will be unlocked! 🚀`;
    */
   private async checkFkeyAcrossAllSources(senderInboxId: string): Promise<{
     fkeyId: string | null;
-    source: 'agent_db' | 'miniapp' | 'farcaster_cast' | 'not_found';
+    source: 'agent_db' | 'miniapp' | 'farcaster_cast' | 'farcaster_fid' | 'not_found';
     stealthAddress: string | null;
     zkProof: any;
     lastUpdated: number;
@@ -1926,20 +1926,33 @@ Once you set your fkey.id, all features will be unlocked! 🚀`;
 
       const userAddress = primaryAddressResult.primaryAddress;
       
-      // 1. Check agent database (most reliable)
+      // 1. Check agent database by user address (most reliable)
       const agentData = await agentDb.getStealthDataByUser(userAddress);
       
-      // 2. Check miniapp settings (if available)
+      // 2. Check agent database by FID (if user has Farcaster context)
+      let fidData: UserStealthData | null = null;
+      try {
+        const farcasterContext = await this.getFarcasterContext(userAddress);
+        if (farcasterContext?.fid) {
+          console.log(`🔍 Checking for existing fkey.id by FID: ${farcasterContext.fid}`);
+          fidData = await agentDb.getStealthDataByFID(farcasterContext.fid);
+        }
+      } catch (error) {
+        console.log(`⚠️ Could not check FID-based lookup: ${error}`);
+      }
+      
+      // 3. Check miniapp settings (if available)
       const miniappData = await this.checkMiniappFkeySetting(userAddress);
       
-      // 3. Check Farcaster casts (if available)
+      // 4. Check Farcaster casts (if available)
       const farcasterData = await this.checkFarcasterCastSetting(userAddress);
       
-      // 4. Reconcile data from all sources
-      const reconciledData = await this.reconcileFkeyData(agentData, miniappData, farcasterData);
+      // 5. Reconcile data from all sources (including FID-based lookup)
+      const reconciledData = await this.reconcileFkeyData(agentData, miniappData, farcasterData, fidData);
       
       console.log(`🔍 Cross-platform fkey check for ${userAddress}:`, {
         agent: agentData?.fkeyId || 'none',
+        fid: fidData?.fkeyId || 'none',
         miniapp: miniappData?.fkeyId || 'none',
         farcaster: farcasterData?.fkeyId || 'none',
         final: reconciledData.fkeyId || 'none',
@@ -2057,10 +2070,11 @@ Once you set your fkey.id, all features will be unlocked! 🚀`;
   private async reconcileFkeyData(
     agentData: any,
     miniappData: any,
-    farcasterData: any
+    farcasterData: any,
+    fidData?: any
   ): Promise<{
     fkeyId: string | null;
-    source: 'agent_db' | 'miniapp' | 'farcaster_cast' | 'not_found';
+    source: 'agent_db' | 'miniapp' | 'farcaster_cast' | 'farcaster_fid' | 'not_found';
     stealthAddress: string | null;
     zkProof: any;
     lastUpdated: number;
@@ -2069,6 +2083,7 @@ Once you set your fkey.id, all features will be unlocked! 🚀`;
   }> {
     const sources = [
       { data: agentData, source: 'agent_db' as const, priority: 3 },
+      { data: fidData, source: 'farcaster_fid' as const, priority: 4 },
       { data: miniappData, source: 'miniapp' as const, priority: 2 },
       { data: farcasterData, source: 'farcaster_cast' as const, priority: 1 }
     ];

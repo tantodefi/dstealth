@@ -190,6 +190,30 @@ export class AgentDatabase {
     }
   }
 
+  // Get stealth data by Farcaster FID
+  async getStealthDataByFID(fid: number): Promise<UserStealthData | null> {
+    try {
+      if (!redis) return null;
+
+      // Get all stealth data and search for matching FID
+      const allData = await this.getAllStealthData();
+      
+      for (const userData of allData) {
+        // Check if this entry has FID in metadata
+        if (userData.metadata?.fid && userData.metadata.fid === fid) {
+          console.log(`✅ Found existing fkey.id for FID ${fid}: ${userData.fkeyId}`);
+          return userData;
+        }
+      }
+
+      console.log(`❌ No fkey.id found for FID ${fid}`);
+      return null;
+    } catch (error) {
+      console.error("❌ Failed to get stealth data by FID:", error);
+      return null;
+    }
+  }
+
   // Get stealth data by fkey.id
   async getStealthDataByFkey(fkeyId: string): Promise<UserStealthData | null> {
     try {
