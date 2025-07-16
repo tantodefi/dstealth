@@ -383,7 +383,15 @@ const corsOptions = {
   credentials: true,
 };
 app.use(cors(corsOptions));
-app.use(express.json());
+
+// JSON body parser with raw body preservation for webhook signature verification
+app.use(express.json({
+  verify: (req: any, res, buf) => {
+    if (req.originalUrl.includes('/api/webhooks')) {
+      req.rawBody = buf.toString('utf8');
+    }
+  }
+}));
 
 // Add global request logger
 app.use((req, res, next) => {

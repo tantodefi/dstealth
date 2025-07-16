@@ -9,18 +9,16 @@ const router = express.Router();
 // Verify Neynar webhook signature
 function verifyNeynarWebhookSignature(payload: string, signature: string, secret: string): boolean {
   try {
+    // Create HMAC with sha512 as per Neynar docs
     const expectedSignature = crypto
-      .createHmac('sha256', secret)
+      .createHmac('sha512', secret)
       .update(payload, 'utf8')
       .digest('hex');
     
-    const providedSignature = signature.startsWith('sha256=') 
-      ? signature.slice(7) 
-      : signature;
-    
+    // Neynar sends signature directly as hex string, no prefix
     return crypto.timingSafeEqual(
       Buffer.from(expectedSignature, 'hex'),
-      Buffer.from(providedSignature, 'hex')
+      Buffer.from(signature, 'hex')
     );
   } catch (error) {
     console.error('❌ Webhook signature verification error:', error);
@@ -100,11 +98,19 @@ router.post('/farcaster/cast', async (req, res) => {
         return res.status(401).json({ error: 'Missing webhook signature' });
       }
       
-      const payload = JSON.stringify(req.body);
+      // Use raw request body if available, otherwise fall back to JSON.stringify
+      const payload = (req as any).rawBody || JSON.stringify(req.body);
+      console.log('🔍 Using payload for signature verification:', payload ? 'Raw body available' : 'Using JSON.stringify fallback');
+      
       const isValid = verifyNeynarWebhookSignature(payload, signature, env.NEYNAR_WEBHOOK_SECRET);
       
       if (!isValid) {
         console.log('❌ Invalid webhook signature');
+        console.log('🔍 Signature debug:', {
+          receivedSignature: signature,
+          payloadLength: payload.length,
+          secretConfigured: !!env.NEYNAR_WEBHOOK_SECRET
+        });
         return res.status(401).json({ error: 'Invalid webhook signature' });
       }
       
