@@ -4,10 +4,10 @@ import { env } from "../config/env.js";
 
 const router = express.Router();
 
-// Initialize Reclaim client with required parameters
+// Initialize Reclaim client
 const reclaimClient = new ReclaimClient(
   env.RECLAIM_APP_ID,
-  env.RECLAIM_APP_SECRET,
+  env.RECLAIM_APP_SECRET
 );
 
 router.get("/lookup/:username", async (req, res) => {
@@ -15,69 +15,163 @@ router.get("/lookup/:username", async (req, res) => {
   let xmtpId: string | null = null;
   let profile: any = null;
   let zkProof = null;
+  let zkProofMultiple: any[] = [];
+  let html: string = "";
 
   try {
     const url = `https://${username}.convos.org`;
     console.log("\n=== CONVOS.ORG LOOKUP START ===");
     console.log(`🔍 Looking up profile for ${username} at ${url}`);
 
-    let html;
-
-    // First try with zkfetch
+    // First try with zkfetch to get ZK-proof
     try {
       console.log("\n📡 Attempting zkfetch...");
-      // Get the HTML content first since we need it for parsing
-      const fetchResponse = await fetch(url);
-      if (!fetchResponse.ok) {
-        throw new Error(`HTTP error! status: ${fetchResponse.status}`);
-      }
-      html = await fetchResponse.text();
-
-      // Then do the zkFetch verification
-      const response = await reclaimClient.zkFetch(
-        url,
-        {
-          method: "GET",
-        },
-        {
-          responseMatches: [
+      console.log("🔧 Reclaim Config:", {
+        appId: env.RECLAIM_APP_ID.slice(0, 10) + "...",
+        hasSecret: !!env.RECLAIM_APP_SECRET,
+        url: url
+      });
+      
+      // First attempt: Decentralized zkfetch with multiple attestors
+      let response;
+      let isDecentralized = false;
+      
+      try {
+        console.log("🏗️ Attempting decentralized zkfetch with multiple attestors...");
+        response = await reclaimClient.zkFetch(
+          url,
+          {
+            method: "GET",
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; zkfetch/1.0)'
+            }
+          },
+          {
+            responseMatches: [
+              {
+                type: "regex",
+                value: `"xmtpId":"[a-zA-Z0-9]+",.*"username":"${username}"`,
+              },
+            ],
+          },
+          true, // isDecentralised: Enable multiple witness attestors
+        );
+        isDecentralized = true;
+        console.log("✅ Decentralized zkfetch successful");
+      } catch (decentralizedError: unknown) {
+        console.log("⚠️ Decentralized zkfetch failed, trying single attestor fallback...");
+        console.log("Error:", decentralizedError instanceof Error ? decentralizedError.message : String(decentralizedError));
+        
+        // Fallback: Single attestor zkfetch
+        try {
+          console.log("🔄 Attempting single attestor zkfetch...");
+          response = await reclaimClient.zkFetch(
+            url,
             {
-              type: "regex",
-              value: "0x[a-fA-F0-9]{40}",
+              method: "GET",
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; zkfetch/1.0)'
+              }
             },
-          ],
-        },
-      );
-      console.log("✅ zkfetch successful");
-      console.log("Response:", response);
+            {
+              responseMatches: [
+                {
+                  type: "regex",
+                  value: `"xmtpId":"[a-zA-Z0-9]+",.*"username":"${username}"`,
+                },
+              ],
+            },
+            false, // isDecentralised: Single attestor mode
+          );
+          isDecentralized = false;
+          console.log("✅ Single attestor zkfetch successful");
+        } catch (singleAttestorError: unknown) {
+          console.log("❌ Single attestor zkfetch also failed");
+          console.log("Error:", singleAttestorError instanceof Error ? singleAttestorError.message : String(singleAttestorError));
+          throw singleAttestorError; // Rethrow to trigger the outer catch
+        }
+      }
 
-      // Validate proof structure
-      if (
-        response &&
-        response.claimData &&
-        response.signatures.length &&
-        response.witnesses.length
-      ) {
-        console.log("✅ Valid proof structure found");
-        zkProof = response;
+      console.log("📊 Response type:", Array.isArray(response) ? 'array' : typeof response);
+      console.log("📊 Response length:", Array.isArray(response) ? response.length : 'N/A');
+      console.log("📊 Attestor mode:", isDecentralized ? 'decentralized' : 'single');
+
+      // Handle multiple proofs from decentralized attestors or single proof
+      const proofs = Array.isArray(response) ? response : [response];
+      console.log(`🏗️ Processing ${proofs.length} proofs from attestors`);
+
+      // Find first valid proof structure
+      const validProof = proofs.find(proof => 
+        proof &&
+        proof.claimData &&
+        proof.signatures?.length &&
+        proof.witnesses?.length
+      );
+
+      if (validProof) {
+        console.log("✅ Valid proof structure found from attestors");
+        zkProof = {
+          ...validProof,
+          attestorCount: proofs.length, // Track number of attestors
+          isDecentralized: isDecentralized, // Track the mode used
+        };
+        
+        // Store all proofs for frontend multi-proof handling
+        zkProofMultiple = proofs.filter(proof => 
+          proof &&
+          proof.claimData &&
+          proof.signatures?.length &&
+          proof.witnesses?.length
+        );
       } else {
-        console.log("❌ Invalid proof structure:", {
-          hasClaimData: !!response?.claimData,
-          signatureCount: response?.signatures.length,
-          witnessCount: response?.witnesses.length,
-        });
-        zkProof = null;
+        console.log("❌ No valid proof structure found in any attestor response");
+        console.log("🔍 Proof structures:", proofs.map(p => ({
+          hasClaimData: !!p?.claimData,
+          hasSignatures: !!p?.signatures?.length,
+          hasWitnesses: !!p?.witnesses?.length
+        })));
+        // If we can't get a valid proof structure, this should be considered a failure
+        throw new Error("No valid ZK proof structure found");
       }
-    } catch (zkError) {
-      // Fallback to regular fetch if zkfetch fails
-      console.log("\n⚠️ zkfetch failed:", zkError);
-      console.log("↪️ Falling back to regular fetch...");
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+
+      // Get HTML content for parsing
+      console.log("\n🌐 Fetching HTML content...");
+      const fetchResponse = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; dstealth/1.0)'
+        }
+      });
+      html = await fetchResponse.text();
+      console.log("✅ HTML content fetched, length:", html.length);
+    } catch (zkError: unknown) {
+      // Enhanced error logging for debugging
+      console.log("\n❌ ZK Proof generation completely failed:");
+      console.log("Error type:", zkError instanceof Error ? zkError.constructor.name : typeof zkError);
+      console.log("Error message:", zkError instanceof Error ? zkError.message : String(zkError));
+      if (zkError instanceof Error && zkError.stack) {
+        console.log("Error stack:", zkError.stack.split('\n').slice(0, 5).join('\n'));
       }
-      html = await response.text();
-      console.log("✅ Regular fetch successful, HTML length:", html.length);
+      
+      // Check if it's a specific AttestorError
+      const errorMessage = zkError instanceof Error ? zkError.message : String(zkError);
+      const errorName = zkError instanceof Error ? zkError.constructor.name : '';
+      if (errorMessage.includes('AttestorError') || errorName === 'AttestorError') {
+        console.log("🔍 AttestorError detected - this may be due to:");
+        console.log("  - Network connectivity issues");
+        console.log("  - Reclaim service temporary unavailability");
+        console.log("  - Invalid response matching criteria");
+        console.log("  - Attestor consensus failure");
+      }
+      
+      // ZK proof is mandatory - fail the lookup if we can't generate any proof
+      console.log("💥 LOOKUP FAILED: ZK proof generation is mandatory but failed on both decentralized and single attestor modes");
+      res.status(500).json({
+        error: "ZK proof generation failed",
+        details: "Unable to generate cryptographic proof for this profile",
+        zkProofRequired: true,
+        attestorError: errorMessage.includes('AttestorError') || errorName === 'AttestorError'
+      });
+      return;
     }
 
     // Look for the __NEXT_DATA__ script tag
@@ -124,6 +218,7 @@ router.get("/lookup/:username", async (req, res) => {
           address: profile.turnkeyAddress,
         },
         proof: zkProof,
+        proofs: zkProofMultiple, // Include all proofs for frontend
       });
     } else {
       console.log("\n❌ No XMTP ID found");

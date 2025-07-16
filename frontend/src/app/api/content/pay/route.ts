@@ -4,10 +4,10 @@ import { randomBytes } from 'crypto';
 import { daimoPayClient, getDaimoChainId } from '@/lib/daimo-pay';
 
 // Redis client setup - with safe initialization
-const redis = process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+const redis = process.env.NEXT_PUBLIC_UPSTASH_REDIS_REST_URL && process.env.NEXT_PUBLIC_UPSTASH_REDIS_REST_TOKEN
   ? new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+      url: process.env.NEXT_PUBLIC_UPSTASH_REDIS_REST_URL,
+      token: process.env.NEXT_PUBLIC_UPSTASH_REDIS_REST_TOKEN,
     })
   : null;
 
@@ -262,7 +262,7 @@ async function generatePaymentUrl(contentId: string, userAddress?: string, userA
     }
   }
 
-  // 🔥 CRITICAL: Get user's stealth address - FAIL if no fkey.id found
+  // 🔥 CRITICAL: Get user's stealth address using primary address approach
   let finalRecipient = recipient;
   let zkReceiptData = null;
   let userFkeyId = null;
@@ -273,39 +273,79 @@ async function generatePaymentUrl(contentId: string, userAddress?: string, userA
   }
 
   try {
+    // ✅ STEP 1: Use connected wallet address as primary address to find stealth data
+    console.log(`🔍 Frontend payment: Looking up stealth data for primary address: ${userAddress}`);
+    
     const userStealthKey = `dstealth_agent:stealth:${userAddress.toLowerCase()}`;
     const stealthData = await redis.get(userStealthKey);
     
-    if (stealthData) {
-      const userData = typeof stealthData === 'string' ? JSON.parse(stealthData) : stealthData;
-      
-      if (userData.stealthAddress && userData.fkeyId) {
-        finalRecipient = userData.stealthAddress;
-        userFkeyId = userData.fkeyId;
-        console.log(`🥷 Using stealth address for payment: ${userData.stealthAddress} (${userData.fkeyId})`);
-        
-        zkReceiptData = {
-          contentId,
-          userStealthAddress: userData.stealthAddress,
-          fkeyId: userData.fkeyId,
-          zkProof: userData.zkProof,
-          timestamp: Date.now(),
-          paymentIntent: `X402 Content ${contentId}`,
-          privacyLevel: 'stealth'
-        };
-      } else {
-        // 🚨 HARD FAIL: User has data but missing fkey.id
-        console.log(`❌ Frontend payment creation BLOCKED - incomplete setup for user: ${userAddress}`);
-        throw new Error(`SETUP_REQUIRED: User ${userAddress} missing fkey.id or stealth address. Complete setup at https://dstealth.xyz first.`);
-      }
-    } else {
-      // 🚨 HARD FAIL: User address provided but no stealth data found
-      console.log(`❌ Frontend payment creation BLOCKED - no fkey.id for user: ${userAddress}`);
+    if (!stealthData) {
+      // 🚨 HARD FAIL: No stealth data found for connected wallet
+      console.log(`❌ Frontend payment creation BLOCKED - no stealth data for primary address: ${userAddress}`);
       throw new Error(`FKEY_REQUIRED: No FluidKey ID found for ${userAddress}. Get one at https://app.fluidkey.com/?ref=62YNSG then complete setup at https://dstealth.xyz`);
     }
+    
+    const userData = typeof stealthData === 'string' ? JSON.parse(stealthData) : stealthData;
+    
+    if (!userData.fkeyId) {
+      // 🚨 HARD FAIL: User has data but no fkey.id
+      console.log(`❌ Frontend payment creation BLOCKED - no fkey.id for primary address: ${userAddress}`);
+      throw new Error(`FKEY_REQUIRED: No FluidKey ID found for ${userAddress}. Get one at https://app.fluidkey.com/?ref=62YNSG then complete setup at https://dstealth.xyz`);
+    }
+
+    console.log(`📋 Found stealth data for primary address: ${userAddress} -> fkey.id: ${userData.fkeyId}`);
+
+    // ✅ STEP 2: Do fresh fkey.id lookup to ensure current address
+    console.log(`🔍 Frontend payment: Doing fresh fkey.id lookup for ${userData.fkeyId}`);
+    
+    const baseUrl = process.env.NEXT_PUBLIC_URL || 'http://localhost:3000';
+    let fkeyLookupResult;
+    
+    try {
+      // Build URL with user address and source for ZK receipt generation
+      const fkeyLookupUrl = new URL(`${baseUrl}/api/fkey/lookup/${userData.fkeyId}`);
+      fkeyLookupUrl.searchParams.append('userAddress', userAddress);
+      fkeyLookupUrl.searchParams.append('source', 'frontend-payment-flow');
+      
+      const response = await fetch(fkeyLookupUrl.toString());
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      fkeyLookupResult = await response.json();
+      
+      if (!fkeyLookupResult.isRegistered || !fkeyLookupResult.address) {
+        throw new Error(`fkey.id ${userData.fkeyId} not found or not registered`);
+      }
+      
+      console.log('🧾 ZK receipt generated during payment flow fkey.id lookup');
+    } catch (error) {
+      console.error('❌ Failed to lookup fkey.id:', error);
+      throw new Error(`VERIFICATION_FAILED: Could not verify fkey.id ${userData.fkeyId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+
+    // ✅ STEP 3: Use fresh stealth address for payment
+    finalRecipient = fkeyLookupResult.address;
+    userFkeyId = userData.fkeyId;
+    console.log(`🥷 Using fresh stealth address for payment: ${fkeyLookupResult.address} (${userData.fkeyId})`);
+    
+    zkReceiptData = {
+      contentId,
+      userStealthAddress: fkeyLookupResult.address,
+      fkeyId: userData.fkeyId,
+      zkProof: fkeyLookupResult.proof,
+      timestamp: Date.now(),
+      paymentIntent: `X402 Content ${contentId}`,
+      privacyLevel: 'stealth',
+      primaryAddress: userAddress // Include primary address for reference
+    };
+    
   } catch (stealthError) {
     // Re-throw setup/fkey errors, catch other technical errors
-    if (stealthError.message.startsWith('SETUP_REQUIRED') || stealthError.message.startsWith('FKEY_REQUIRED')) {
+    if (stealthError.message.startsWith('SETUP_REQUIRED') || 
+        stealthError.message.startsWith('FKEY_REQUIRED') ||
+        stealthError.message.startsWith('VERIFICATION_FAILED')) {
       throw stealthError;
     }
     console.warn('⚠️ Technical error retrieving stealth address:', stealthError);
@@ -342,13 +382,17 @@ async function generatePaymentUrl(contentId: string, userAddress?: string, userA
   
   // 🔥 ENHANCED: Always include fkey.id in metadata for trust verification
   metadata.verifiedFkeyId = userFkeyId;
-  metadata.trustedIdentity = true;
+  metadata.trustedIdentity = 'true'; // ✅ Convert to string
   
   // Only add zkReceiptId if it exists
   if (zkReceiptData) {
     metadata.zkReceiptId = `zk_${contentId}_${Date.now()}`;
-    // Add other zkReceiptData fields
-    Object.assign(metadata, zkReceiptData);
+    // Add other zkReceiptData fields as strings
+    metadata.userStealthAddress = zkReceiptData.userStealthAddress || '';
+    metadata.paymentIntent = zkReceiptData.paymentIntent || '';
+    metadata.privacyLevel = zkReceiptData.privacyLevel || '';
+    metadata.zkProofSource = 'reclaim-protocol';
+    metadata.timestamp = Date.now().toString(); // ✅ Convert to string
   }
 
   const paymentLink = await daimoPayClient.createPaymentLink({

@@ -134,7 +134,7 @@ export default function DaimoPayButton({
   const [stealthPayments, setStealthPayments] = useLocalStorage<StealthPayment[]>('stealth-payments', []);
 
   // Enhanced payment completion handler that saves ZK receipt data
-  const handlePaymentCompleted = (event: any) => {
+  const handlePaymentCompleted = async (event: any) => {
     console.log("✅ ZK Stealth Payment Completed - Full Event:", JSON.stringify(event, null, 2));
     console.log("🔍 Event structure analysis:", {
       hasValue: 'value' in event,
@@ -284,21 +284,48 @@ export default function DaimoPayButton({
       const updatedPayments = [...stealthPayments, completedPayment];
       setStealthPayments(updatedPayments);
 
-      // Log the completed payment
-      console.log('💾 Completed payment saved as ZK receipt:', {
-        txHash: completedPayment.txHash,
-        amount: completedPayment.amount,
-        recipient: completedPayment.recipientAddress,
-        fkeyId: completedPayment.fkeyId,
-        hasZkProof: !!completedPayment.proof,
-        txUrl: completedPayment.txUrl,
-        zkProofDetails: completedPayment.proof ? {
-          provider: completedPayment.proof.claimData.provider,
-          owner: completedPayment.proof.claimData.owner,
-          witnessCount: completedPayment.proof.witnesses.length,
-          signatureCount: completedPayment.proof.signatures.length,
-        } : null
-      });
+      // 🔧 NEW: Save ZK receipt to Redis for successful transactions
+      try {
+        const zkReceiptKey = `zk_receipt:successful_payment_${txData.hash}:${recipientAddress.toLowerCase()}:${Date.now()}`;
+        const zkReceiptData = {
+          transactionHash: txData.hash,
+          networkId: 'base',
+          amount: txData.amount || '0.00',
+          currency: 'USDC',
+          recipientAddress: recipientAddress,
+          fkeyId: username ? `${username}.fkey.id` : `${toAddress.slice(0, 6)}...${toAddress.slice(-4)}`,
+          senderAddress: recipientAddress, // In this context, we're sending to the stealth address
+          timestamp: Date.now(),
+          status: 'completed',
+          paymentUrl: txUrl,
+          // Include the ZK proof from the search
+          zkProof: zkProofs?.fkey || zkProofs?.convos || null,
+          metadata: {
+            transactionType: "Successful DaimoPayButton Transaction",
+            privacyFeature: "stealth-address",
+            zkProofAvailable: !!(zkProofs?.fkey || zkProofs?.convos),
+            source: "frontend-daimo-pay-button",
+            paymentMethod: "daimo-sdk"
+          }
+        };
+
+        // Save to Redis via API call
+        await fetch('/api/zkreceipts', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            key: zkReceiptKey,
+            data: zkReceiptData
+          })
+        });
+
+        console.log('✅ ZK receipt saved to Redis for successful payment:', zkReceiptKey);
+      } catch (receiptError) {
+        console.warn('⚠️ Failed to save ZK receipt to Redis:', receiptError);
+        // Don't fail the payment completion if receipt storage fails
+      }
 
       // Also check if this completes any existing payment links
       // Match any pending link to same address/amount (no time limit since links could be paid much later)
@@ -322,6 +349,33 @@ export default function DaimoPayButton({
         );
         setGeneratedPaymentLinks(updatedLinks);
         console.log('🔗 Updated corresponding payment link as completed:', linkToUpdate.id);
+
+        // 🔧 NEW: Update Redis ZK receipt for completed payment link
+        try {
+          const updateResponse = await fetch('/api/zkreceipts/update', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              pattern: `zk_receipt:payment_link_${linkToUpdate.id}:*`,
+              updates: {
+                transactionHash: txData.hash,
+                status: 'completed',
+                completedAt: Date.now(),
+                txUrl: txUrl
+              }
+            })
+          });
+
+          if (updateResponse.ok) {
+            console.log('✅ Updated Redis ZK receipt for completed payment link');
+          } else {
+            console.warn('⚠️ Failed to update Redis ZK receipt for completed payment link');
+          }
+        } catch (updateError) {
+          console.warn('⚠️ Error updating Redis ZK receipt for completed payment link:', updateError);
+        }
       }
 
     } catch (error) {
@@ -344,6 +398,20 @@ export default function DaimoPayButton({
       // Generate Coinbase Wallet request link
       paymentLink = generateCoinbaseWalletLink(toAddress, customAmount, 'USDC');
     } else {
+      // 🔥 FIXED: Use proven owner address from ZK proof, not toAddress
+      const provenOwnerAddress = zkProofs?.fkey?.claimData?.owner || zkProofs?.convos?.claimData?.owner;
+      
+      if (!provenOwnerAddress) {
+        alert('❌ No ZK proof found. Please search for a valid fkey.id first.');
+        return;
+      }
+
+      console.log('🔑 Using proven owner address for payment lookup:', {
+        provenOwner: provenOwnerAddress,
+        toAddress: toAddress,
+        username: username
+      });
+
       // 🔥 NEW: Use proper Daimo Pay API instead of deprecated deep links
       try {
         const contentId = `frontend_payment_${Date.now()}`;
@@ -353,7 +421,7 @@ export default function DaimoPayButton({
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            userAddress: toAddress, // This will trigger stealth address lookup
+            userAddress: provenOwnerAddress, // ✅ Use proven owner address for stealth lookup
             amount: customAmount,
             currency: 'USDC',
           }),
@@ -418,6 +486,51 @@ export default function DaimoPayButton({
     // Save to localStorage as ZK receipt
     const updatedLinks = [...generatedPaymentLinks, paymentLinkData];
     setGeneratedPaymentLinks(updatedLinks);
+
+    // 🔧 NEW: Save ZK receipt to Redis for payment link creation
+    try {
+      const zkReceiptKey = `zk_receipt:payment_link_${linkId}:${toAddress.toLowerCase()}:${Date.now()}`;
+      const zkReceiptData = {
+        transactionHash: '', // Will be filled when payment is completed
+        networkId: 'base',
+        amount: paymentLinkData.amount,
+        currency: 'USDC',
+        recipientAddress: toAddress,
+        fkeyId: paymentLinkData.fkeyId,
+        senderAddress: toAddress, // For link creation, this is the recipient address
+        timestamp: Date.now(),
+        status: 'pending_payment',
+        paymentLinkId: linkId,
+        paymentUrl: paymentLink,
+        // Include the ZK proof from the search
+        zkProof: zkProofs?.fkey || zkProofs?.convos || null,
+        metadata: {
+          transactionType: "Payment Link Created",
+          privacyFeature: "stealth-address",
+          zkProofAvailable: !!(zkProofs?.fkey || zkProofs?.convos),
+          source: "frontend-payment-link-creation",
+          paymentMethod: "daimo-pay-link",
+          memo: memo || 'ZK Stealth Payment via FluidKey'
+        }
+      };
+
+      // Save to Redis via API call
+      await fetch('/api/zkreceipts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          key: zkReceiptKey,
+          data: zkReceiptData
+        })
+      });
+
+      console.log('✅ ZK receipt saved to Redis for payment link creation:', zkReceiptKey);
+    } catch (receiptError) {
+      console.warn('⚠️ Failed to save ZK receipt to Redis for payment link:', receiptError);
+      // Don't fail the link generation if receipt storage fails
+    }
 
     // Call callback if provided
     onLinkGenerated?.(paymentLinkData);
@@ -595,7 +708,7 @@ export default function DaimoPayButton({
             {showLinkGenerator && (
               <div className="border-t border-gray-700 pt-4 mt-4">
                 <div className="text-white text-sm font-medium mb-3">
-                  Generate Custom Daimo Link
+                  Generate Custom {linkType === 'coinbase' ? 'CBW' : 'Daimo'} Link
                 </div>
                 
                 {!generatedLink ? (
@@ -657,7 +770,11 @@ export default function DaimoPayButton({
                     <button
                       onClick={() => generatePaymentLink()}
                       disabled={!customAmount || parseFloat(customAmount) <= 0}
-                      className="w-full px-4 py-2 bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white rounded-lg font-medium text-sm transition-all duration-200"
+                      className={`w-full px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 disabled:cursor-not-allowed text-white ${
+                        linkType === 'coinbase'
+                          ? 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-700'
+                          : 'bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 disabled:from-gray-600 disabled:to-gray-700'
+                      }`}
                     >
                       Generate {linkType === 'coinbase' ? 'Coinbase Wallet' : 'Daimo'} Link
                     </button>

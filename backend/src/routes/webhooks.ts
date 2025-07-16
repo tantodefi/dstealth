@@ -1,7 +1,11 @@
 import { Router } from "express";
 import { env } from "../config/env.js";
+import farcasterWebhookRoutes from "./webhook-farcaster.js";
 
 const router = Router();
+
+// 🔧 NEW: Register Farcaster webhook routes
+router.use("/", farcasterWebhookRoutes);
 
 // Webhook endpoint for receiving notifications from frontend
 router.post("/notifications", async (req, res) => {

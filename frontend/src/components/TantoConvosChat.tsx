@@ -128,7 +128,43 @@ export default function TantoConvosChat() {
                             : "bg-gray-700 text-gray-200"
                         }`}
                       >
-                        <p>{typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)}</p>
+                        <p>
+                          {(() => {
+                            // Handle empty or undefined content
+                            if (!msg.content || msg.content === '') {
+                              return <span className="text-gray-400 italic">Action sent</span>;
+                            }
+                            
+                            // Handle string content
+                            if (typeof msg.content === 'string') {
+                              return msg.content;
+                            }
+                            
+                            // Handle object content (like action buttons)
+                            if (typeof msg.content === 'object') {
+                              // Check if it's an action content type
+                              if (msg.content.actions && Array.isArray(msg.content.actions)) {
+                                return (
+                                  <div className="space-y-1">
+                                    <div className="text-sm">{msg.content.description || 'Interactive message'}</div>
+                                    <div className="space-y-1">
+                                      {msg.content.actions.map((action: any, idx: number) => (
+                                        <div key={idx} className="bg-purple-500 text-white px-2 py-1 rounded text-xs">
+                                          {action.label}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              // For other objects, stringify
+                              return JSON.stringify(msg.content);
+                            }
+                            
+                            // Fallback for other types
+                            return String(msg.content);
+                          })()}
+                        </p>
                         <p className="text-xs opacity-60 mt-1">
                           {sentTime.toLocaleTimeString()}
                         </p>

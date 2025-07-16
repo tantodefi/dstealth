@@ -5,6 +5,7 @@ import { useXMTP } from "@/context/xmtp-context";
 import { SpinnerIcon } from "./icons/SpinnerIcon";
 import { CheckIcon } from "./icons/CheckIcon";
 import ConvosChat from "./ConvosChat";
+import { XIcon } from "./icons/XIcon";
 
 interface ConvosProfile {
     xmtpId: string;
@@ -28,6 +29,7 @@ export function ConvosSearch() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [convosData, setConvosData] = useState<ConvosProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [zkProofError, setZkProofError] = useState<{service: string; error: string; details?: any; attestorError?: any} | null>(null);
   const [searchSuccess, setSearchSuccess] = useState(false);
 
   const handleSearch = async () => {
@@ -35,6 +37,7 @@ export function ConvosSearch() {
 
     setIsSending(true);
     setError("");
+    setZkProofError(null);
     setConvosData(null);
     setSearchSuccess(false);
     
@@ -51,7 +54,23 @@ export function ConvosSearch() {
           setError("User not found on convos.org");
         }
       } else {
-        setError("User not found on convos.org");
+        // Handle ZK proof failure errors
+        try {
+          const errorData = await convosResponse.json();
+          if (errorData.zkProofRequired) {
+            console.log('❌ ZK proof generation failed for convos:', errorData);
+            setZkProofError({
+              service: 'convos.org',
+              error: errorData.error,
+              details: errorData.details,
+              attestorError: errorData.attestorError
+            });
+          } else {
+            setError("User not found on convos.org");
+          }
+        } catch (parseError) {
+          setError("User not found on convos.org");
+        }
       }
 
     } catch (error) {
@@ -121,6 +140,39 @@ export function ConvosSearch() {
         <div className="flex items-center gap-2 text-orange-400 bg-gray-800 p-3 rounded-lg">
           <SpinnerIcon className="animate-spin h-5 w-5" />
           <span>Searching convos.org...</span>
+        </div>
+      )}
+
+      {/* ZK Proof Error */}
+      {zkProofError && (
+        <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-4">
+          <div className="flex items-start gap-3">
+            <XIcon className="h-5 w-5 text-red-400 mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              <h3 className="text-red-400 font-medium mb-2">ZK Proof Generation Failed</h3>
+              <p className="text-red-300 text-sm mb-2">
+                Failed to generate cryptographic proof for <span className="font-mono">{zkProofError.service}</span>
+              </p>
+              <p className="text-red-300/80 text-xs mb-3">
+                {zkProofError.details || "Unable to verify account authenticity through zero-knowledge proofs"}
+              </p>
+              {zkProofError.attestorError && (
+                <div className="bg-red-500/5 border border-red-500/10 rounded p-2 mb-3">
+                  <p className="text-red-300/70 text-xs">
+                    <span className="font-medium">Attestor Service Issue:</span> This may be due to network connectivity problems or temporary service unavailability.
+                  </p>
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="bg-red-500/10 text-red-300 px-2 py-1 rounded">
+                  🔒 Cryptographic verification required
+                </span>
+                <span className="bg-red-500/10 text-red-300 px-2 py-1 rounded">
+                  ⚠️ Service temporarily unavailable
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

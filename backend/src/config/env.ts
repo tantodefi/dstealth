@@ -35,6 +35,15 @@ const envSchema = z.object({
   // dStealth Agent Configuration
   OPENAI_API_KEY: z.string().optional(),
 
+  // Farcaster Integration Configuration
+  COINBASE_API_PRIVATE_KEY: z.string().optional(),
+  NEYNAR_API_KEY: z.string().optional(),
+  NEYNAR_SPONSOR_WALLET_ID: z.string().optional(),
+  NEYNAR_SPONSOR_ADDRESS: z.string().optional(),
+  NEYNAR_SIGNER_UUID: z.string().optional(),
+  NEYNAR_WEBHOOK_ID: z.string().optional(),
+  NEYNAR_WEBHOOK_SECRET: z.string().optional(),
+
   // AgentKit Configuration
   CDP_API_KEY_NAME: z.string().optional(),
   CDP_API_KEY_PRIVATE_KEY: z.string().optional(),

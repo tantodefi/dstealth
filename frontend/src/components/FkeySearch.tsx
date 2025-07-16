@@ -65,7 +65,9 @@ const verifyReclaimProof = async (proof: any): Promise<VerificationResult> => {
       signatureCount: proof?.signatures?.length,
       witnessCount: proof?.witnesses?.length,
       hasIdentifier: !!proof?.identifier,
-      hasEpoch: !!proof?.epoch
+      hasEpoch: !!proof?.epoch,
+      isDecentralized: proof?.isDecentralized || false,
+      attestorCount: proof?.attestorCount || 1
     });
 
     // Basic proof structure validation first
@@ -93,7 +95,7 @@ const verifyReclaimProof = async (proof: any): Promise<VerificationResult> => {
     }
 
     console.log('✅ Basic structure validation passed');
-    console.log('🔍 Performing cryptographic verification with Reclaim SDK...');
+    console.log('🔍 Performing cryptographic verification with Reclaim SDK v4.3.0...');
 
     // Use the actual Reclaim Protocol verifyProof function
     const isProofValid = await verifyProof(proof);
@@ -109,7 +111,9 @@ const verifyReclaimProof = async (proof: any): Promise<VerificationResult> => {
         identifier: proof.identifier,
         epoch: proof.epoch,
         cryptographicallyVerified: true,
-        reclaimSdkVersion: '3.0.4'
+        reclaimSdkVersion: '4.3.0',
+        isDecentralized: proof.isDecentralized || false,
+        attestorCount: proof.attestorCount || 1
       };
 
       return {
@@ -123,7 +127,7 @@ const verifyReclaimProof = async (proof: any): Promise<VerificationResult> => {
       };
     }
 
-      } catch (error) {
+  } catch (error) {
     console.error('❌ Reclaim verification error:', error);
     return {
       isValid: false,
@@ -161,6 +165,52 @@ function CopyButton({ text, className = "", title = "Copy to clipboard" }: { tex
   );
 }
 
+// AttestorSelector Component for switching between different attestor proofs
+function AttestorSelector({ 
+  proofType, 
+  proofs, 
+  selectedIndex, 
+  onSelect 
+}: { 
+  proofType: 'fkey' | 'convos', 
+  proofs: any[], 
+  selectedIndex: number, 
+  onSelect: (index: number) => void 
+}) {
+  if (!proofs || proofs.length <= 1) return null;
+
+  return (
+    <div className="mb-4 p-3 bg-gray-900 rounded-lg border border-gray-700">
+      <h4 className="text-white text-sm font-medium mb-2">
+        🏗️ Multiple Attestor Proofs ({proofs.length} available)
+      </h4>
+      <div className="flex flex-wrap gap-2">
+        {proofs.map((proof, index) => (
+          <button
+            key={index}
+            onClick={() => onSelect(index)}
+            className={`px-3 py-1 rounded text-xs transition-colors ${
+              selectedIndex === index
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            Attestor {index + 1}
+            {proof.claimData?.provider && (
+              <span className="ml-1 text-xs opacity-75">
+                ({proof.claimData.provider})
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 text-xs text-gray-400">
+        Currently showing proof from Attestor {selectedIndex + 1}
+      </div>
+    </div>
+  );
+}
+
 export function FkeySearch() {
   // Wallet connection state
   const { isConnected } = useWallet();
@@ -188,16 +238,30 @@ export function FkeySearch() {
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<FkeyProfile | null>(null);
   const [convosData, setConvosData] = useState<ConvosProfile | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [zkProofs, setZkProofs] = useState<{fkey?: any, convos?: any}>({});
-  const [zkVerification, setZkVerification] = useState<{fkey?: VerificationResult, convos?: VerificationResult}>({});
+  const [error, setError] = useState("");
+  const [zkProofError, setZkProofError] = useState<{service: string; error: string; details?: any; attestorError?: any} | null>(null);
+  
+  // Enhanced ZK fetching state
+  const [zkFetching, setZkFetching] = useState(false);
   const [zkSuccess, setZkSuccess] = useState(false);
+  const [zkFetchingMessage, setZkFetchingMessage] = useState("");
+  const [zkProofVerified, setZkProofVerified] = useState(false);
+
+  // ZK Proof state
+  const [zkProofs, setZkProofs] = useState<{fkey?: any, convos?: any}>({});
+  const [zkProofArrays, setZkProofArrays] = useState<{fkey?: any[], convos?: any[]}>({});
+  const [zkVerification, setZkVerification] = useState<{fkey?: VerificationResult, convos?: VerificationResult}>({});
+  
+  // Multiple proof handling
+  const [selectedAttestorIndex, setSelectedAttestorIndex] = useState<{fkey: number, convos: number}>({
+    fkey: 0,
+    convos: 0
+  });
+  const [showMultiProofToggle, setShowMultiProofToggle] = useState(false);
   const [showZkModal, setShowZkModal] = useState(false);
   const [selectedProofType, setSelectedProofType] = useState<'fkey' | 'convos'>('fkey');
-
-  // ZK fetching state
-  const [zkFetching, setZkFetching] = useState(false);
-  const [zkFetchingMessage, setZkFetchingMessage] = useState("ZK Fetching user accounts...");
+  const [smartSearchResults, setSmartSearchResults] = useState<any[]>([]);
+  const [showSmartSearch, setShowSmartSearch] = useState(false);
 
   // Local storage for activity stats
   const [activityStats, setActivityStats] = useLocalStorage<ActivityStats>("activity-stats", {
@@ -206,6 +270,49 @@ export function FkeySearch() {
     uniqueRecipients: 0,
   });
 
+  // Initialize proof handling variables
+  const proofs: {fkey?: any, convos?: any} = {};
+  const proofsArrays: {fkey?: any[], convos?: any[]} = {};
+  let hasMultipleProofs = false;
+
+  const resetStates = () => {
+    setLoading(false);
+    setProfile(null);
+    setConvosData(null);
+    setError("");
+    setZkProofError(null);
+    setZkProofs({});
+    setZkProofArrays({});
+    setZkVerification({});
+    setZkSuccess(false);
+    setZkFetching(false);
+    setZkFetchingMessage("ZK Fetching user accounts...");
+    setZkProofVerified(false);
+    setShowZkModal(false);
+    setSelectedProofType('fkey');
+    setSelectedAttestorIndex({ fkey: 0, convos: 0 });
+    setShowMultiProofToggle(false);
+    setSmartSearchResults([]);
+    setShowSmartSearch(false);
+  };
+
+  // Get current proof based on selected attestor
+  const getCurrentProof = (type: 'fkey' | 'convos') => {
+    const proofArrays = zkProofArrays[type];
+    if (proofArrays && proofArrays.length > 0) {
+      const index = selectedAttestorIndex[type];
+      return proofArrays[index] || proofArrays[0];
+    }
+    return zkProofs[type];
+  };
+
+  // Handle attestor selection
+  const handleAttestorSelect = (type: 'fkey' | 'convos', index: number) => {
+    setSelectedAttestorIndex(prev => ({
+      ...prev,
+      [type]: index
+    }));
+  };
 
 
   // Clear results when username changes (immediate clearing on input change)
@@ -242,24 +349,36 @@ export function FkeySearch() {
     
     try {
       // Fetch profile and convos data from backend (which includes real ZK proofs)
+      const fkeyLookupUrl = new URL(`/api/fkey/lookup/${username}`, window.location.origin);
+      const convosLookupUrl = new URL(`/api/convos/lookup/${username}`, window.location.origin);
+      
+      // Add user address and source parameters for ZK receipt generation
+      if (address) {
+        fkeyLookupUrl.searchParams.append('userAddress', address);
+        convosLookupUrl.searchParams.append('userAddress', address);
+      }
+      fkeyLookupUrl.searchParams.append('source', 'frontend-fkey-search');
+      convosLookupUrl.searchParams.append('source', 'frontend-convos-search');
+      
       const [profileResponse, convosResponse] = await Promise.allSettled([
-        fetch(`/api/fkey/lookup/${username}`),
-        fetch(`/api/convos/lookup/${username}`)
+        fetch(fkeyLookupUrl.toString()),
+        fetch(convosLookupUrl.toString())
       ]);
 
-      const proofs: {fkey?: any, convos?: any} = {};
-      let fkeyUserExists = false;
-      let convosUserExists = false;
+      // Initialize local variables for this search
+      let profileData: any = null;
+      let convosData: any = null;
       
       // Handle profile data and extract zkProof
       if (profileResponse.status === 'fulfilled' && profileResponse.value.ok) {
         const data = await profileResponse.value.json();
         if (data.address) {
-          fkeyUserExists = true;
+          profileData = data;
           setProfile(data);
-          // Extract the real ZK proof from backend response
+          // Extract ZK proofs from backend response (single proof + multiple proofs)
           if (data.proof) {
             console.log('🔐 Received REAL Reclaim Protocol ZK proof from backend for fkey:', data.proof);
+            console.log('🧾 ZK receipt automatically generated by backend');
             console.log('📊 Proof validation:', {
               hasClaimData: !!data.proof.claimData,
               hasSignatures: !!data.proof.signatures?.length,
@@ -267,45 +386,99 @@ export function FkeySearch() {
               signatureCount: data.proof.signatures?.length,
               witnessCount: data.proof.witnesses?.length,
               provider: data.proof.claimData?.provider,
-              timestamp: data.proof.claimData?.timestampS
+              timestamp: data.proof.claimData?.timestampS,
+              attestorCount: data.proof.attestorCount || 1,
+              isDecentralized: data.proof.isDecentralized
             });
             proofs.fkey = data.proof;
+            
+            // Handle multiple proofs from decentralized attestors
+            if (data.proofs && Array.isArray(data.proofs) && data.proofs.length > 0) {
+              console.log(`🏗️ Received ${data.proofs.length} proofs from decentralized attestors for fkey`);
+              proofsArrays.fkey = data.proofs;
+              if (data.proofs.length > 1) {
+                hasMultipleProofs = true;
+              }
+            }
           } else {
             console.log('⚠️ No ZK proof received from backend for fkey - Reclaim zkFetch may have failed');
           }
+        }
+      } else if (profileResponse.status === 'fulfilled' && !profileResponse.value.ok) {
+        // Handle ZK proof failure errors
+        try {
+          const errorData = await profileResponse.value.json();
+          if (errorData.zkProofRequired) {
+            console.log('❌ ZK proof generation failed for fkey:', errorData);
+            setZkProofError({
+              service: 'fkey.id',
+              error: errorData.error,
+              details: errorData.details,
+              attestorError: errorData.attestorError
+            });
+          }
+        } catch (parseError) {
+          console.log('❌ Failed to parse error response for fkey');
         }
       }
 
       // Handle convos data and extract zkProof
       if (convosResponse.status === 'fulfilled' && convosResponse.value.ok) {
-        const convosData = await convosResponse.value.json();
-        if (convosData.success && convosData.xmtpId) {
-          convosUserExists = true;
-          setConvosData(convosData);
-          // Extract the real ZK proof from backend response
-          if (convosData.proof) {
-            console.log('🔐 Received REAL Reclaim Protocol ZK proof from backend for convos:', convosData.proof);
+        const data = await convosResponse.value.json();
+        if (data.success && data.xmtpId) {
+          convosData = data;
+          setConvosData(data);
+          // Extract ZK proofs from backend response (single proof + multiple proofs)
+          if (data.proof) {
+            console.log('🔐 Received REAL Reclaim Protocol ZK proof from backend for convos:', data.proof);
             console.log('📊 Proof validation:', {
-              hasClaimData: !!convosData.proof.claimData,
-              hasSignatures: !!convosData.proof.signatures?.length,
-              hasWitnesses: !!convosData.proof.witnesses?.length,
-              signatureCount: convosData.proof.signatures?.length,
-              witnessCount: convosData.proof.witnesses?.length,
-              provider: convosData.proof.claimData?.provider,
-              timestamp: convosData.proof.claimData?.timestampS
+              hasClaimData: !!data.proof.claimData,
+              hasSignatures: !!data.proof.signatures?.length,
+              hasWitnesses: !!data.proof.witnesses?.length,
+              signatureCount: data.proof.signatures?.length,
+              witnessCount: data.proof.witnesses?.length,
+              provider: data.proof.claimData?.provider,
+              timestamp: data.proof.claimData?.timestampS,
+              attestorCount: data.proof.attestorCount || 1,
+              isDecentralized: data.proof.isDecentralized
             });
-            proofs.convos = convosData.proof;
+            proofs.convos = data.proof;
+            
+            // Handle multiple proofs from decentralized attestors
+            if (data.proofs && Array.isArray(data.proofs) && data.proofs.length > 0) {
+              console.log(`🏗️ Received ${data.proofs.length} proofs from decentralized attestors for convos`);
+              proofsArrays.convos = data.proofs;
+              if (data.proofs.length > 1) {
+                hasMultipleProofs = true;
+              }
+            }
           } else {
             console.log('⚠️ No ZK proof received from backend for convos - Reclaim zkFetch may have failed');
           }
         }
+      } else if (convosResponse.status === 'fulfilled' && !convosResponse.value.ok) {
+        // Handle ZK proof failure errors
+        try {
+          const errorData = await convosResponse.value.json();
+          if (errorData.zkProofRequired) {
+            console.log('❌ ZK proof generation failed for convos:', errorData);
+            setZkProofError({
+              service: 'convos.org',
+              error: errorData.error,
+              details: errorData.details,
+              attestorError: errorData.attestorError
+            });
+          }
+        } catch (parseError) {
+          console.log('❌ Failed to parse error response for convos');
+        }
       }
 
       // Handle different scenarios based on what was found
-      if (!fkeyUserExists && !convosUserExists) {
+      if (!profileData?.address && !convosData?.xmtpId) {
         // Neither fkey nor convos user exists - show generic invite
         setError(`${username}.fkey.id does not exist`);
-      } else if (!fkeyUserExists && convosUserExists) {
+      } else if (!profileData?.address && convosData?.xmtpId) {
         // Convos user found but no fkey - show special message for messaging
         setError(`${username}.fkey.id not found, but convos user found`);
       } else {
@@ -316,15 +489,17 @@ export function FkeySearch() {
       // Only set proofs and show success if we have valid data
       if (proofs.fkey || proofs.convos) {
         setZkProofs(proofs);
+        setZkProofArrays(proofsArrays);
+        setShowMultiProofToggle(hasMultipleProofs);
         // Start background verification with real proofs
         verifyProofsInBackground(proofs);
 
-      // Clear the message timer and complete the zkfetching process
-      clearTimeout(messageTimer);
-      setTimeout(() => {
-        setZkFetching(false);
-        setZkSuccess(true);
-      }, 2000);
+        // Clear the message timer and complete the zkfetching process
+        clearTimeout(messageTimer);
+        setTimeout(() => {
+          setZkFetching(false);
+          setZkSuccess(true);
+        }, 2000);
       } else {
         // No proofs means no valid users were found or zkFetch failed
         clearTimeout(messageTimer);
@@ -381,6 +556,21 @@ export function FkeySearch() {
     }
     
     setZkVerification(verifications);
+    
+    // Check if we have at least one valid proof
+    const hasValidProofs = Object.values(verifications).some(v => v?.isValid);
+    const hasFailedProofs = Object.values(verifications).some(v => v && !v.isValid);
+    
+    if (hasValidProofs) {
+      console.log('✅ At least one ZK proof verified successfully - payment buttons enabled');
+      setZkProofVerified(true);
+    } else if (hasFailedProofs) {
+      console.log('❌ ZK proof verification failed - payment buttons disabled');
+      setZkProofVerified(false);
+    } else {
+      console.log('⚠️ No ZK proofs to verify - payment buttons disabled');
+      setZkProofVerified(false);
+    }
   };
 
   const handlePaymentCompleted = (event: any) => {
@@ -531,6 +721,40 @@ export function FkeySearch() {
         </div>
       )}
 
+      {/* ZK Proof Error */}
+      {zkProofError && (
+        <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-4">
+          <div className="flex items-start gap-3">
+            <XIcon className="h-5 w-5 text-red-400 mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              <h3 className="text-red-400 font-medium mb-2">ZK Proof Generation Failed</h3>
+              <p className="text-red-300 text-sm mb-2">
+                Failed to generate cryptographic proof for <span className="font-mono">{zkProofError.service}</span>
+              </p>
+              <p className="text-red-300/80 text-xs mb-3">
+                {zkProofError.details || "Unable to verify account authenticity through zero-knowledge proofs"}
+              </p>
+              {zkProofError.attestorError && (
+                <div className="bg-red-500/5 border border-red-500/10 rounded p-2 mb-3">
+                  <p className="text-red-300/70 text-xs">
+                    <span className="font-medium">Attestor Service Issue:</span> This may be due to network connectivity problems or temporary service unavailability.
+                  </p>
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="bg-red-500/10 text-red-300 px-2 py-1 rounded">
+                  🔒 Cryptographic verification required
+                </span>
+                <span className="bg-red-500/10 text-red-300 px-2 py-1 rounded">
+                  ⚠️ Service temporarily unavailable
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success Status */}
       {zkSuccess && (
         <div className="flex items-center gap-2 text-green-400 bg-gray-800 p-3 rounded-lg mobile-scroll hide-scrollbar">
           <CheckIcon className="h-5 w-5" />
@@ -656,10 +880,12 @@ export function FkeySearch() {
                 <DaimoPayButton
                   toAddress={profile.address as `0x${string}`}
                   memo={`ZK Stealth Payment to ${username}.fkey.id`}
+                  disabled={!zkProofVerified}
                   metadata={{
                     fkeyId: `${username}.fkey.id`,
                     zkProofAvailable: String(!!(zkProofs.fkey || zkProofs.convos)),
                     zkProofProvider: String(zkProofs.fkey?.claimData?.provider || zkProofs.convos?.claimData?.provider || ''),
+                    zkProofVerified: String(zkProofVerified),
                     isEphemeral: String(address?.startsWith('0x0')),
                     timestamp: Date.now().toString(),
                     username: username,
@@ -688,19 +914,23 @@ export function FkeySearch() {
                   onPaymentBounced={(event) => {
                     console.error('❌ ZK Stealth Payment bounced:', event);
                   }}
-                  disabled={!isWalletConnected}
                 />
 
                 {/* ZK Proof Integration Footer */}
                 <div className="bg-purple-900/20 border border-purple-600/30 rounded-lg p-3">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-purple-200">
-                      🔐 {zkProofs.fkey || zkProofs.convos ? 'ZK Verified Payment' : 'Standard Payment'}
+                      🔐 {zkProofVerified ? 'ZK Verified Payment' : 'Verifying ZK Proofs...'}
                     </span>
                     <span className="text-purple-300">
                       {isEphemeralWallet ? 'Ephemeral Burner • ' : ''}Any Chain • Any Token
                     </span>
                   </div>
+                  {!zkProofVerified && (zkProofs.fkey || zkProofs.convos) && (
+                    <div className="mt-2 text-xs text-purple-300">
+                      Payment disabled until ZK proof verification completes
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
@@ -793,10 +1023,18 @@ export function FkeySearch() {
               </div>
             )}
 
-            {zkProofs[selectedProofType] ? (
+            {/* Attestor Selector */}
+            <AttestorSelector
+              proofType={selectedProofType}
+              proofs={zkProofArrays[selectedProofType] || []}
+              selectedIndex={selectedAttestorIndex[selectedProofType]}
+              onSelect={(index) => handleAttestorSelect(selectedProofType, index)}
+            />
+
+            {getCurrentProof(selectedProofType) ? (
               <pre className="bg-black rounded-md p-3 overflow-auto text-xs mobile-scroll hide-scrollbar">
                 <code className="text-gray-300 whitespace-pre-wrap break-all">
-                  {JSON.stringify(zkProofs[selectedProofType], null, 2)}
+                  {JSON.stringify(getCurrentProof(selectedProofType), null, 2)}
                 </code>
               </pre>
             ) : (

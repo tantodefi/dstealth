@@ -453,6 +453,55 @@ export class AgentDatabase {
     }
   }
 
+  // Get all stealth data for reverse lookup (used by Farcaster integration)
+  async getAllStealthData(): Promise<UserStealthData[]> {
+    try {
+      if (!redis) {
+        console.log("⚠️ Redis not available - cannot get all stealth data");
+        return [];
+      }
+
+      const pattern = this.key("stealth:*");
+      const keys = await redis.keys(pattern);
+
+      if (!keys || keys.length === 0) {
+        return [];
+      }
+
+      const allData: UserStealthData[] = [];
+
+      // Get all stealth data records
+      for (const key of keys) {
+        try {
+          const data = await redis.get(key);
+          if (data) {
+            let userData: UserStealthData;
+            
+            // Handle both string and object responses from Upstash
+            if (typeof data === "string") {
+              userData = JSON.parse(data);
+            } else if (typeof data === "object") {
+              userData = data as UserStealthData;
+            } else {
+              continue;
+            }
+
+            allData.push(userData);
+          }
+        } catch (parseError) {
+          console.error(`❌ Error parsing stealth data from key ${key}:`, parseError);
+          continue;
+        }
+      }
+
+      console.log(`✅ Retrieved ${allData.length} stealth data records`);
+      return allData;
+    } catch (error) {
+      console.error("❌ Failed to get all stealth data:", error);
+      return [];
+    }
+  }
+
   // Get database stats
   async getStats(): Promise<any> {
     try {

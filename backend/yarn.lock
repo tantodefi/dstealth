@@ -2644,9 +2644,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@reclaimprotocol/attestor-core@npm:4.0.1":
-  version: 4.0.1
-  resolution: "@reclaimprotocol/attestor-core@npm:4.0.1"
+"@reclaimprotocol/attestor-core@npm:^4.0.2":
+  version: 4.0.3
+  resolution: "@reclaimprotocol/attestor-core@npm:4.0.3"
   dependencies:
     "@bufbuild/protobuf": "npm:^2.2.2"
     "@commitlint/cli": "npm:^17.8.1"
@@ -2674,7 +2674,7 @@ __metadata:
   dependenciesMeta:
     koffi:
       optional: true
-  checksum: 10/66c09a771571b0eaef2687510fa12ed50714abacf205a64386520a9d383f4c5671532829c03d80f30f1e9d1e5a0e4b3aaf25ee80cfab15a23c22b1738806b6e6
+  checksum: 10/839de24a54e040f65022949552f9e54bb7e644e6204e411e582b46b09c86025ffd8f5e6d197ce1a61e1116820652f75eaf9ea25de7f6f9320cd143c11cc5f2f1
   languageName: node
   linkType: hard
 
@@ -2703,16 +2703,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@reclaimprotocol/zk-fetch@npm:^0.3.3":
-  version: 0.3.3
-  resolution: "@reclaimprotocol/zk-fetch@npm:0.3.3"
+"@reclaimprotocol/zk-fetch@npm:0.4.0":
+  version: 0.4.0
+  resolution: "@reclaimprotocol/zk-fetch@npm:0.4.0"
   dependencies:
-    "@reclaimprotocol/attestor-core": "npm:4.0.1"
+    "@reclaimprotocol/attestor-core": "npm:^4.0.2"
     "@swc/core": "npm:^1.6.13"
     ethers: "npm:^5.7.2"
     pino: "npm:^8.20.0"
     uuid: "npm:^9.0.1"
-  checksum: 10/6c94c7eb96ce336bd2a3391d92663c55049b83e28ee56e3b93f8f2e724e103db3125e0aae8dba6a9c1eec1d3aaf333ce0ed8511ce31d280c2ffe89afda1a9b88
+  checksum: 10/719b8dc5db36d5d97f1736cf11df7ebab44f6fafcfc6fc869e9bf93284c72d405c4b5c5d106941eeb6fdff93e2191502a5b4d90b05bee10b06e5a666f034c4e8
   languageName: node
   linkType: hard
 
@@ -9282,7 +9282,7 @@ __metadata:
     "@eslint/js": "npm:^9.19.0"
     "@ianvs/prettier-plugin-sort-imports": "npm:^4.4.1"
     "@reclaimprotocol/js-sdk": "npm:^3.0.4"
-    "@reclaimprotocol/zk-fetch": "npm:^0.3.3"
+    "@reclaimprotocol/zk-fetch": "npm:0.4.0"
     "@types/cors": "npm:^2.8.17"
     "@types/eslint__js": "npm:^8.42.3"
     "@types/express": "npm:^4.17.21"

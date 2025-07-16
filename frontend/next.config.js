@@ -43,6 +43,17 @@ const nextConfig = {
       'lucide-react',
     ],
   },
+
+  // Proxy API calls to backend server
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: 'http://localhost:5001/api/:path*',
+      },
+    ];
+  },
+
   webpack: (config, { isServer, webpack }) => {
     // Add extensionAlias for .js
     config.resolve = config.resolve || {};

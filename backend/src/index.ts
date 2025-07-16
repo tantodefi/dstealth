@@ -24,7 +24,25 @@ import {
 import convosRoutes from "./routes/convos.js";
 import fkeyRoutes from "./routes/fkey.js";
 import webhookRoutes from "./routes/webhooks.js";
+import userStealthDataRoutes from "./routes/user-stealth-data.js";
+import userSearchRoutes from "./routes/user-search.js";
+import frontendUsersRoutes from "./routes/frontend-users.js";
 import { stealthMonitor } from "./services/stealth-monitor.js";
+// Import Redis for database status
+import { Redis } from "@upstash/redis";
+
+// Initialize Redis client with proper error handling
+let redisClient: Redis | null = null;
+try {
+  if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
+    redisClient = new Redis({
+      url: env.UPSTASH_REDIS_REST_URL,
+      token: env.UPSTASH_REDIS_REST_TOKEN,
+    });
+  }
+} catch (error) {
+  console.error("❌ Failed to initialize Redis client:", error);
+}
 
 const { WALLET_KEY, API_SECRET_KEY, ENCRYPTION_KEY, XMTP_ENV, PORT } =
   validateEnvironment([
@@ -66,7 +84,7 @@ const handleStreamFailure: StreamFailureCallback = async (error: Error) => {
   // Log to database for monitoring
   try {
     await agentDb.logAgentInteraction(
-      dStealthAgent?.getClient().inboxId || "unknown",
+      dStealthAgent?.getClient()?.inboxId || "unknown",
       "system",
       "stream_failure",
       {
@@ -76,8 +94,8 @@ const handleStreamFailure: StreamFailureCallback = async (error: Error) => {
         stack: error.stack?.substring(0, 500), // Truncate stack trace
       },
     );
-  } catch (logError) {
-    console.error("❌ Failed to log stream failure:", logError);
+  } catch (dbError) {
+    console.error("❌ Failed to log stream failure to database:", dbError);
   }
 
   // Alert if too many failures
@@ -139,16 +157,20 @@ const initializeDStealthAgent = async () => {
     // Test agent functionality (non-critical - if this fails, agent is still available)
     try {
       const agentInfo = newAgent.getClient();
-      console.log(
-        "✅ Production dStealth Agent initialized with XMTP SDK v3.1.0+:",
-      );
-      console.log(`   📬 Agent Inbox ID: ${agentInfo.inboxId}`);
-      console.log(`   📊 Agent Status: active (enhanced stream reliability)`);
-      console.log(`   🔧 Installation Management: enabled (max 5)`);
-      console.log(`   🔄 Stream Failure Recovery: enabled`);
-      console.log(
-        `   💼 Core Features: FluidKey referral, fkey.id, payment links, ZK receipts`,
-      );
+      if (agentInfo) {
+        console.log(
+          "✅ Production dStealth Agent initialized with XMTP SDK v3.1.0+:",
+        );
+        console.log(`   📬 Agent Inbox ID: ${agentInfo.inboxId}`);
+        console.log(`   📊 Agent Status: active (enhanced stream reliability)`);
+        console.log(`   🔧 Installation Management: enabled (max 5)`);
+        console.log(`   🔄 Stream Failure Recovery: enabled`);
+        console.log(
+          `   💼 Core Features: FluidKey referral, fkey.id, payment links, ZK receipts`,
+        );
+      } else {
+        console.log("⚠️ Agent client not available");
+      }
       console.log("✅ Agent is fully operational and ready for frontend connections!");
     } catch (testError) {
       console.warn("⚠️ Agent created but status test failed:", testError);
@@ -388,7 +410,7 @@ app.get("/health", (req, res) => {
       ? {
           running: agentStatus.isRunning,
           streamRestarts: agentStatus.streamRestartCount,
-          processedMessages: agentStatus.processedMessageCount,
+          processedMessages: agentStatus.processedMessages,
           installations: agentStatus.installationCount,
           streamFailures: streamFailureCount,
           lastFailure: lastStreamFailure?.toISOString(),
@@ -431,46 +453,44 @@ app.get("/api/agent/info", async (req, res) => {
       });
     }
 
-    const agentInfo = dStealthAgent.getClient();
-    const agentStatus = dStealthAgent.getStatus();
-    const signer = createSigner(WALLET_KEY);
-    const identifier = await Promise.resolve(signer.getIdentifier());
-    const agentAddress = identifier.identifier;
+    const agentInfo = dStealthAgent?.getClient()
+    ? {
+        address: dStealthAgent.getAgentAddress(),
+        inboxId: dStealthAgent.getClient()?.inboxId,
+        isRunning: dStealthAgent.isConnected(),
+        environment: process.env.XMTP_ENV || 'production',
+      }
+    : null;
 
-    res.json({
-      success: true,
-      agent: {
-        inboxId: agentInfo.inboxId,
-        address: agentAddress,
-        status: "active",
-        features: [
-          "Stealth Address Generation",
-          "ZK Receipt Creation", 
-          "Anonymous Payment Links",
-          "Privacy Score Analysis",
-          "fkey.id Integration",
-          "Multi-chain Stealth Support",
-          "FluidKey Rewards System",
-          "🔧 NEW: Enhanced Stream Reliability",
-          "🔧 NEW: Installation Management",
-          "🔧 NEW: Always-Live Functionality",
-        ],
-        fallbackMode: false,
-        sdkVersion: "3.0.0+",
-        // 🔧 NEW v3.0.0+: Detailed status information
-        streamStatus: {
-          isRunning: agentStatus.isRunning,
-          restartCount: agentStatus.streamRestartCount,
-          processedMessages: agentStatus.processedMessageCount,
-          failures: streamFailureCount,
-          lastFailure: lastStreamFailure?.toISOString(),
-        },
-        installations: {
-          count: agentStatus.installationCount,
-          limit: 5,
-        },
-      },
-    });
+  if (agentInfo) {
+    console.log(`✅ dStealth Agent Status:`);
+    console.log(`   🔧 Agent Address: ${agentInfo.address}`);
+    console.log(`   📬 Agent Inbox ID: ${agentInfo.inboxId}`);
+    console.log(`   🌍 Environment: ${agentInfo.environment}`);
+    console.log(`   🔄 Status: ${agentInfo.isRunning ? "Connected" : "Disconnected"}`);
+  } else {
+    console.log(`❌ dStealth Agent not available`);
+  }
+
+  res.json({
+    success: true,
+    timestamp: new Date().toISOString(),
+    agent: agentInfo ? {
+      address: agentInfo.address,
+      inboxId: agentInfo.inboxId,
+      isRunning: agentInfo.isRunning,
+      environment: agentInfo.environment,
+    } : null,
+    database: {
+      redis: !!redisClient,
+      healthCheck: "available",
+    },
+    endpoints: {
+      stealth: "/api/stealth",
+      convos: "/api/convos",
+      webhooks: "/api/webhooks",
+    },
+  });
   } catch (error) {
     console.error("Error getting agent info:", error);
     res.status(200).json({
@@ -577,6 +597,13 @@ app.get("/api/dstealth/info", async (req, res) => {
     }
 
     const agentInfo = dStealthAgent.getClient();
+    if (!agentInfo) {
+      return res.status(503).json({
+        success: false,
+        error: "dStealth agent client not available",
+      });
+    }
+
     const signer = createSigner(WALLET_KEY);
     const identifier = await Promise.resolve(signer.getIdentifier());
     const agentAddress = identifier.identifier;
@@ -761,6 +788,9 @@ app.get(
 app.use("/api/fkey", fkeyRoutes);
 app.use("/api/convos", convosRoutes);
 app.use("/api/webhooks", webhookRoutes);
+app.use("/api/user/stealth-data", userStealthDataRoutes);
+app.use("/api/user/search", userSearchRoutes);
+app.use("/api/frontend-users", frontendUsersRoutes);
 
 // Stealth notification endpoints
 app.post("/api/stealth/register", async (req, res) => {
@@ -1065,14 +1095,18 @@ app.post("/api/admin/sync-conversations", async (req, res) => {
     if (!dStealthAgent) {
       return res.status(503).json({
         success: false,
-        error: "Agent not available",
+        error: "dStealth agent not available",
       });
     }
 
-    console.log("🔄 Admin-triggered conversation sync starting...");
-    
-    // Force conversation sync through the client
     const client = dStealthAgent.getClient();
+    if (!client) {
+      return res.status(503).json({
+        success: false,
+        error: "dStealth agent client not available",
+      });
+    }
+
     await client.conversations.sync();
     
     console.log("✅ Admin-triggered conversation sync completed");
@@ -1140,6 +1174,8 @@ void (async () => {
       );
       // Server continues to run without stealth monitoring
     }
+
+    console.log("✅ Unified database approach - no sync service needed");
   } catch (error) {
     console.error("Failed to start server:", error);
     process.exit(1);

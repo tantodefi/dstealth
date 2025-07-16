@@ -299,12 +299,41 @@ export default function ConvosChat({ xmtpId, username, url, profile, defaultMess
                     ? 'bg-blue-600 text-white ml-auto'
                     : 'bg-gray-700 text-gray-100'
                 }`}>
-                  {typeof message.content === 'string' 
-                    ? message.content 
-                    : typeof message.content === 'object' 
-                      ? JSON.stringify(message.content) 
-                      : String(message.content)
-                  }
+                  {(() => {
+                    // Handle empty or undefined content
+                    if (!message.content || message.content === '') {
+                      return <span className="text-gray-400 italic">Action sent</span>;
+                    }
+                    
+                    // Handle string content
+                    if (typeof message.content === 'string') {
+                      return message.content;
+                    }
+                    
+                    // Handle object content (like action buttons)
+                    if (typeof message.content === 'object') {
+                      // Check if it's an action content type
+                      if (message.content.actions && Array.isArray(message.content.actions)) {
+                        return (
+                          <div className="space-y-2">
+                            <div className="text-sm">{message.content.description || 'Interactive message'}</div>
+                            <div className="space-y-1">
+                              {message.content.actions.map((action: any, idx: number) => (
+                                <div key={idx} className="bg-blue-500 text-white px-2 py-1 rounded text-xs">
+                                  {action.label}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      }
+                      // For other objects, stringify
+                      return JSON.stringify(message.content);
+                    }
+                    
+                    // Fallback for other types
+                    return String(message.content);
+                  })()}
                 </div>
               </div>
             ))}

@@ -14,6 +14,28 @@ try {
   console.warn('⚠️ Failed to initialize Redis for ZK receipts API:', error);
 }
 
+export async function POST(request: NextRequest) {
+  try {
+    const { key, data } = await request.json();
+    
+    if (!key || !data) {
+      return NextResponse.json({ error: 'Key and data are required' }, { status: 400 });
+    }
+
+    if (!redis) {
+      return NextResponse.json({ error: 'Redis not available' }, { status: 500 });
+    }
+
+    // Store ZK receipt in Redis with 7-day expiration (local-first system)
+    await redis.set(key, JSON.stringify(data), { ex: 86400 * 7 });
+
+    return NextResponse.json({ success: true, key });
+  } catch (error) {
+    console.error('❌ Error saving ZK receipt:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -59,12 +81,8 @@ export async function GET(request: NextRequest) {
       zkReceipts,
       total: zkReceipts.length
     });
-
   } catch (error) {
-    console.error('❌ Error retrieving ZK receipts:', error);
-    return NextResponse.json(
-      { error: 'Failed to retrieve ZK receipts', zkReceipts: [] },
-      { status: 500 }
-    );
+    console.error('❌ Error fetching ZK receipts:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 } 

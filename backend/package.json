@@ -31,7 +31,7 @@
     "@coinbase/coinbase-sdk": "^0.25.0",
     "@coinbase/onchainkit": "^0.38.13",
     "@reclaimprotocol/js-sdk": "^3.0.4",
-    "@reclaimprotocol/zk-fetch": "^0.3.3",
+    "@reclaimprotocol/zk-fetch": "0.4.0",
     "@upstash/redis": "^1.35.0",
     "@xmtp/content-type-primitives": "^2.0.2",
     "@xmtp/content-type-reaction": "^2.0.2",

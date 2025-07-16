@@ -12,15 +12,32 @@ export async function GET(
   console.log('🚀 Fkey lookup route called at:', new Date().toISOString());
   
   const { username } = await context.params;
+  const { searchParams } = new URL(request.url);
+  const userAddress = searchParams.get('userAddress');
+  const source = searchParams.get('source');
   
   try {
     console.log(`👤 Proxying fkey lookup request for username: ${username}`);
+    console.log(`🎯 User address: ${userAddress || 'not provided'}, Source: ${source || 'not provided'}`);
+    
     const backendUrl = env.BACKEND_URL || env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
     const apiSecret = env.API_SECRET_KEY || 'qXs/ud2727aw3+zBJVob1Vn2pTW381aCsJgLpCgnSg0=';
     
     console.log(`🌐 Backend URL: ${backendUrl}`);
     console.log(`🔑 API Secret available: ${!!apiSecret}`);
-    console.log(`⏱️  Making request to: ${backendUrl}/api/fkey/lookup/${username}`);
+    
+    // Build backend URL with query parameters for ZK receipt generation
+    const backendUrl_withParams = new URL(`${backendUrl}/api/fkey/lookup/${username}`);
+    if (userAddress) {
+      backendUrl_withParams.searchParams.append('userAddress', userAddress);
+    }
+    if (source) {
+      backendUrl_withParams.searchParams.append('source', source);
+    } else {
+      backendUrl_withParams.searchParams.append('source', 'frontend-api');
+    }
+    
+    console.log(`⏱️  Making request to: ${backendUrl_withParams.toString()}`);
     
     // Add timeout to prevent hanging
     const controller = new AbortController();
@@ -29,7 +46,7 @@ export async function GET(
       controller.abort();
     }, 60000); // 60 second timeout
     
-    const response = await fetch(`${backendUrl}/api/fkey/lookup/${username}`, {
+    const response = await fetch(backendUrl_withParams.toString(), {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -51,26 +68,12 @@ export async function GET(
 
     const data = await response.json();
     console.log('✅ Backend response received successfully');
+    console.log('🧾 ZK receipt generation handled by backend');
     return Response.json(data);
   } catch (error) {
-    const duration = Date.now() - startTime;
-    console.error(`💥 Error in fkey lookup after ${duration}ms:`, error);
-    
-    if (error instanceof Error) {
-      console.error(`💥 Error name: ${error.name}`);
-      console.error(`💥 Error message: ${error.message}`);
-    }
-    
-    if (error instanceof Error && error.name === 'AbortError') {
-      console.log('⏰ Request was aborted due to timeout');
-      return Response.json(
-        { error: 'Request timeout - please try again', success: false },
-        { status: 408 }
-      );
-    }
-    
+    console.error('❌ Fkey lookup proxy error:', error);
     return Response.json(
-      { error: 'Failed to lookup profile', success: false },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }

@@ -12,6 +12,7 @@
 import { agentDb } from '../lib/agent-database.js';
 import { daimoPayClient } from '../lib/daimo-pay.js';
 import { createSigner, getEncryptionKeyFromHex } from '../helper.js';
+import { resolvePrimaryFromXMTP, createStealthDataWithPrimaryAddress } from '../lib/primary-address-resolver.js';
 import { Group, Client, type XmtpEnv } from '@xmtp/node-sdk';
 import { 
   ReactionCodec, 
@@ -49,6 +50,90 @@ try {
   }
 } catch (error) {
   console.warn('⚠️ Failed to initialize Redis for ZK receipts:', error);
+}
+
+// Farcaster integration imports
+import { ethers } from 'ethers';
+
+// Farcaster API configuration
+const COINBASE_API_ENDPOINT = 'https://api.wallet.coinbase.com/rpc/v2/giftlink/fetchIdentityFromAddress';
+const NEYNAR_API_BASE = 'https://api.neynar.com/v2';
+
+// Farcaster integration types
+interface FarcasterUser {
+  fid: number;
+  username: string;
+  displayName: string;
+  avatarUrl: string;
+  verified: boolean;
+  custodyAddress: string;
+  verifiedAddresses: string[];
+  bio?: string;
+  followerCount?: number;
+  followingCount?: number;
+}
+
+interface CoinbaseIdentityResponse {
+  fid: number;
+  username: string;
+  displayName: string;
+  avatarUrl: string;
+}
+
+interface NeynarUserResponse {
+  users: {
+    fid: number;
+    username: string;
+    display_name: string;
+    pfp_url: string;
+    verified: boolean;
+    custody_address: string;
+    verified_addresses: {
+      eth_addresses: string[];
+    };
+    profile: {
+      bio: {
+        text: string;
+      };
+    };
+    follower_count: number;
+    following_count: number;
+  }[];
+}
+
+interface NeynarFollowersResponse {
+  users: {
+    fid: number;
+    username: string;
+    display_name: string;
+    pfp_url: string;
+    verified: boolean;
+    custody_address: string;
+    verified_addresses: {
+      eth_addresses: string[];
+    };
+    profile: {
+      bio: {
+        text: string;
+      };
+    };
+    follower_count: number;
+    following_count: number;
+  }[];
+  next: {
+    cursor: string;
+  } | null;
+}
+
+interface UserSearchResult {
+  fid: number;
+  username: string;
+  displayName: string;
+  avatarUrl: string;
+  verified: boolean;
+  walletAddress: string;
+  fkeyId?: string;
+  hasFkey: boolean;
 }
 
 // Action button content types (from working example)
@@ -176,10 +261,17 @@ export class DStealthAgentProduction {
   // Track users in fkey.id confirmation flow
   private userConfirmationPending: Map<string, {fkeyId: string, timestamp: number}> = new Map();
 
+  // Farcaster context cache
+  private farcasterUserCache: Map<string, FarcasterUser> = new Map();
+
   // Configuration
   private readonly FLUIDKEY_REFERRAL_URL = "https://app.fluidkey.com/?ref=62YNSG";
   private readonly DSTEALTH_APP_URL = "https://dstealth.xyz";
   private readonly OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  private readonly COINBASE_API_PRIVATE_KEY = process.env.COINBASE_API_PRIVATE_KEY;
+  private readonly NEYNAR_API_KEY = process.env.NEYNAR_API_KEY;
+  private readonly NEYNAR_SPONSOR_WALLET_ID = process.env.NEYNAR_SPONSOR_WALLET_ID;
+  private readonly NEYNAR_SPONSOR_ADDRESS = process.env.NEYNAR_SPONSOR_ADDRESS;
 
   /**
    * Create and start the dStealth Agent
@@ -310,6 +402,19 @@ export class DStealthAgentProduction {
       const senderAddress = inboxState[0]?.identifiers[0]?.identifier;
       const senderInboxId = message.senderInboxId;
 
+      // 🔧 NEW: Get Farcaster context for sender (async, non-blocking)
+      let farcasterContext: FarcasterUser | null = null;
+      if (senderAddress) {
+        try {
+          farcasterContext = await this.getFarcasterContext(senderAddress);
+          if (farcasterContext) {
+            console.log(`🎭 Farcaster context: @${farcasterContext.username} (${farcasterContext.displayName})`);
+          }
+        } catch (error) {
+          console.warn('⚠️ Failed to get Farcaster context:', error);
+        }
+      }
+
       // CRITICAL: Handle Intent messages from action buttons (from working example)
       if (message.contentType?.typeId === "intent") {
         console.log("🎯 Intent message detected - action button was clicked!");
@@ -359,7 +464,8 @@ export class DStealthAgentProduction {
           message.content,
           senderInboxId,
           isGroup,
-          conversation.id
+          conversation.id,
+          message
         );
 
         if (!shouldProcess) {
@@ -367,7 +473,7 @@ export class DStealthAgentProduction {
         }
 
         // Process the message with our dStealth logic
-        const response = await this.processTextMessage(message.content, senderInboxId, isGroup, conversation);
+        const response = await this.processTextMessage(message.content, senderInboxId, isGroup, conversation, farcasterContext);
         if (response) {
           await conversation.send(response);
         }
@@ -382,9 +488,14 @@ export class DStealthAgentProduction {
   /**
    * Process text messages with dStealth agent logic
    */
-  private async processTextMessage(messageContent: string, senderInboxId: string, isGroup: boolean, conversation?: any): Promise<string | undefined> {
+  private async processTextMessage(messageContent: string, senderInboxId: string, isGroup: boolean, conversation?: any, farcasterContext?: FarcasterUser | null): Promise<string | undefined> {
     try {
       console.log(`📝 Processing text message: "${messageContent}" from ${senderInboxId}`);
+      
+      // Handle ping command first (works for all users in DMs)
+      if (messageContent.trim().toLowerCase() === "ping" && !isGroup) {
+        return "ok";
+      }
       
       // Handle fkey.id setting commands
       if (this.isFkeySetCommand(messageContent)) {
@@ -398,13 +509,13 @@ export class DStealthAgentProduction {
 
       // Handle commands (starts with /)
       if (messageContent.startsWith('/')) {
-        return await this.handleCommand(messageContent, senderInboxId, isGroup);
+        return await this.handleCommand(messageContent, senderInboxId, isGroup, conversation);
       }
 
       // Handle payment amount requests
       const paymentAmount = this.extractPaymentAmount(messageContent);
       if (paymentAmount) {
-        return await this.handlePaymentRequest(paymentAmount, senderInboxId, "conversation", isGroup);
+        return await this.handlePaymentRequest(paymentAmount, senderInboxId, conversation?.id, isGroup, conversation);
       }
 
       // Handle fkey.id pattern (e.g., "tantodefi.fkey.id")
@@ -413,7 +524,7 @@ export class DStealthAgentProduction {
       }
 
       // Handle general messages with OpenAI or basic responses
-      return await this.processGeneralMessage(messageContent, senderInboxId, isGroup, conversation);
+      return await this.processGeneralMessage(messageContent, senderInboxId, isGroup, conversation, farcasterContext);
 
     } catch (error) {
       console.error("❌ Error processing text message:", error);
@@ -429,16 +540,532 @@ export class DStealthAgentProduction {
   }
 
   /**
-   * Get agent status
+   * Get the agent's wallet address
    */
+  getAgentAddress(): string | null {
+    return this.agentAddress;
+  }
+
+  /**
+   * Get agent contact information
+   */
+  getContactInfo(): { address: string | null; inboxId: string | null } {
+    return {
+      address: this.agentAddress,
+      inboxId: this.client?.inboxId || null
+    };
+  }
+
+  /**
+   * Check if the agent is connected
+   */
+  isConnected(): boolean {
+    return this.client !== null;
+  }
+
   getStatus() {
     return {
-      isRunning: !!this.client,
-              processedMessageCount: this.processedMessageCount,
-      agentAddress: this.agentAddress,
+      isRunning: this.client !== null,
+      processedMessages: this.processedMessageCount,
       streamRestartCount: this.streamRestartCount,
       installationCount: this.installationCount,
+      groupIntroductions: this.groupIntroductions.size,
+      userWelcomesSent: this.userWelcomesSent.size,
+      processedIntents: this.processedIntentIds.size,
+      farcasterCacheSize: this.farcasterUserCache.size
     };
+  }
+
+  /**
+   * 🔧 NEW: Coinbase API - Generate auth signature for API request
+   */
+  private async generateCoinbaseAuthSignature(
+    walletAddress: string,
+    timestamp: number,
+    privateKey: string
+  ): Promise<string> {
+    try {
+      const wallet = new ethers.Wallet(privateKey);
+      const message = `${walletAddress}${timestamp}`;
+      return await wallet.signMessage(message);
+    } catch (error) {
+      console.error('Error generating Coinbase auth signature:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🔧 NEW: Coinbase API - Fetch FID from wallet address
+   */
+  private async fetchFIDFromWalletAddress(walletAddress: string): Promise<CoinbaseIdentityResponse | null> {
+    try {
+      if (!this.COINBASE_API_PRIVATE_KEY) {
+        console.warn('⚠️ COINBASE_API_PRIVATE_KEY not configured');
+        return null;
+      }
+
+      console.log(`🔍 Fetching FID for wallet: ${walletAddress}`);
+
+      const timestamp = Math.floor(Date.now() / 1000);
+      const authSignature = await this.generateCoinbaseAuthSignature(
+        walletAddress,
+        timestamp,
+        this.COINBASE_API_PRIVATE_KEY
+      );
+
+      const requestPayload = {
+        wallet_address: walletAddress,
+        auth_signature: authSignature,
+        timestamp_secs: timestamp
+      };
+
+      const response = await fetch(COINBASE_API_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestPayload)
+      });
+
+      if (!response.ok) {
+        console.log(`❌ Coinbase API error: ${response.status}`);
+        return null;
+      }
+
+      const data = await response.json() as CoinbaseIdentityResponse;
+      console.log(`✅ Found FID ${data.fid} for wallet ${walletAddress}`);
+      return data;
+
+    } catch (error) {
+      console.error('Error fetching FID from Coinbase API:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 🔧 NEW: Neynar API - Fetch user data by FID
+   */
+  private async fetchNeynarUserData(fid: number): Promise<FarcasterUser | null> {
+    try {
+      if (!this.NEYNAR_API_KEY) {
+        console.warn('⚠️ NEYNAR_API_KEY not configured');
+        return null;
+      }
+
+      console.log(`🔍 Fetching Neynar data for FID: ${fid}`);
+
+      const response = await fetch(`${NEYNAR_API_BASE}/farcaster/user/bulk?fids=${fid}`, {
+        headers: {
+          'api_key': this.NEYNAR_API_KEY
+        }
+      });
+
+      if (!response.ok) {
+        console.log(`❌ Neynar API error: ${response.status}`);
+        return null;
+      }
+
+      const data = await response.json() as NeynarUserResponse;
+      
+      if (!data.users || data.users.length === 0) {
+        console.log(`❌ No user data found for FID: ${fid}`);
+        return null;
+      }
+
+      const user = data.users[0];
+      const farcasterUser: FarcasterUser = {
+        fid: user.fid,
+        username: user.username,
+        displayName: user.display_name,
+        avatarUrl: user.pfp_url,
+        verified: user.verified,
+        custodyAddress: user.custody_address,
+        verifiedAddresses: user.verified_addresses?.eth_addresses || [],
+        bio: user.profile?.bio?.text,
+        followerCount: user.follower_count,
+        followingCount: user.following_count
+      };
+
+      console.log(`✅ Found Farcaster user: @${farcasterUser.username} (${farcasterUser.displayName})`);
+      return farcasterUser;
+
+    } catch (error) {
+      console.error('Error fetching Neynar user data:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 🔧 NEW: Get comprehensive Farcaster context for user
+   */
+  private async getFarcasterContext(walletAddress: string): Promise<FarcasterUser | null> {
+    try {
+      // Check cache first
+      if (this.farcasterUserCache.has(walletAddress)) {
+        console.log(`📋 Using cached Farcaster data for ${walletAddress}`);
+        return this.farcasterUserCache.get(walletAddress) || null;
+      }
+
+      // Step 1: Get FID from Coinbase API
+      const coinbaseData = await this.fetchFIDFromWalletAddress(walletAddress);
+      if (!coinbaseData) {
+        console.log(`❌ Could not get FID for wallet: ${walletAddress}`);
+        return null;
+      }
+
+      // Step 2: Get comprehensive user data from Neynar
+      const farcasterUser = await this.fetchNeynarUserData(coinbaseData.fid);
+      if (!farcasterUser) {
+        console.log(`❌ Could not get Neynar data for FID: ${coinbaseData.fid}`);
+        return null;
+      }
+
+      // Cache the result (expire after 1 hour)
+      this.farcasterUserCache.set(walletAddress, farcasterUser);
+      setTimeout(() => {
+        this.farcasterUserCache.delete(walletAddress);
+      }, 60 * 60 * 1000); // 1 hour
+
+      console.log(`✅ Complete Farcaster context for ${walletAddress}: @${farcasterUser.username}`);
+      return farcasterUser;
+
+    } catch (error) {
+      console.error('Error getting Farcaster context:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 🔧 NEW: Get CBW wallet addresses directly from FID (your requested flow)
+   */
+  private async getCBWWalletsFromFID(fid: number): Promise<{
+    custodyAddress: string;
+    verifiedAddresses: string[];
+    allWallets: string[];
+    error?: string;
+  }> {
+    try {
+      console.log(`🎯 Getting CBW wallets for FID: ${fid}`);
+      
+      // Use Neynar API to get wallet addresses from FID
+      const farcasterUser = await this.fetchNeynarUserData(fid);
+      
+      if (!farcasterUser) {
+        return {
+          custodyAddress: '',
+          verifiedAddresses: [],
+          allWallets: [],
+          error: 'Could not fetch user data from Neynar'
+        };
+      }
+
+      // Extract all wallet addresses
+      const allWallets = [
+        farcasterUser.custodyAddress,
+        ...farcasterUser.verifiedAddresses
+      ].filter(Boolean);
+
+      // Remove duplicates
+      const uniqueWallets = [...new Set(allWallets)];
+
+      console.log(`✅ Found ${uniqueWallets.length} wallet addresses for FID ${fid}:`);
+      console.log(`   Custody: ${farcasterUser.custodyAddress}`);
+      console.log(`   Verified: ${farcasterUser.verifiedAddresses.length}`);
+
+      return {
+        custodyAddress: farcasterUser.custodyAddress,
+        verifiedAddresses: farcasterUser.verifiedAddresses,
+        allWallets: uniqueWallets,
+      };
+
+    } catch (error) {
+      console.error('Error getting CBW wallets from FID:', error);
+      return {
+        custodyAddress: '',
+        verifiedAddresses: [],
+        allWallets: [],
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * 🔧 NEW: Neynar API - Send fungible rewards to user
+   */
+  private async sendFarcasterRewards(
+    fid: number,
+    amount: number = 0.001,
+    tokenAddress: string = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913' // USDC on Base
+  ): Promise<{success: boolean, txHash?: string, error?: string}> {
+    try {
+      if (!this.NEYNAR_API_KEY) {
+        console.warn('⚠️ NEYNAR_API_KEY not configured for rewards');
+        return {success: false, error: 'Neynar API key not configured'};
+      }
+
+      // Check if sponsor wallet ID is configured
+      if (!this.NEYNAR_SPONSOR_WALLET_ID) {
+        console.warn('⚠️ NEYNAR_SPONSOR_WALLET_ID not configured for rewards');
+        return {success: false, error: 'Sponsor wallet ID not configured'};
+      }
+
+      console.log(`💰 Sending ${amount} USDC rewards to FID: ${fid}`);
+      console.log(`🏦 Using sponsor wallet ID: ${this.NEYNAR_SPONSOR_WALLET_ID}`);
+
+      const requestPayload = {
+        fids: [fid],
+        token_address: tokenAddress,
+        amount: amount.toString(),
+        chain_id: 8453, // Base network
+        sponsor_wallet_id: this.NEYNAR_SPONSOR_WALLET_ID, // Your actual sponsor wallet ID from Neynar
+        message: `🎉 dStealth Privacy Rewards! You've earned ${amount} USDC for using stealth addresses! 🥷`
+      };
+
+      const response = await fetch(`${NEYNAR_API_BASE}/farcaster/fungibles/send`, {
+        method: 'POST',
+        headers: {
+          'api_key': this.NEYNAR_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestPayload)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.log(`❌ Neynar send fungibles error: ${response.status}`, errorData);
+        return {success: false, error: `API error: ${response.status}`};
+      }
+
+      const data = await response.json() as {transaction_hash: string};
+      console.log(`✅ Rewards sent successfully! TX: ${data.transaction_hash}`);
+      
+      return {success: true, txHash: data.transaction_hash};
+
+    } catch (error) {
+      console.error('Error sending Farcaster rewards:', error);
+      return {success: false, error: error instanceof Error ? error.message : 'Unknown error'};
+    }
+  }
+
+  /**
+   * 🔧 NEW: Neynar API - Fetch user followers
+   */
+  private async fetchUserFollowers(fid: number, limit: number = 50): Promise<FarcasterUser[]> {
+    try {
+      if (!this.NEYNAR_API_KEY) {
+        console.warn('⚠️ NEYNAR_API_KEY not configured for followers');
+        return [];
+      }
+
+      console.log(`👥 Fetching followers for FID: ${fid}`);
+
+      const response = await fetch(`${NEYNAR_API_BASE}/farcaster/followers?fid=${fid}&limit=${limit}`, {
+        headers: {
+          'api_key': this.NEYNAR_API_KEY
+        }
+      });
+
+      if (!response.ok) {
+        console.log(`❌ Neynar followers API error: ${response.status}`);
+        return [];
+      }
+
+      const data = await response.json() as NeynarFollowersResponse;
+      
+      const followers: FarcasterUser[] = data.users.map(user => ({
+        fid: user.fid,
+        username: user.username,
+        displayName: user.display_name,
+        avatarUrl: user.pfp_url,
+        verified: user.verified,
+        custodyAddress: user.custody_address,
+        verifiedAddresses: user.verified_addresses?.eth_addresses || [],
+        bio: user.profile?.bio?.text,
+        followerCount: user.follower_count,
+        followingCount: user.following_count
+      }));
+
+      console.log(`✅ Found ${followers.length} followers for FID ${fid}`);
+      return followers;
+
+    } catch (error) {
+      console.error('Error fetching user followers:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 🔧 ENHANCED: Reverse lookup - Find fkey.id by wallet address - NO ZK receipts for search
+   */
+  private async findFkeyByWallet(walletAddress: string): Promise<string | null> {
+    try {
+      if (!walletAddress) return null;
+      
+      console.log(`🔍 Searching for fkey.id with wallet: ${walletAddress}`);
+      
+      // Get all users from the database and check their stealth addresses
+      const allUsers = await agentDb.getAllStealthData();
+      
+      for (const userData of allUsers) {
+        // Check if the stealth address matches
+        if (userData.stealthAddress && userData.stealthAddress.toLowerCase() === walletAddress.toLowerCase()) {
+          console.log(`✅ Found fkey.id: ${userData.fkeyId} for wallet: ${walletAddress}`);
+          return userData.fkeyId;
+        }
+        
+        // Also check if there's a way to get the user's original wallet address
+        if (this.client) {
+          try {
+            const inboxState = await this.client.preferences.inboxStateFromInboxIds([userData.userId]);
+            const userWalletAddress = inboxState[0]?.identifiers[0]?.identifier;
+            
+            if (userWalletAddress && userWalletAddress.toLowerCase() === walletAddress.toLowerCase()) {
+              console.log(`✅ Found fkey.id: ${userData.fkeyId} for original wallet: ${walletAddress}`);
+              return userData.fkeyId;
+            }
+          } catch (inboxError) {
+            // Skip if we can't get inbox state
+            continue;
+          }
+        }
+      }
+      
+      console.log(`❌ No fkey.id found for wallet: ${walletAddress}`);
+      return null;
+    } catch (error) {
+      console.error('Error finding fkey by wallet:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 🔧 ENHANCED: Search for Farcaster users and check dStealth usage - NO ZK receipts for search
+   */
+  private async searchFarcasterUsers(query: string): Promise<UserSearchResult[]> {
+    try {
+      if (!this.NEYNAR_API_KEY) {
+        console.warn('⚠️ NEYNAR_API_KEY not configured for search');
+        return [];
+      }
+
+      console.log(`🔍 Searching Farcaster users: ${query}`);
+
+      const response = await fetch(`${NEYNAR_API_BASE}/farcaster/user/search?q=${encodeURIComponent(query)}&limit=20`, {
+        headers: {
+          'api_key': this.NEYNAR_API_KEY
+        }
+      });
+
+      if (!response.ok) {
+        console.log(`❌ Neynar search API error: ${response.status}`);
+        return [];
+      }
+
+      const data = await response.json() as NeynarUserResponse;
+      
+      const results: UserSearchResult[] = [];
+      
+      for (const user of data.users) {
+        // Check all addresses for existing fkey.id in database
+        let foundFkey: string | null = null;
+        
+        // Check custody address
+        const custodyFkey = await this.findFkeyByWallet(user.custody_address);
+        if (custodyFkey) {
+          foundFkey = custodyFkey;
+        }
+        
+        // Check verified addresses
+        if (!foundFkey && user.verified_addresses?.eth_addresses) {
+          for (const address of user.verified_addresses.eth_addresses) {
+            const fkey = await this.findFkeyByWallet(address);
+            if (fkey) {
+              foundFkey = fkey;
+              break;
+            }
+          }
+        }
+        
+        const primaryAddress = user.verified_addresses?.eth_addresses?.[0] || user.custody_address;
+        
+        results.push({
+          fid: user.fid,
+          username: user.username,
+          displayName: user.display_name,
+          avatarUrl: user.pfp_url,
+          verified: user.verified,
+          walletAddress: primaryAddress,
+          fkeyId: foundFkey || undefined,
+          hasFkey: !!foundFkey
+        });
+      }
+      
+      console.log(`✅ Found ${results.length} users, ${results.filter(r => r.hasFkey).length} with fkey.id`);
+      return results;
+      
+    } catch (error) {
+      console.error('Error searching Farcaster users:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 🔧 ENHANCED: Social Discovery - Analyze followers for dStealth usage - NO ZK receipts for search
+   */
+  private async analyzeFollowersForDStealth(fid: number): Promise<UserSearchResult[]> {
+    try {
+      // Get user's followers
+      const followers = await this.fetchUserFollowers(fid, 100); // Get up to 100 followers
+      
+      const results: UserSearchResult[] = [];
+      
+      console.log(`🔍 Analyzing ${followers.length} followers for dStealth usage...`);
+      
+      for (const follower of followers) {
+        // Check all verified addresses for existing fkey.id in database
+        let foundFkey: string | null = null;
+        
+        // Check custody address
+        const custodyFkey = await this.findFkeyByWallet(follower.custodyAddress);
+        if (custodyFkey) {
+          foundFkey = custodyFkey;
+        }
+        
+        // Check verified addresses if no fkey found yet
+        if (!foundFkey) {
+          for (const address of follower.verifiedAddresses) {
+            const fkey = await this.findFkeyByWallet(address);
+            if (fkey) {
+              foundFkey = fkey;
+              break;
+            }
+          }
+        }
+        
+        // Use primary verified address or custody address
+        const primaryAddress = follower.verifiedAddresses[0] || follower.custodyAddress;
+        
+        results.push({
+          fid: follower.fid,
+          username: follower.username,
+          displayName: follower.displayName,
+          avatarUrl: follower.avatarUrl,
+          verified: follower.verified,
+          walletAddress: primaryAddress,
+          fkeyId: foundFkey || undefined,
+          hasFkey: !!foundFkey
+        });
+      }
+      
+      const dStealthUsers = results.filter(r => r.hasFkey);
+      console.log(`✅ Found ${dStealthUsers.length} dStealth users among ${followers.length} followers`);
+      
+      return results;
+      
+    } catch (error) {
+      console.error('Error analyzing followers for dStealth:', error);
+      return [];
+    }
   }
 
   /**
@@ -470,9 +1097,9 @@ export class DStealthAgentProduction {
   }
 
   /**
-   * 🔧 UPDATED: Enhanced message processing logic for group chats
+   * 🔧 ENHANCED: Message processing logic for group chats - only @mentions or replies
    */
-  private async shouldProcessMessage(messageContent: string, senderInboxId: string, isGroup: boolean, conversationId: string): Promise<boolean> {
+  private async shouldProcessMessage(messageContent: string, senderInboxId: string, isGroup: boolean, conversationId: string, message?: any): Promise<boolean> {
     try {
       const trimmed = messageContent.trim().toLowerCase();
       
@@ -492,16 +1119,16 @@ export class DStealthAgentProduction {
       const isActualGroup = conversation instanceof Group;
       
       if (isActualGroup) {
-        // 🔧 FIXED: Group chat logic - VERY restrictive - only @mentions
+        // 🔧 ENHANCED: Group chat logic - only @mentions or replies to agent
         
-        // Always send welcome message if not sent yet
+        // Always send welcome message if not sent yet FOR THIS GROUP
         if (!this.groupIntroductions.has(conversationId)) {
-          console.log("👋 Sending group introduction");
+          console.log("👋 Sending group introduction to group:", conversationId);
           this.groupIntroductions.add(conversationId); // Mark as sent immediately
           return true;
         }
 
-        // 🔧 STRICT: Only respond to explicit @mentions in groups
+        // 🔧 Check for explicit @mentions
         const hasExplicitMention = trimmed.includes('@dstealth') || 
                                    trimmed.includes('@dstealth.eth') ||
                                    trimmed.includes('@dstealth.base.eth');
@@ -511,8 +1138,14 @@ export class DStealthAgentProduction {
           return true;
         }
 
-        // 🔧 REMOVED: Payment trigger logic for groups - only @mentions allowed
-        console.log("🔇 Group message lacks @mention - ignoring");
+        // 🔧 NEW: Check if this message is a reply to an agent message
+        if (message && await this.isReplyToAgent(message, conversation)) {
+          console.log("💬 Group message is a reply to agent - will process");
+          return true;
+        }
+
+        // 🔧 STRICT: Ignore all other messages in groups
+        console.log("🔇 Group message lacks @mention or reply - ignoring");
         return false;
       } else {
         // In DMs: Always process
@@ -523,6 +1156,44 @@ export class DStealthAgentProduction {
       console.error("❌ Error checking if message should be processed:", error);
       // Default to NOT processing in groups if we can't determine
       return !isGroup;
+    }
+  }
+
+  /**
+   * 🔧 NEW: Check if a message is a reply to an agent message
+   */
+  private async isReplyToAgent(message: any, conversation: any): Promise<boolean> {
+    try {
+      if (!this.client) return false;
+
+      // Get recent messages from the conversation to check for replies
+      const recentMessages = await conversation.messages({ limit: 50 });
+      
+      // Find the most recent agent message
+      const agentInboxId = this.client.inboxId.toLowerCase();
+      const recentAgentMessage = recentMessages.find((msg: any) => 
+        msg.senderInboxId.toLowerCase() === agentInboxId
+      );
+
+      if (!recentAgentMessage) {
+        return false; // No recent agent message to reply to
+      }
+
+      // Check if this message is close in time to the agent message (within 5 minutes)
+      const agentMessageTime = recentAgentMessage.sentAt.getTime();
+      const currentMessageTime = message.sentAt?.getTime() || Date.now();
+      const timeDiff = currentMessageTime - agentMessageTime;
+      
+      // If the message is within 5 minutes and after the agent message, consider it a potential reply
+      if (timeDiff > 0 && timeDiff < 5 * 60 * 1000) {
+        console.log(`⏰ Message timing suggests reply (${timeDiff}ms after agent message)`);
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error("❌ Error checking if message is reply to agent:", error);
+      return false;
     }
   }
 
@@ -634,30 +1305,45 @@ Something went wrong. Please try:
   }
 
   /**
-   * 🔧 UPDATED: Process general messages with onboarding flow
+   * 🔧 FIXED: Process general messages with clear onboarding flow separation
    */
-  private async processGeneralMessage(content: string, senderInboxId: string, isGroup: boolean, conversation?: any): Promise<string> {
+  private async processGeneralMessage(content: string, senderInboxId: string, isGroup: boolean, conversation?: any, farcasterContext?: FarcasterUser | null): Promise<string> {
     try {
       // Check if user is onboarded first
       const isOnboarded = await this.isUserOnboarded(senderInboxId);
+      console.log(`🔍 Processing "${content}" - User onboarded: ${isOnboarded}, isGroup: ${isGroup}`);
       
       // For groups, always check onboarding status
       if (isGroup) {
         if (!isOnboarded) {
-          return "🔒 Please DM me to set up your fkey.id first! I can only help users who have completed onboarding.";
+          console.log("🔒 Group user not onboarded - requesting DM setup");
+          return this.getRequiresFkeyMessage(true);
         }
         
-        // Group intro message if not sent yet
-        if (!this.groupIntroductions.has(senderInboxId)) {
-          this.groupIntroductions.add(senderInboxId);
+        // Group intro message is now handled in shouldProcessMessage - this is a fallback
+        // that should rarely be called since the logic is now in shouldProcessMessage
+        const conversationId = conversation?.id;
+        if (conversationId && !this.groupIntroductions.has(conversationId)) {
+          console.log("👋 Sending group intro message");
+          this.groupIntroductions.add(conversationId);
           return this.getGroupIntroMessage();
         }
       }
       
-      // For DMs, if user is not onboarded, send welcome flow
-      if (!isGroup && !isOnboarded) {
+      // 🔧 FIXED: Clear separation between onboarded and non-onboarded flows
+      if (!isOnboarded) {
+        console.log("🔑 Non-onboarded user flow");
+        // NON-ONBOARDED USER FLOW (DMs only)
+        if (isGroup) {
+          return "🔒 Setup Required: DM me your fkey.id first, then try again!\n\nI can only help users who have completed onboarding.";
+        }
+        
         // Check if we haven't sent welcome yet
-        if (!this.userWelcomesSent.has(senderInboxId)) {
+        const welcomeAlreadySent = this.userWelcomesSent.has(senderInboxId);
+        console.log(`🔍 Welcome already sent: ${welcomeAlreadySent}`);
+        
+        if (!welcomeAlreadySent) {
+          console.log("👋 Sending welcome actions to non-onboarded user");
           await this.sendWelcomeWithActions(senderInboxId, conversation);
           return ""; // Actions message sent, no text response needed
         }
@@ -669,6 +1355,7 @@ Something went wrong. Please try:
         }
         
         // Return onboarding reminder
+        console.log("🔄 Returning onboarding reminder");
         return `🔑 Complete Your Setup
 
 Please choose one of the options above:
@@ -678,30 +1365,47 @@ Please choose one of the options above:
 Or type your fkey.id username directly (e.g., tantodefi)`;
       }
       
-      // User is onboarded, proceed with normal flow
+      // 🔧 FIXED: ONBOARDED USER FLOW ONLY - no welcome actions here
+      console.log("✅ Onboarded user flow");
       const userData = await agentDb.getStealthDataByUser(senderInboxId);
       
-      // Check for command patterns
+      // Check for simple command patterns first
       if (content.startsWith('/')) {
-        return await this.handleCommand(content, senderInboxId, isGroup);
+        console.log("🔧 Processing command");
+        return await this.handleCommand(content, senderInboxId, isGroup, conversation);
       }
       
-      // Check for basic keywords
+      // Check for simple username search (when user types a username directly)
+      const trimmedContent = content.trim();
+      if (trimmedContent.length > 0 && !trimmedContent.includes(' ') && 
+          (trimmedContent.includes('.base.eth') || trimmedContent.includes('.eth') || 
+           trimmedContent.startsWith('@') || trimmedContent.match(/^[a-zA-Z0-9_]+$/))) {
+        console.log("🔍 Possible username search detected");
+        const searchResult = await this.handleDirectUserSearch(trimmedContent, senderInboxId);
+        if (searchResult) {
+          return searchResult;
+        }
+      }
+      
+      // Check for basic keywords (onboarded users only)
       const basicResponse = this.handleBasicKeywords(content);
       if (basicResponse) {
+        console.log("📝 Using basic keyword response");
         return basicResponse;
       }
       
       // Try OpenAI integration for intelligent responses
       if (this.OPENAI_API_KEY) {
-        const openAIResponse = await this.getOpenAIResponse(content, userData);
+        console.log("🤖 Trying OpenAI response");
+        const openAIResponse = await this.getOpenAIResponse(content, userData, farcasterContext);
         if (openAIResponse) {
           return openAIResponse;
         }
       }
       
       // Fallback to basic response
-      return this.getBasicResponse(content, userData);
+      console.log("🔄 Using fallback response");
+      return this.getBasicResponse(content, userData, farcasterContext);
     } catch (error) {
       console.error("Error processing general message:", error);
       return `❌ Error Processing Message
@@ -764,9 +1468,18 @@ Examples:
 Need FluidKey? Get it here: ${this.FLUIDKEY_REFERRAL_URL}`;
       }
 
-      // 🔧 ONLY NOW: Call fkey.id lookup API
+      // ✅ FIRST: Resolve primary address for user
+      const primaryAddressResult = await resolvePrimaryFromXMTP(senderInboxId, this.client);
+      
+      if (!primaryAddressResult) {
+        return `❌ Setup Failed
+
+Could not resolve your wallet address. Please try again later.`;
+      }
+
+      // 🔧 ENHANCED: Call fkey.id lookup API with user address and source for ZK receipt
       console.log(`🔍 Setting fkey.id for user: ${username}`);
-      const lookupResult = await this.callFkeyLookupAPI(username);
+      const lookupResult = await this.callFkeyLookupAPI(username, primaryAddressResult.primaryAddress, 'xmtp-agent-fkey-set');
 
       if (lookupResult.error) {
         return `❌ fkey.id Setup Failed
@@ -781,14 +1494,21 @@ Please ensure:
 Try: \`/set yourUsername\``;
       }
 
-      // Store fkey.id association with ZK proof
+      // ✅ FIXED: Store fkey.id association using primary address approach
       const userData = {
-        userId: senderInboxId,
+        userId: primaryAddressResult.primaryAddress, // ✅ Use primary address as database key
         fkeyId: username,
         stealthAddress: lookupResult.address || "",
         zkProof: lookupResult.proof,
         lastUpdated: Date.now(),
         requestedBy: senderInboxId,
+        setupStatus: 'fkey_set' as const,
+        metadata: {
+          source: 'xmtp-agent',
+          primaryAddressSource: primaryAddressResult.source,
+          primaryAddressMetadata: primaryAddressResult.metadata,
+          xmtpInboxId: senderInboxId
+        }
       };
 
       await agentDb.storeUserStealthData(userData);
@@ -815,12 +1535,13 @@ Complete Setup: ${this.DSTEALTH_APP_URL}`;
   }
 
   /**
-   * 🔧 NEW: Process messages with OpenAI for intelligent responses
+   * 🔧 UPDATED: Process messages with OpenAI for intelligent responses with Farcaster context
    */
   private async handleWithOpenAI(
     content: string,
     senderInboxId: string,
     isGroup: boolean,
+    farcasterContext?: FarcasterUser | null,
   ): Promise<string | undefined> {
     try {
       // Check if user is onboarded
@@ -837,10 +1558,10 @@ Complete Setup: ${this.DSTEALTH_APP_URL}`;
       
       // Use OpenAI if available
       if (this.OPENAI_API_KEY) {
-        return await this.getOpenAIResponse(content, userData);
+        return await this.getOpenAIResponse(content, userData, farcasterContext);
       } else {
         // Fallback to basic responses
-        return this.getBasicResponse(content, userData);
+        return this.getBasicResponse(content, userData, farcasterContext);
       }
 
     } catch (error) {
@@ -850,10 +1571,23 @@ Complete Setup: ${this.DSTEALTH_APP_URL}`;
   }
 
   /**
-   * 🔧 NEW: Get OpenAI response
+   * 🔧 UPDATED: Get OpenAI response with Farcaster context
    */
-  private async getOpenAIResponse(content: string, userData: any): Promise<string> {
+  private async getOpenAIResponse(content: string, userData: any, farcasterContext?: FarcasterUser | null): Promise<string> {
     try {
+      // Build context string for OpenAI
+      let contextString = `The user has fkey.id: ${userData.fkeyId}.`;
+      
+      if (farcasterContext) {
+        contextString += ` They are connected to Farcaster as @${farcasterContext.username} (${farcasterContext.displayName})`;
+        if (farcasterContext.verified) {
+          contextString += ' and are verified';
+        }
+        contextString += `. They have ${farcasterContext.followerCount} followers and can receive privacy rewards via Farcaster.`;
+      } else {
+        contextString += ` They are not connected to Farcaster yet and could benefit from connecting for privacy rewards.`;
+      }
+
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -865,15 +1599,40 @@ Complete Setup: ${this.DSTEALTH_APP_URL}`;
           messages: [
             {
               role: 'system',
-              content: `You are dStealth, a privacy-focused AI agent that helps users with anonymous payments and stealth addresses. The user has fkey.id: ${userData.fkeyId}. Keep responses concise, helpful, and privacy-focused. You can help with payment links, privacy tools, and general questions about cryptocurrency privacy.`
+              content: `You are dStealth, a specialized AI assistant for the dStealth privacy payment platform. ${contextString}
+
+STRICT SCOPE: Only help with dStealth-specific features:
+- fkey.id setup and management
+- Anonymous payment link creation
+- Stealth address technology & explanations (Alice/Bob examples welcome)
+- ZK proof receipts
+- Privacy rewards via Farcaster
+- dStealth agent commands (/help, /balance, /search, etc.)
+- Educational explanations about stealth addresses, privacy, and how dStealth works
+
+RESPONSE RULES:
+- Keep responses under 2-3 sentences
+- Always direct users to specific commands when possible
+- For topics outside dStealth scope, redirect to /help
+- Don't provide general crypto advice or market commentary
+- Focus on actionable next steps
+- Feel free to explain stealth address concepts with Alice/Bob examples
+
+COMMAND PRIORITY: When users ask questions, guide them to relevant commands:
+- Payment questions → "create payment link for $X"
+- Account questions → /balance, /status
+- User search → /search username
+- Help → /help
+
+If asked about non-dStealth topics, respond: "I'm focused on dStealth privacy features. Type /help for available commands or visit https://dstealth.xyz for more info."`
             },
             {
               role: 'user',
               content: content
             }
           ],
-          max_tokens: 150,
-          temperature: 0.7,
+          max_tokens: 120, // Reduced from 150 to enforce conciseness
+          temperature: 0.5, // Reduced from 0.7 for more focused responses
         }),
       });
 
@@ -888,33 +1647,53 @@ Complete Setup: ${this.DSTEALTH_APP_URL}`;
           }; 
         }> 
       };
-      return data.choices[0]?.message?.content || "I'm here to help with privacy and payments! Type /help for commands.";
+      
+      let aiResponse = data.choices[0]?.message?.content || "I'm here to help with privacy and payments! Type /help for commands.";
+      
+      // Add Farcaster context if available and relevant
+      if (farcasterContext && !aiResponse.includes('Farcaster') && !aiResponse.includes('@')) {
+        aiResponse += `\n\n🎭 @${farcasterContext.username}, try /rewards to check your privacy rewards!`;
+      }
+      
+      return aiResponse;
 
     } catch (error) {
       console.error("OpenAI API error:", error);
-      return "I'm here to help with privacy and payments! Type /help for commands.";
+      const fallbackGreeting = farcasterContext ? `@${farcasterContext.username}` : userData.fkeyId;
+      return `Hi ${fallbackGreeting}! I'm here to help with privacy and payments! Type /help for commands.`;
     }
   }
 
   /**
-   * 🔧 NEW: Basic fallback response
+   * 🔧 UPDATED: Basic fallback response with Farcaster context
    */
-  private getBasicResponse(content: string, userData: any): string {
+  private getBasicResponse(content: string, userData: any, farcasterContext?: FarcasterUser | null): string {
     const lower = content.toLowerCase();
     
+    // Create personalized greeting based on available context
+    let greeting = userData.fkeyId ? `${userData.fkeyId}` : 'there';
+    if (farcasterContext) {
+      greeting = `@${farcasterContext.username}`;
+    }
+    
     if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
-      return `👋 Hello ${userData.fkeyId}! I'm dStealth, your privacy assistant. How can I help you today?`;
+      const fcBadge = farcasterContext?.verified ? ' ✅' : '';
+      return `👋 Hello ${greeting}${fcBadge}! I'm dStealth, your privacy assistant. How can I help you today?`;
     }
     
     if (lower.includes('help')) {
       return this.getHelpMessage();
     }
     
-    return `Hi ${userData.fkeyId}! I'm here to help with anonymous payments and privacy tools. Type /help for available commands.`;
+    const fcFeature = farcasterContext ? 
+      `\n\n🎭 Farcaster Connected: @${farcasterContext.username}\n• Use /rewards to check available privacy rewards\n• Use /send-rewards to claim 0.001 USDC` : 
+      `\n\n🔗 Connect to Farcaster with /fc for rewards!`;
+    
+    return `Hi ${greeting}! I'm here to help with anonymous payments and privacy tools. Type /help for available commands.${fcFeature}`;
   }
 
   /**
-   * 🔧 NEW: Group introduction message
+   * 🔧 NEW: Group introduction message (no markdown, shorter)
    */
   private getGroupIntroMessage(): string {
     return `👋 Hello! I'm dStealth 🥷
@@ -922,9 +1701,9 @@ Complete Setup: ${this.DSTEALTH_APP_URL}`;
 I help with anonymous payments and privacy tools.
 
 To get started:
-• DM me to set your fkey.id: \`/set yourUsername\`
+• DM me to set your fkey.id: /set yourUsername
 • Create payment links: "create payment link for $25" 
-• Get help: \`/help\`
+• Get help: /help
 
 I only respond when @mentioned or for payment requests!`;
   }
@@ -936,6 +1715,7 @@ I only respond when @mentioned or for payment requests!`;
     command: string,
     senderInboxId: string,
     isGroup: boolean,
+    conversation?: any,
   ): Promise<string> {
     const cmd = command.toLowerCase().trim();
 
@@ -945,7 +1725,8 @@ I only respond when @mentioned or for payment requests!`;
     // /help command - available to all users, but different for onboarded vs non-onboarded
     if (cmd === "/help") {
       if (isOnboarded) {
-        await this.sendHelpActionsMessage(senderInboxId);
+        // 🔧 FIXED: Send help actions to the same conversation where requested
+        await this.sendHelpActionsMessage(senderInboxId, isGroup, conversation);
         return ""; // Return empty string since we're sending actions
       } else {
         // For non-onboarded users, show basic help
@@ -976,21 +1757,7 @@ Once you set your fkey.id, all features will be unlocked! 🚀`;
 
     // All other commands require onboarding
     if (!isOnboarded) {
-      if (isGroup) {
-        return "🔒 Please DM me to set up your fkey.id first! Type /help for instructions.";
-      } else {
-        return `🔑 Setup Required
-
-You need to set your fkey.id to use dStealth features.
-
-Quick Setup:
-• Type your username (e.g., tantodefi)
-• Or use: /set yourUsername
-
-Need FluidKey? ${this.FLUIDKEY_REFERRAL_URL}
-
-Type /help for full setup instructions.`;
-      }
+      return this.getRequiresFkeyMessage(isGroup);
     }
 
     // Commands for onboarded users only
@@ -1009,6 +1776,26 @@ Type /help for full setup instructions.`;
       case "/actions":
         await this.sendActionsMenu(senderInboxId);
         return ""; // Return empty string since we're sending actions
+
+      case "/fc":
+        return await this.handleFarcasterProfile(senderInboxId);
+
+      case "/rewards":
+        return await this.handleRewardsCommand(senderInboxId);
+
+      case "/send-rewards":
+        return await this.handleSendRewardsCommand(senderInboxId);
+
+      case "/search-followers":
+        return await this.handleSearchFollowersCommand(senderInboxId);
+
+      case "/search":
+        if (cmd.split(' ').length < 2) {
+          // Use enhanced search with follower fallback when no username provided
+          return await this.handleEnhancedSearchCommand('', senderInboxId);
+        }
+        const username = cmd.slice(8).trim().replace('@', ''); // Remove "/search " and @
+        return await this.handleEnhancedSearchCommand(username, senderInboxId);
 
       default:
         if (cmd.startsWith("/fkey ")) {
@@ -1053,12 +1840,35 @@ Type /help for full setup instructions.`;
   }
 
   /**
-   * 🔧 FIXED: Call fkey.id lookup API to get ZK proof and store it
+   * 🔧 ENHANCED: Call fkey.id lookup API to get ZK proof and store it as ZK receipt
    */
-  private async callFkeyLookupAPI(fkeyId: string): Promise<{ address?: string; proof?: unknown; error?: string }> {
+  private async callFkeyLookupAPI(fkeyId: string, userAddress?: string, source?: string): Promise<{ address?: string; proof?: unknown; error?: string }> {
     try {
+      // Try to get user address from inbox ID if not provided
+      if (!userAddress && this.client) {
+        try {
+          const senderInboxId = this.client.inboxId;
+          const inboxState = await this.client.preferences.inboxStateFromInboxIds([senderInboxId]);
+          userAddress = inboxState[0]?.identifiers[0]?.identifier;
+        } catch (error) {
+          console.warn('⚠️ Could not resolve user address from inbox ID:', error);
+        }
+      }
+
       const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      const response = await fetch(`${baseUrl}/api/fkey/lookup/${fkeyId}`);
+      
+      // Build URL with query parameters for ZK receipt storage
+      const url = new URL(`${baseUrl}/api/fkey/lookup/${fkeyId}`);
+      if (userAddress) {
+        url.searchParams.append('userAddress', userAddress);
+      }
+      if (source) {
+        url.searchParams.append('source', source);
+      }
+      
+      console.log(`🔍 Agent: Enhanced fkey.id lookup with ZK receipt generation: ${url.toString()}`);
+      
+      const response = await fetch(url.toString());
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -1067,6 +1877,7 @@ Type /help for full setup instructions.`;
       const data = await response.json() as { isRegistered?: boolean; address?: string; proof?: unknown; error?: string };
       
       if (data.isRegistered && data.address) {
+        console.log(`✅ Agent: fkey.id lookup successful with ZK receipt generated for ${fkeyId}`);
         return {
           address: data.address,
           proof: data.proof || null
@@ -1086,7 +1897,234 @@ Type /help for full setup instructions.`;
   }
 
   /**
+   * 🔧 ENHANCED: Cross-platform fkey.id status checking
+   * Checks agent DB, miniapp settings, and Farcaster casts for most authoritative source
+   */
+  private async checkFkeyAcrossAllSources(senderInboxId: string): Promise<{
+    fkeyId: string | null;
+    source: 'agent_db' | 'miniapp' | 'farcaster_cast' | 'not_found';
+    stealthAddress: string | null;
+    zkProof: any;
+    lastUpdated: number;
+    isAuthoritative: boolean;
+    needsUpdate: boolean;
+  }> {
+    try {
+      // Get user's wallet address
+      const primaryAddressResult = await resolvePrimaryFromXMTP(senderInboxId, this.client);
+      if (!primaryAddressResult) {
+        return {
+          fkeyId: null,
+          source: 'not_found',
+          stealthAddress: null,
+          zkProof: null,
+          lastUpdated: 0,
+          isAuthoritative: false,
+          needsUpdate: false
+        };
+      }
+
+      const userAddress = primaryAddressResult.primaryAddress;
+      
+      // 1. Check agent database (most reliable)
+      const agentData = await agentDb.getStealthDataByUser(userAddress);
+      
+      // 2. Check miniapp settings (if available)
+      const miniappData = await this.checkMiniappFkeySetting(userAddress);
+      
+      // 3. Check Farcaster casts (if available)
+      const farcasterData = await this.checkFarcasterCastSetting(userAddress);
+      
+      // 4. Reconcile data from all sources
+      const reconciledData = await this.reconcileFkeyData(agentData, miniappData, farcasterData);
+      
+      console.log(`🔍 Cross-platform fkey check for ${userAddress}:`, {
+        agent: agentData?.fkeyId || 'none',
+        miniapp: miniappData?.fkeyId || 'none',
+        farcaster: farcasterData?.fkeyId || 'none',
+        final: reconciledData.fkeyId || 'none',
+        source: reconciledData.source
+      });
+
+      return reconciledData;
+    } catch (error) {
+      console.error('Error in checkFkeyAcrossAllSources:', error);
+      return {
+        fkeyId: null,
+        source: 'not_found',
+        stealthAddress: null,
+        zkProof: null,
+        lastUpdated: 0,
+        isAuthoritative: false,
+        needsUpdate: false
+      };
+    }
+  }
+
+  /**
+   * 🔧 NEW: Check miniapp fkey.id setting
+   */
+  private async checkMiniappFkeySetting(userAddress: string): Promise<{
+    fkeyId: string | null;
+    lastUpdated: number;
+    source: 'miniapp';
+  }> {
+    try {
+      // Call the miniapp API to check if user has set fkey.id there
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const response = await fetch(`${frontendUrl}/api/user/profile/${userAddress}`);
+      
+      if (!response.ok) {
+        return { fkeyId: null, lastUpdated: 0, source: 'miniapp' };
+      }
+      
+      const profileData = await response.json();
+      
+      if (profileData.fkeyId) {
+        console.log(`✅ Found fkey.id in miniapp: ${profileData.fkeyId} for ${userAddress}`);
+        return {
+          fkeyId: profileData.fkeyId,
+          lastUpdated: profileData.lastUpdated || Date.now(),
+          source: 'miniapp'
+        };
+      }
+      
+      return { fkeyId: null, lastUpdated: 0, source: 'miniapp' };
+    } catch (error) {
+      console.warn('⚠️ Could not check miniapp fkey setting:', error);
+      return { fkeyId: null, lastUpdated: 0, source: 'miniapp' };
+    }
+  }
+
+  /**
+   * 🔧 NEW: Check Farcaster cast fkey.id setting
+   */
+  private async checkFarcasterCastSetting(userAddress: string): Promise<{
+    fkeyId: string | null;
+    lastUpdated: number;
+    source: 'farcaster_cast';
+  }> {
+    try {
+      if (!this.NEYNAR_API_KEY) {
+        return { fkeyId: null, lastUpdated: 0, source: 'farcaster_cast' };
+      }
+
+      // Get user's Farcaster profile
+      const farcasterUser = await this.getFarcasterContext(userAddress);
+      if (!farcasterUser) {
+        return { fkeyId: null, lastUpdated: 0, source: 'farcaster_cast' };
+      }
+
+      // Search for recent casts containing "@dstealth username.fkey.id"
+      const response = await fetch(`${NEYNAR_API_BASE}/farcaster/casts?fid=${farcasterUser.fid}&limit=50`, {
+        headers: {
+          'api_key': this.NEYNAR_API_KEY
+        }
+      });
+
+      if (!response.ok) {
+        return { fkeyId: null, lastUpdated: 0, source: 'farcaster_cast' };
+      }
+
+      const castsData = await response.json() as { casts: any[] };
+      
+      // Look for casts with "@dstealth username.fkey.id" pattern
+      for (const cast of castsData.casts) {
+        const castText = cast.text?.toLowerCase() || '';
+        const match = castText.match(/@dstealth\s+(\w+)\.fkey\.id/);
+        
+        if (match) {
+          const fkeyId = match[1];
+          console.log(`✅ Found fkey.id in Farcaster cast: ${fkeyId} for ${userAddress}`);
+          return {
+            fkeyId,
+            lastUpdated: new Date(cast.timestamp).getTime(),
+            source: 'farcaster_cast'
+          };
+        }
+      }
+      
+      return { fkeyId: null, lastUpdated: 0, source: 'farcaster_cast' };
+    } catch (error) {
+      console.warn('⚠️ Could not check Farcaster cast fkey setting:', error);
+      return { fkeyId: null, lastUpdated: 0, source: 'farcaster_cast' };
+    }
+  }
+
+  /**
+   * 🔧 NEW: Reconcile fkey.id data from all sources
+   */
+  private async reconcileFkeyData(
+    agentData: any,
+    miniappData: any,
+    farcasterData: any
+  ): Promise<{
+    fkeyId: string | null;
+    source: 'agent_db' | 'miniapp' | 'farcaster_cast' | 'not_found';
+    stealthAddress: string | null;
+    zkProof: any;
+    lastUpdated: number;
+    isAuthoritative: boolean;
+    needsUpdate: boolean;
+  }> {
+    const sources = [
+      { data: agentData, source: 'agent_db' as const, priority: 3 },
+      { data: miniappData, source: 'miniapp' as const, priority: 2 },
+      { data: farcasterData, source: 'farcaster_cast' as const, priority: 1 }
+    ];
+
+    // Find the most recent and authoritative source
+    let mostAuthoritative = null;
+    let mostRecent = null;
+
+    for (const source of sources) {
+      if (source.data?.fkeyId) {
+        if (!mostAuthoritative || source.priority > mostAuthoritative.priority) {
+          mostAuthoritative = source;
+        }
+        if (!mostRecent || source.data.lastUpdated > mostRecent.data.lastUpdated) {
+          mostRecent = source;
+        }
+      }
+    }
+
+    // If no fkey.id found anywhere
+    if (!mostAuthoritative) {
+      return {
+        fkeyId: null,
+        source: 'not_found',
+        stealthAddress: null,
+        zkProof: null,
+        lastUpdated: 0,
+        isAuthoritative: false,
+        needsUpdate: false
+      };
+    }
+
+    // Use agent DB if available and recent, otherwise use most recent
+    const selectedSource = (agentData?.fkeyId && 
+                           agentData.lastUpdated > Date.now() - 24 * 60 * 60 * 1000) // 24 hours
+                           ? { data: agentData, source: 'agent_db' as const }
+                           : mostRecent || mostAuthoritative;
+
+    const needsUpdate = selectedSource.source !== 'agent_db' || 
+                       !selectedSource.data.stealthAddress ||
+                       selectedSource.data.lastUpdated < Date.now() - 60 * 60 * 1000; // 1 hour
+
+    return {
+      fkeyId: selectedSource.data.fkeyId,
+      source: selectedSource.source,
+      stealthAddress: selectedSource.data.stealthAddress || null,
+      zkProof: selectedSource.data.zkProof || null,
+      lastUpdated: selectedSource.data.lastUpdated || 0,
+      isAuthoritative: selectedSource.source === 'agent_db',
+      needsUpdate
+    };
+  }
+
+  /**
    * 🔧 SECURITY: Helper method to always get fresh user stealth data with current fkey.id lookup
+   * Uses primary address approach - resolves inbox ID to wallet address for database lookup
    */
   private async getFreshUserStealthData(senderInboxId: string): Promise<{
     userData: any;
@@ -1095,15 +2133,59 @@ Type /help for full setup instructions.`;
     error?: string;
   } | null> {
     try {
-      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      // ✅ ENHANCED: Use cross-platform checking first
+      const crossPlatformData = await this.checkFkeyAcrossAllSources(senderInboxId);
       
-      if (!userData || !userData.fkeyId) {
+      if (!crossPlatformData.fkeyId) {
+        console.log(`❌ No fkey.id found across all sources for inbox: ${senderInboxId}`);
         return null;
       }
 
-      // Always do fresh fkey.id lookup for security
+      // ✅ STEP 1: Resolve inbox ID to primary wallet address
+      const primaryAddressResult = await resolvePrimaryFromXMTP(senderInboxId, this.client);
+      
+      if (!primaryAddressResult) {
+        console.error(`❌ Could not resolve primary address for inbox ID: ${senderInboxId}`);
+        return null;
+      }
+      
+      console.log(`🔑 Resolved primary address: ${primaryAddressResult.primaryAddress} for inbox: ${senderInboxId}`);
+      
+      // ✅ STEP 2: Get stealth data using primary address (fallback to cross-platform if needed)
+      let userData = await agentDb.getStealthDataByUser(primaryAddressResult.primaryAddress);
+      
+      if (!userData || !userData.fkeyId) {
+        // Create userData from cross-platform data if not in agent DB
+        userData = {
+          userId: primaryAddressResult.primaryAddress,
+          fkeyId: crossPlatformData.fkeyId,
+          stealthAddress: crossPlatformData.stealthAddress || '',
+          zkProof: crossPlatformData.zkProof,
+          lastUpdated: crossPlatformData.lastUpdated,
+          requestedBy: senderInboxId,
+          setupStatus: 'fkey_set' as const,
+          metadata: {
+            source: `synced_from_${crossPlatformData.source}`,
+            primaryAddressSource: primaryAddressResult.source,
+            primaryAddressMetadata: primaryAddressResult.metadata,
+            xmtpInboxId: senderInboxId
+          }
+        };
+        console.log(`🔄 Created userData from cross-platform source: ${crossPlatformData.source}`);
+      }
+
+      // ✅ STEP 3: Always do fresh fkey.id lookup for security (with ZK receipt)
+      if (!userData || !userData.fkeyId) {
+        return {
+          userData,
+          currentAddress: '',
+          isAddressUpdated: false,
+          error: 'No user data or fkey.id found'
+        };
+      }
+
       console.log(`🔒 Security check: Refreshing stealth address for ${userData.fkeyId}`);
-      const freshLookup = await this.callFkeyLookupAPI(userData.fkeyId);
+      const freshLookup = await this.callFkeyLookupAPI(userData.fkeyId, primaryAddressResult.primaryAddress, 'xmtp-agent-fresh-lookup');
       
       if (freshLookup.error || !freshLookup.address) {
         return {
@@ -1117,20 +2199,27 @@ Type /help for full setup instructions.`;
       const currentAddress = freshLookup.address;
       let isAddressUpdated = false;
 
-      // Update stored data if address changed or missing
+      // ✅ STEP 4: Update stored data if address changed or missing
       if (!userData.stealthAddress || userData.stealthAddress !== currentAddress) {
         if (userData.stealthAddress) {
           console.log(`🔄 Address updated for ${userData.fkeyId}: ${userData.stealthAddress} → ${currentAddress}`);
           isAddressUpdated = true;
         }
         
-        // Update stored data with fresh info
+        // Update stored data with fresh info using primary address
         const updatedUserData = {
           ...userData,
+          userId: primaryAddressResult.primaryAddress,
           stealthAddress: currentAddress,
           zkProof: freshLookup.proof,
           lastUpdated: Date.now(),
+          metadata: {
+            ...(userData.metadata || {}),
+            lastAddressUpdate: Date.now(),
+            addressUpdateSource: 'xmtp-agent-fresh-lookup'
+          }
         };
+
         await agentDb.storeUserStealthData(updatedUserData);
         
         return {
@@ -1214,24 +2303,14 @@ Type /help for full setup instructions.`;
     senderInboxId: string,
     conversationId: string,
     isGroup: boolean,
+    conversation?: any,
   ): Promise<string> {
     try {
       // Check if user has fkey.id set
       const userData = await agentDb.getStealthDataByUser(senderInboxId);
       
       if (!userData?.fkeyId) {
-        if (isGroup) {
-          return "🔒 Please DM me to set your fkey.id first: /set yourUsername";
-        } else {
-        return `🔒 Payment Link Setup Required
-
-To create payment links, please set your fkey.id first:
-
-Step 1: \`/set yourUsername\`
-Step 2: Complete setup at ${this.DSTEALTH_APP_URL}
-
-Need FluidKey? ${this.FLUIDKEY_REFERRAL_URL}`;
-        }
+        return this.getRequiresFkeyMessage(isGroup);
       }
 
       // 🔧 SECURITY: Get fresh user data with current address verification
@@ -1292,6 +2371,47 @@ Need larger amounts? Visit ${this.DSTEALTH_APP_URL} for alternatives.`;
 
       const daimoResponse = await daimoPayClient.createPaymentLink(paymentRequest);
       
+      // 🔧 CRITICAL FIX: Store payment link in Redis for frontend ZK receipts access
+      try {
+        // Get sender's wallet address for Redis key
+        const inboxState = await this.client!.preferences.inboxStateFromInboxIds([senderInboxId]);
+        const senderWalletAddress = inboxState[0]?.identifiers[0]?.identifier;
+        
+        if (senderWalletAddress && redis) {
+          const zkReceiptKey = `zk_receipt:agent_payment_${Date.now()}:${senderWalletAddress.toLowerCase()}:${Date.now()}`;
+          const zkReceiptData = {
+            transactionHash: '', // Will be filled when payment is completed
+            networkId: 'base',
+            amount: amount,
+            currency: 'USDC',
+            recipientAddress: currentAddress,
+            fkeyId: currentData.fkeyId,
+            senderAddress: senderWalletAddress,
+            timestamp: Date.now(),
+            status: 'pending_payment',
+            paymentLinkId: daimoResponse.id,
+            paymentUrl: daimoResponse.url,
+            // Include the ZK proof from agent database
+            zkProof: currentData.zkProof,
+            metadata: {
+              transactionType: "Agent Generated Payment Link",
+              privacyFeature: "stealth-address",
+              zkProofAvailable: !!currentData.zkProof,
+              source: "dstealth-agent",
+              agentInboxId: this.client?.inboxId,
+              userInboxId: senderInboxId
+            }
+          };
+          
+          // Store in Redis for frontend access (expires in 7 days - local-first system)
+          await redis.set(zkReceiptKey, JSON.stringify(zkReceiptData), { ex: 86400 * 7 });
+          console.log(`✅ Payment link stored for frontend ZK receipts: ${zkReceiptKey}`);
+        }
+      } catch (storageError) {
+        console.error('⚠️ Failed to store payment link for frontend access:', storageError);
+        // Don't fail the payment creation, just warn
+      }
+      
       // Generate Coinbase Wallet payment URL
       const coinbaseWalletUrl = this.generateCoinbaseWalletLink(currentAddress, amount, "USDC");
 
@@ -1299,11 +2419,34 @@ Need larger amounts? Visit ${this.DSTEALTH_APP_URL} for alternatives.`;
         ? `\n⚠️ Address Updated: Your stealth address was refreshed.`
         : '';
 
-      // 🔧 FIXED: Send Transaction Actions for the payment link - now uses senderInboxId
-      await this.sendTransactionActions(senderInboxId, amount, currentData.fkeyId, daimoResponse.url, currentAddress);
+      // 🔧 FIXED: Send Transaction Actions to the same conversation where requested
+      await this.sendTransactionActions(senderInboxId, amount, currentData.fkeyId, daimoResponse.url, currentAddress, conversationId, isGroup, conversation);
 
-      // Return empty string since we're only sending action buttons now
-      return "";
+      // 🔧 FIXED: Always return proper text response with payment links
+      return `💳 Payment Link Created! ${addressChangeWarning}
+
+💰 Amount: $${amount} USDC
+🎯 Recipient: ${currentData.fkeyId}.fkey.id
+📍 Address: ${currentAddress.slice(0, 8)}...${currentAddress.slice(-6)}
+
+🔗 **Payment Links:**
+
+**Daimo (Recommended):**
+${daimoResponse.url}
+
+**Coinbase Wallet:**
+${coinbaseWalletUrl}
+
+🥷 **Privacy Features:**
+• Anonymous sender protection
+• ZK proof receipts available
+• Stealth address technology
+• Earn privacy rewards
+
+💡 **Share this link** to receive payments from anyone!
+📊 **View receipts:** ${this.DSTEALTH_APP_URL}
+
+${isGroup ? "💬 **DM me** for more payment options and features!" : ""}`;
 
     } catch (error) {
       console.error("Error creating payment link:", error);
@@ -1337,10 +2480,15 @@ Need larger amounts? Visit ${this.DSTEALTH_APP_URL} for alternatives.`;
   }
 
   /**
-   * Handle basic keywords and greetings (for onboarded users only)
+   * 🔧 FIXED: Handle basic keywords and greetings (for onboarded users only)
    */
   private handleBasicKeywords(content: string): string | null {
     const lower = content.toLowerCase();
+
+    // Handle ping command for monitoring/testing
+    if (lower.trim() === "ping") {
+      return "ok";
+    }
 
     if (
       lower.includes("hello") ||
@@ -1349,6 +2497,7 @@ Need larger amounts? Visit ${this.DSTEALTH_APP_URL} for alternatives.`;
       lower.includes("gm") ||
       lower.includes("good morning")
     ) {
+      console.log("📝 Returning greeting for onboarded user");
       return `👋 Hello! I'm dStealth, your privacy assistant 🥷
 
 What can I help you with today?
@@ -1435,7 +2584,7 @@ Then tell me your fkey.id username!`;
   }
 
   /**
-   * 🔧 UPDATED: Enhanced help message for onboarded users
+   * 🔧 UPDATED: Enhanced help message for onboarded users with Farcaster integration and social discovery
    */
   private getHelpMessage(): string {
     return `🤖 dStealth Agent Commands 🥷
@@ -1444,6 +2593,16 @@ Then tell me your fkey.id username!`;
 • create payment link for $25 - Generate anonymous payment link
 • /balance - Check your earnings
 • /links - Manage your payment links
+
+🎭 Farcaster Integration:
+• /fc or /farcaster - Show your Farcaster profile
+• /rewards - Check available privacy rewards
+• /send-rewards - Send 0.001 USDC rewards to your FC wallet
+
+🔍 Social Discovery:
+• /search-followers - Find which of your FC followers use dStealth
+• /find-users <query> - Search FC users for dStealth usage
+• Cast "@dstealth yourfkey.fkey.id" on FC to set fkey.id
 
 ℹ️ Info Commands:
 • /help - Show this help
@@ -1463,11 +2622,39 @@ Then tell me your fkey.id username!`;
 • 🥷 Anonymous sender privacy
 • 🔒 Stealth address technology
 • 🧾 ZK proof receipts
-• 🎯 Privacy rewards
+• 🎯 Privacy rewards via Farcaster
+• 💰 Automatic rewards to FC wallet
+• 👥 Social discovery of dStealth users
+• 📱 Farcaster cast integration
 
 Complete Dashboard: ${this.DSTEALTH_APP_URL}
 
+🔗 Connect your Coinbase Wallet to Farcaster for rewards!
+🎭 Cast "@dstealth yourfkey.fkey.id" on Farcaster to set up!
 Need help? Just ask me anything about privacy payments!`;
+  }
+
+  /**
+   * 🔧 NEW: Get simplified help message for group chats (no markdown, shorter)
+   */
+  private getGroupHelpMessage(): string {
+    return `🤖 dStealth Agent Commands
+
+💳 Payment: "create payment link for $25"
+📊 Info: /balance, /status, /fkey username
+🎭 Farcaster: /fc, /rewards, /send-rewards
+🔍 Search: /search-followers, /find-users query
+⚙️ Settings: /links
+
+🥷 Privacy Features:
+• Anonymous payments via stealth addresses
+• ZK proof receipts for all transactions
+• Privacy rewards through Farcaster
+• Social discovery of dStealth users
+
+📱 Web App: ${this.DSTEALTH_APP_URL}
+
+💡 Only respond to @mentions in groups!`;
   }
 
   /**
@@ -1483,7 +2670,7 @@ Need help? Just ask me anything about privacy payments!`;
     return `📊 Agent Status
 
 Status: ${status.isRunning ? "🟢 Active" : "🔴 Inactive"}
-Messages Processed: ${status.processedMessageCount}
+Messages Processed: ${status.processedMessages}
 Stream Restarts: ${status.streamRestartCount}
 Installations: ${status.installationCount}/5
 
@@ -1494,7 +2681,7 @@ Core Features: ✅ All operational
 • ZK receipt creation
 
 XMTP SDK: v3.1.2 with enhanced reliability
-Agent Address: ${status.agentAddress}
+Agent Address: ${this.agentAddress}
 
 Agent is running optimally! 🚀`;
   }
@@ -1507,15 +2694,7 @@ Agent is running optimally! 🚀`;
       const userData = await agentDb.getStealthDataByUser(senderInboxId);
 
       if (!userData || !userData.fkeyId) {
-        return `💰 Balance Check - Setup Required
-
-To check your balance, complete your setup:
-
-1. 🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
-2. 📝 Tell me your fkey.id: (e.g., "tantodefi.fkey.id")
-3. 🚀 Complete setup: ${this.DSTEALTH_APP_URL}
-
-Once setup is complete, I can show your privacy rewards balance!`;
+        return this.getRequiresFkeyMessage(false);
       }
 
       return `💰 Balance Overview 
@@ -1529,10 +2708,10 @@ Rewards: Coming soon...
 • Receive stealth payments
 • Complete privacy challenges
 
-Full Dashboard: ${this.DSTEALTH_APP_URL}`;
+🚀 Web App: ${this.DSTEALTH_APP_URL}`;
     } catch (error) {
       console.error("Error checking balance:", error);
-      return "❌ Failed to check balance. Please try again.";
+      return "❌ Error checking balance. Please try again.";
     }
   }
 
@@ -1601,8 +2780,17 @@ Analytics: View in dashboard
     try {
       console.log(`🔍 Looking up fkey.id: ${cleanFkeyId} for ${senderInboxId}`);
 
-      // Call the actual fkey.id lookup API
-      const lookupResult = await this.callFkeyLookupAPI(cleanFkeyId);
+      // Get user address for ZK receipt storage
+      let userAddress: string | undefined = undefined;
+      try {
+        const inboxState = await this.client?.preferences.inboxStateFromInboxIds([senderInboxId]);
+        userAddress = inboxState?.[0]?.identifiers[0]?.identifier;
+      } catch (error) {
+        console.warn('⚠️ Could not resolve user address for fkey lookup:', error);
+      }
+
+      // Call the actual fkey.id lookup API with ZK receipt generation
+      const lookupResult = await this.callFkeyLookupAPI(cleanFkeyId, userAddress, 'xmtp-agent-fkey-lookup');
 
       if (lookupResult.error) {
         return `❌ fkey.id Lookup Failed
@@ -1644,6 +2832,699 @@ Get your own FluidKey: ${this.FLUIDKEY_REFERRAL_URL}`;
 Failed to lookup ${cleanFkeyId}.fkey.id. Please try again.
 
 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}`;
+    }
+  }
+
+  /**
+   * 🔧 NEW: Handle Farcaster profile command
+   */
+  private async handleFarcasterProfile(senderInboxId: string): Promise<string> {
+    try {
+      // Check if user has fkey.id set
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      
+      if (!userData?.fkeyId) {
+        return this.getRequiresFkeyMessage(false);
+      }
+
+      if (!this.client) {
+        return "❌ Agent not available";
+      }
+
+      // Get sender's wallet address
+      const inboxState = await this.client.preferences.inboxStateFromInboxIds([senderInboxId]);
+      const senderAddress = inboxState[0]?.identifiers[0]?.identifier;
+
+      if (!senderAddress) {
+        return "❌ Could not get your wallet address";
+      }
+
+      console.log(`🎭 Fetching Farcaster profile for ${senderAddress}`);
+
+      // Get Farcaster context
+      const farcasterContext = await this.getFarcasterContext(senderAddress);
+
+      if (!farcasterContext) {
+        return `🎭 No Farcaster Profile Found
+
+Your wallet address (${senderAddress.slice(0, 8)}...${senderAddress.slice(-6)}) is not connected to a Farcaster account.
+
+🔗 Connect your wallet to Farcaster:
+• Visit warpcast.com
+• Connect your wallet
+• Set up your profile
+
+Once connected, I'll be able to:
+• Send rewards to your FC wallet
+• Provide personalized Farcaster context
+• Enhance your privacy experience
+
+Try again with /fc after connecting!`;
+      }
+
+      return `🎭 Your Farcaster Profile
+
+@${farcasterContext.username} (${farcasterContext.displayName})
+${farcasterContext.verified ? '✅ Verified' : '⚪ Not Verified'}
+📍 FID: ${farcasterContext.fid}
+
+📊 Stats:
+• Followers: ${farcasterContext.followerCount?.toLocaleString() || 'N/A'}
+• Following: ${farcasterContext.followingCount?.toLocaleString() || 'N/A'}
+• Bio: ${farcasterContext.bio || 'No bio set'}
+
+💰 Rewards Available:
+• Privacy rewards: /rewards
+• Send rewards: /send-rewards
+
+🔗 Wallet Connection:
+• Connected: ${senderAddress.slice(0, 8)}...${senderAddress.slice(-6)}
+• Custody: ${farcasterContext.custodyAddress.slice(0, 8)}...${farcasterContext.custodyAddress.slice(-6)}
+• Verified Addresses: ${farcasterContext.verifiedAddresses.length}
+
+Ready to earn privacy rewards! 🥷`;
+
+    } catch (error) {
+      console.error("Error handling Farcaster profile:", error);
+      return "❌ Error fetching Farcaster profile. Please try again.";
+    }
+  }
+
+  /**
+   * 🔧 NEW: Handle rewards command
+   */
+  private async handleRewardsCommand(senderInboxId: string): Promise<string> {
+    try {
+      // Check if user has fkey.id set
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      
+      if (!userData?.fkeyId) {
+        return this.getRequiresFkeyMessage(false);
+      }
+
+      if (!this.client) {
+        return "❌ Agent not available";
+      }
+
+      // Get sender's wallet address
+      const inboxState = await this.client.preferences.inboxStateFromInboxIds([senderInboxId]);
+      const senderAddress = inboxState[0]?.identifiers[0]?.identifier;
+
+      if (!senderAddress) {
+        return "❌ Could not get your wallet address";
+      }
+
+      // Get Farcaster context
+      const farcasterContext = await this.getFarcasterContext(senderAddress);
+
+      if (!farcasterContext) {
+        return `💰 Rewards - FC Connection Required
+
+To earn privacy rewards, connect your wallet to Farcaster:
+
+🔗 Setup Steps:
+1. Visit warpcast.com
+2. Connect your wallet: ${senderAddress.slice(0, 8)}...${senderAddress.slice(-6)}
+3. Set up your profile
+4. Return here with /fc
+
+🎯 Available Rewards:
+• Privacy usage rewards: 0.001 USDC per stealth payment
+• Referral rewards: Coming soon
+• Achievement rewards: Coming soon
+
+Connect to Farcaster to unlock rewards! 🚀`;
+      }
+
+      // Get user's stealth data (userData already declared at function start)
+      const hasStealthSetup = userData?.fkeyId && userData?.stealthAddress;
+
+      return `💰 Privacy Rewards Dashboard
+
+👤 Profile: @${farcasterContext.username}
+🔗 Connected: ${hasStealthSetup ? '✅ Stealth Setup Complete' : '⚠️ Setup Required'}
+
+🎯 Available Rewards:
+• 💳 Create Payment Link: 0.001 USDC
+• 🧾 Receive Stealth Payment: 0.001 USDC
+• 🎪 Weekly Challenges: Up to 0.1 USDC
+
+📊 Current Status:
+• Privacy Points: Coming soon
+• Total Earned: Coming soon
+• Rank: Coming soon
+
+🚀 Earn More:
+• Complete your fkey.id setup: /set yourUsername
+• Generate payment links: "create payment link for $X"
+• Use stealth addresses for privacy
+
+Ready to earn? Type /send-rewards to claim available rewards!`;
+
+    } catch (error) {
+      console.error("Error handling rewards command:", error);
+      return "❌ Error fetching rewards. Please try again.";
+    }
+  }
+
+  /**
+   * 🔧 NEW: Handle send rewards command
+   */
+  private async handleSendRewardsCommand(senderInboxId: string): Promise<string> {
+    try {
+      if (!this.client) {
+        return "❌ Agent not available";
+      }
+
+      // Get sender's wallet address
+      const inboxState = await this.client.preferences.inboxStateFromInboxIds([senderInboxId]);
+      const senderAddress = inboxState[0]?.identifiers[0]?.identifier;
+
+      if (!senderAddress) {
+        return "❌ Could not get your wallet address";
+      }
+
+      // Get Farcaster context
+      const farcasterContext = await this.getFarcasterContext(senderAddress);
+
+      if (!farcasterContext) {
+        return `💰 Send Rewards - FC Required
+
+To receive privacy rewards, connect your wallet to Farcaster first:
+
+🔗 Setup:
+1. Visit warpcast.com
+2. Connect wallet: ${senderAddress.slice(0, 8)}...${senderAddress.slice(-6)}
+3. Complete profile setup
+4. Return with /fc
+
+Then you can receive rewards via Farcaster!`;
+      }
+
+      // Check if user has stealth setup
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
+      
+      if (!userData?.fkeyId || !userData?.stealthAddress) {
+        return `💰 Send Rewards - Setup Required
+
+Hi @${farcasterContext.username}! 
+
+To earn privacy rewards, complete your stealth setup:
+
+🔑 Step 1: Set fkey.id
+• /set yourUsername
+• Connect to FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+
+🚀 Step 2: Generate payment links
+• "create payment link for $X"
+
+Then you can claim rewards! 🎯`;
+      }
+
+      // Try to send rewards
+      console.log(`💰 Attempting to send rewards to FID: ${farcasterContext.fid}`);
+      
+      const rewardResult = await this.sendFarcasterRewards(farcasterContext.fid, 0.001);
+
+      if (rewardResult.success) {
+        return `🎉 Rewards Sent Successfully!
+
+👤 Recipient: @${farcasterContext.username}
+💰 Amount: 0.001 USDC
+🎯 Reward Type: Privacy Usage Bonus
+🔗 Transaction: ${rewardResult.txHash}
+
+✅ Rewards sent to your Farcaster wallet!
+
+🚀 Keep earning:
+• Generate more payment links
+• Use stealth addresses
+• Complete privacy challenges
+
+Thank you for using dStealth! 🥷`;
+      } else {
+        return `❌ Reward Send Failed
+
+Could not send rewards to @${farcasterContext.username}:
+${rewardResult.error}
+
+🔧 Common Issues:
+• Neynar API configuration
+• Insufficient sponsor funds
+• Network connectivity
+
+Try again later or contact support at ${this.DSTEALTH_APP_URL}`;
+      }
+
+    } catch (error) {
+      console.error("Error handling send rewards command:", error);
+      return "❌ Error sending rewards. Please try again.";
+    }
+  }
+
+  /**
+   * 🔧 NEW: Handle search followers command
+   */
+  private async handleSearchFollowersCommand(senderInboxId: string): Promise<string> {
+    try {
+      if (!this.client) {
+        return "❌ Agent not available";
+      }
+
+      // Get sender's wallet address
+      const inboxState = await this.client.preferences.inboxStateFromInboxIds([senderInboxId]);
+      const senderAddress = inboxState[0]?.identifiers[0]?.identifier;
+
+      if (!senderAddress) {
+        return "❌ Could not get your wallet address";
+      }
+
+      // Get Farcaster context
+      const farcasterContext = await this.getFarcasterContext(senderAddress);
+
+      if (!farcasterContext) {
+        return `🔍 Search Followers - FC Required
+
+To search your followers for dStealth users, connect your wallet to Farcaster:
+
+🔗 Setup:
+1. Visit warpcast.com
+2. Connect wallet: ${senderAddress.slice(0, 8)}...${senderAddress.slice(-6)}
+3. Set up your profile
+4. Return with /fc
+
+Then you can discover which of your followers use dStealth!`;
+      }
+
+      console.log(`🔍 Analyzing followers for @${farcasterContext.username} (FID: ${farcasterContext.fid})`);
+
+      // Analyze followers for dStealth usage
+      const followerAnalysis = await this.analyzeFollowersForDStealth(farcasterContext.fid);
+
+      if (followerAnalysis.length === 0) {
+        return `🔍 Follower Analysis Results
+
+@${farcasterContext.username}, I couldn't fetch your followers right now.
+
+This could be due to:
+• Neynar API rate limits
+• Network connectivity issues
+• Your profile privacy settings
+
+Try again in a few minutes, or contact support if issues persist.`;
+      }
+
+      const dStealthUsers = followerAnalysis.filter(user => user.hasFkey);
+      const totalFollowers = followerAnalysis.length;
+
+      if (dStealthUsers.length === 0) {
+        return `🔍 Follower Analysis Results
+
+@${farcasterContext.username}, I analyzed ${totalFollowers} of your followers.
+
+❌ No dStealth Users Found
+
+None of your recent followers have set up fkey.id yet.
+
+🚀 Spread the word:
+• Share dStealth with your community
+• Tell them about privacy rewards
+• Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+
+Try /find-users <name> to search for specific users!`;
+      }
+
+      // Format results
+      const userList = dStealthUsers
+        .slice(0, 10) // Show max 10 results
+        .map(user => {
+          const verifiedBadge = user.verified ? ' ✅' : '';
+          return `• @${user.username}${verifiedBadge} → ${user.fkeyId}.fkey.id`;
+        })
+        .join('\n');
+
+      const moreResults = dStealthUsers.length > 10 ? `\n\n... and ${dStealthUsers.length - 10} more dStealth users!` : '';
+
+      return `🔍 Follower Analysis Results
+
+@${farcasterContext.username}, I found ${dStealthUsers.length} dStealth users among ${totalFollowers} followers:
+
+${userList}${moreResults}
+
+🎯 Social Discovery:
+• Use /find-users <name> to search for more users
+• Share fkey.id with followers for privacy rewards
+• Connect more friends to expand the privacy network
+
+Ready to explore more? 🕵️‍♂️`;
+
+    } catch (error) {
+      console.error("Error handling search followers command:", error);
+      return "❌ Error searching followers. Please try again.";
+    }
+  }
+
+  /**
+   * 🔧 ENHANCED: Handle find users command using comprehensive search API
+   */
+  private async handleFindUsersCommand(searchQuery: string, senderInboxId: string): Promise<string> {
+    try {
+      if (!this.client) {
+        return "❌ Agent not available";
+      }
+
+      console.log(`🔍 Comprehensive find users for: ${searchQuery}`);
+
+      // Use the comprehensive search API
+      const backendUrl = process.env.BACKEND_URL || 'http://localhost:5001';
+      const response = await fetch(`${backendUrl}/api/user/search/comprehensive?query=${encodeURIComponent(searchQuery)}&limit=10`);
+
+      if (!response.ok) {
+        throw new Error(`Search API failed: ${response.status}`);
+      }
+
+      const searchData = await response.json();
+
+      if (!searchData.success || searchData.results.length === 0) {
+        return `🔍 Comprehensive Search Results
+
+No users found for "${searchQuery}" across any data source.
+
+Try searching for:
+• Username (e.g., vitalik)
+• Display name (e.g., "Ethereum") 
+• Handle (e.g., @tantodefi)
+
+🌐 Searched: All available users
+📍 Sources: Agent DMs, dStealth miniapp, Farcaster casts
+
+🔗 Get more users on dStealth:
+• Share FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+• Invite friends to set fkey.id
+• Earn referral rewards (coming soon)`;
+      }
+
+      const dStealthUsers = searchData.results.filter((user: any) => user.hasFkey);
+      const totalResults = searchData.results.length;
+      const sources = searchData.sources;
+
+      // Format results with source information
+      let resultMessage = `🔍 Comprehensive Search Results
+
+Found ${totalResults} users for "${searchQuery}":
+🌐 Sources: ${Object.entries(sources)
+  .filter(([_, count]) => (count as number) > 0)
+  .map(([source, count]) => {
+    const sourceLabel = source === 'agent_db' ? 'Agent' : source === 'frontend_db' ? 'Frontend' : 'Farcaster';
+    return `${sourceLabel}: ${count}`;
+  })
+  .join(', ')}`;
+
+      if (dStealthUsers.length > 0) {
+        const dStealthList = dStealthUsers
+          .slice(0, 5) // Show max 5 dStealth users
+          .map((user: any) => {
+            const verifiedBadge = user.verified ? ' ✅' : '';
+            const sourceIcon = user.source === 'agent_db' ? '🔗' : user.source === 'frontend_db' ? '💻' : '🎭';
+            return `${sourceIcon} @${user.username}${verifiedBadge} → ${user.fkeyId}.fkey.id`;
+          })
+          .join('\n');
+
+        resultMessage += `\n\n🥷 dStealth Users (${dStealthUsers.length}):
+${dStealthList}`;
+      }
+
+      const regularUsers = searchData.results.filter((user: any) => !user.hasFkey);
+      if (regularUsers.length > 0) {
+        const regularList = regularUsers
+          .slice(0, 3) // Show max 3 regular users
+          .map((user: any) => {
+            const verifiedBadge = user.verified ? ' ✅' : '';
+            const sourceIcon = user.source === 'agent_db' ? '🔗' : user.source === 'frontend_db' ? '💻' : '🎭';
+            return `${sourceIcon} @${user.username}${verifiedBadge} (no fkey.id yet)`;
+          })
+          .join('\n');
+
+        resultMessage += `\n\n⚪ Other Users (${regularUsers.length}):
+${regularList}`;
+
+        if (regularUsers.length > 3) {
+          resultMessage += `\n... and ${regularUsers.length - 3} more users`;
+        }
+      }
+
+      resultMessage += `\n\n🚀 Grow the Network:
+• Invite users to get fkey.id
+• Share FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+• Earn rewards for referrals (coming soon)
+
+🔗 = Found users (from Agent DMs, dStealth miniapp, Farcaster casts)
+Ready to connect? 🌐`;
+
+      return resultMessage;
+
+    } catch (error) {
+      console.error("Error in comprehensive find users:", error);
+      
+      // Fallback to original Farcaster search  
+      try {
+        console.log('🔄 Falling back to Farcaster-only search...');
+        const searchResults = await this.searchFarcasterUsers(searchQuery);
+        
+        if (searchResults.length > 0) {
+          const dStealthUsers = searchResults.filter(user => user.hasFkey);
+          
+          let resultMessage = `🔍 Search Results (Fallback)
+
+Found ${searchResults.length} users for "${searchQuery}":`;
+
+          if (dStealthUsers.length > 0) {
+            const dStealthList = dStealthUsers
+              .slice(0, 3)
+              .map(user => {
+                const verifiedBadge = user.verified ? ' ✅' : '';
+                return `🥷 @${user.username}${verifiedBadge} → ${user.fkeyId}.fkey.id`;
+              })
+              .join('\n');
+
+            resultMessage += `\n\n🥷 dStealth Users (${dStealthUsers.length}):
+${dStealthList}`;
+          }
+
+          resultMessage += `\n\n⚠️ Using fallback search - comprehensive search temporarily unavailable.`;
+          return resultMessage;
+        }
+      } catch (fallbackError) {
+        console.error('Fallback search also failed:', fallbackError);
+      }
+
+      return "❌ Search temporarily unavailable. Please try again later.";
+    }
+  }
+
+  /**
+   * 🔧 ENHANCED: Handle search command using comprehensive search API
+   */
+  private async handleSearchCommand(username: string, senderInboxId: string): Promise<string> {
+    try {
+      if (!username || username.length < 1) {
+        return `❌ Please provide a username to search for.
+
+Examples:
+• /search tantodefi
+• /search @vitalik
+• /search ethereum.eth
+• /search user.base.eth`;
+      }
+
+      console.log(`🔍 Enhanced search for: ${username}`);
+
+      // 🔧 STEP 1: Resolve user input to address if possible
+      const resolution = await this.resolveUserInput(username);
+      
+      console.log(`📍 Search resolution:`, {
+        input: resolution.originalInput,
+        type: resolution.inputType,
+        resolved: resolution.resolvedAddress ? `${resolution.resolvedAddress.slice(0, 8)}...` : 'null'
+      });
+
+      // 🔧 STEP 2: Search database with both username and resolved address
+      const searchResult = await this.searchDatabaseForFkey(username, resolution.resolvedAddress || undefined);
+      
+      if (searchResult.fkeyId) {
+        // Found fkey.id in database
+        const resolvedInfo = resolution.resolvedAddress ? `\n🔗 Resolved from: ${resolution.resolvedFrom || resolution.originalInput}` : '';
+        
+        return `🔍 User Found! 🔗
+
+👤 ${username}${resolvedInfo}
+🔑 FluidKey: ${searchResult.fkeyId}.fkey.id
+💳 Privacy payments enabled
+
+💰 You can send anonymous payments to this user!
+
+🚀 Try it:
+• "create payment link for $25"
+• Share the link with them
+• They'll receive payments to their stealth address
+
+🥷 Privacy enabled! 🔒
+
+📊 Found by: ${searchResult.foundBy} search
+📍 Sources: Agent DMs, dStealth miniapp, Farcaster casts`;
+      }
+
+      // 🔧 STEP 3: If not found in database, check if we resolved an address
+      if (resolution.resolvedAddress) {
+        const addressType = resolution.inputType === 'ens_name' ? 'ENS name' : 
+                          resolution.inputType === 'base_name' ? 'Base name' : 
+                          resolution.inputType === 'farcaster_username' ? 'Farcaster username' : 'address';
+        
+        return `🔍 Address Found (No FluidKey)
+
+👤 ${username}
+🔗 ${addressType} resolved to: ${resolution.resolvedAddress.slice(0, 8)}...${resolution.resolvedAddress.slice(-6)}
+❌ No fkey.id set up yet
+
+💡 Help them get started:
+• Share FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+• Tell them to cast "@dstealth username.fkey.id" on Farcaster
+• They can also DM me at @dstealth.base.eth
+
+🚀 Grow the privacy network together!
+
+📊 Address resolution: ${resolution.inputType} → wallet address`;
+      }
+
+      // 🔧 STEP 4: Fallback to comprehensive search API
+      try {
+        const backendUrl = process.env.BACKEND_URL || 'http://localhost:5001';
+        const response = await fetch(`${backendUrl}/api/user/search/comprehensive?query=${encodeURIComponent(username)}&limit=5`);
+
+        if (response.ok) {
+          const searchData = await response.json();
+
+          if (searchData.success && searchData.results.length > 0) {
+            // Look for exact username match first
+            let exactMatch = searchData.results.find((user: any) => 
+              user.username.toLowerCase() === username.toLowerCase() ||
+              (user.fkeyId && user.fkeyId.toLowerCase() === username.toLowerCase())
+            );
+
+            // If no exact match, use the first result with fkey, then first overall
+            if (!exactMatch) {
+              exactMatch = searchData.results.find((user: any) => user.hasFkey) || searchData.results[0];
+            }
+
+            if (exactMatch.hasFkey) {
+              const verifiedBadge = exactMatch.verified ? ' ✅' : '';
+              const sourceIcon = exactMatch.source === 'agent_db' ? '🔗' : exactMatch.source === 'frontend_db' ? '💻' : '🎭';
+              
+              return `🔍 User Found! ${sourceIcon}
+
+👤 @${exactMatch.username}${verifiedBadge} (${exactMatch.displayName})
+🔑 FluidKey: ${exactMatch.fkeyId}.fkey.id
+💳 ${exactMatch.stealthAddress ? 'Stealth payments enabled' : 'Standard payments'}
+
+💰 You can send anonymous payments to this user!
+
+🚀 Try it:
+• "create payment link for $25"
+• Share the link with @${exactMatch.username}
+• They'll receive payments to their stealth address
+
+🥷 Privacy enabled! 🔒
+
+📊 Found in: All available users
+📍 Sources: Agent DMs, dStealth miniapp, Farcaster casts`;
+            } else {
+              const verifiedBadge = exactMatch.verified ? ' ✅' : '';
+              
+              return `🔍 User Found (No FluidKey) 🔗
+
+👤 @${exactMatch.username}${verifiedBadge} (${exactMatch.displayName})
+❌ No fkey.id set up yet
+
+💡 Help them get started:
+• Share FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+• Tell them to cast "@dstealth username.fkey.id" on Farcaster
+• They can also DM me at @dstealth.base.eth
+
+🚀 Grow the privacy network together!
+
+📊 Found in: All available users
+📍 Sources: Agent DMs, dStealth miniapp, Farcaster casts`;
+            }
+          }
+        }
+      } catch (apiError) {
+        console.error('Comprehensive search API failed:', apiError);
+      }
+
+      // 🔧 STEP 5: Final fallback to Farcaster search
+      try {
+        console.log('🔄 Falling back to Farcaster-only search...');
+        const farcasterResults = await this.searchFarcasterUsers(username);
+        
+        if (farcasterResults.length > 0) {
+          const exactMatch = farcasterResults.find(user => 
+            user.username.toLowerCase() === username.toLowerCase()
+          ) || farcasterResults[0];
+
+          const verifiedBadge = exactMatch.verified ? ' ✅' : '';
+          
+          if (exactMatch.hasFkey) {
+            return `🔍 User Found! (Fallback Search)
+
+👤 @${exactMatch.username}${verifiedBadge} (${exactMatch.displayName})
+🔑 FluidKey: ${exactMatch.fkeyId}.fkey.id
+
+💰 You can send anonymous payments to this user!
+
+⚠️ Using fallback search - comprehensive search temporarily unavailable.`;
+          } else {
+            return `🔍 User Found (No FluidKey)
+
+👤 @${exactMatch.username}${verifiedBadge} (${exactMatch.displayName})
+❌ No fkey.id set up yet
+
+💡 Help them get started with FluidKey!
+
+⚠️ Using fallback search - comprehensive search temporarily unavailable.`;
+          }
+        }
+      } catch (fallbackError) {
+        console.error('Fallback search also failed:', fallbackError);
+      }
+
+      // 🔧 STEP 6: Nothing found anywhere
+      const inputTypeHelp = resolution.inputType === 'ens_name' ? 'ENS name' : 
+                           resolution.inputType === 'base_name' ? 'Base name' : 
+                           resolution.inputType === 'farcaster_username' ? 'Farcaster username' : 'username';
+      
+      return `❌ User Not Found
+
+Sorry, I couldn't find "${username}" anywhere.
+
+🔍 Searched as: ${inputTypeHelp}
+🌐 Checked: All available users
+📍 Sources: Agent DMs, dStealth miniapp, Farcaster casts
+${resolution.inputType !== 'plain_username' ? `🔗 Address resolution: ${resolution.inputType === 'ens_name' ? 'ENS' : resolution.inputType === 'base_name' ? 'Base' : 'Farcaster'} lookup attempted` : ''}
+
+💡 Suggestions:
+• Check the spelling
+• Try with @ prefix for Farcaster: @${username}
+• Try with .eth or .base.eth suffix
+• Use /find-users ${username} for broader search
+
+Want to invite them to dStealth? Share this:
+• Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+• Cast "@dstealth username.fkey.id" on Farcaster
+• DM me at @dstealth.base.eth`;
+
+    } catch (error) {
+      console.error("Error in enhanced search:", error);
+      return `❌ Search temporarily unavailable. Please try again later.`;
     }
   }
 
@@ -1790,80 +3671,29 @@ Try it now! Just type the amount you want.`;
         case 'get-help':
           return this.getHelpMessage();
 
-        case 'setup-fkey':
-          return `🔑 Setup fkey.id
+        case 'search-user':
+          return `🔍 Search for User's fkey.id
 
-To set up your fkey.id:
-
-Step 1: 🔑 Get FluidKey (if you don't have it)
-${this.FLUIDKEY_REFERRAL_URL}
-
-Step 2: 📝 Set your fkey.id
-• /set yourUsername
-• my fkey is yourUsername
-
-Step 3: 🚀 Complete setup
-${this.DSTEALTH_APP_URL}
+Type a .base.eth handle or Farcaster username to search for their fkey.id:
 
 Examples:
-• /set tantodefi
-• my fkey is tantodefi
+• tantodefi
+• vitalik.eth
+• @username
+• user.base.eth
 
-Need help? Just ask me anything!`;
+I'll search across all databases and tell you if they have set their fkey.id!
+
+💡 Just type the username you want to search for.`;
+
+        case 'setup-fkey':
+          return await this.handleHaveFkeyFlow(senderInboxId);
 
         case 'manage-links':
           return await this.handleLinksManagement(senderInboxId);
 
         case 'check-status':
           return this.getStatusMessage();
-
-        case 'open-coinbase-wallet':
-          return `🔗 Open in Coinbase Wallet
-
-Your payment link is ready! Use the Coinbase Wallet app to:
-
-• 📱 Open Coinbase Wallet
-• 💳 Navigate to payment links
-• 🚀 Complete your payment
-
-Direct Link: Use the Daimo link from the previous message
-
-Need help? Contact support at ${this.DSTEALTH_APP_URL}`;
-
-        case 'share-link':
-          return `📤 Share Payment Link
-
-Share this payment link to receive anonymous payments:
-
-The link from your previous payment will work with any wallet that supports Base network.
-
-Sharing Options:
-• 📱 Social media
-• 💬 Direct messages
-• 📧 Email
-• 🔗 Any platform
-
-Privacy Features:
-• 🥷 Anonymous sender protection
-• 🔒 Stealth address technology
-• 🧾 ZK proof receipts
-
-Dashboard: ${this.DSTEALTH_APP_URL}`;
-
-        case 'view-receipt':
-          return `🧾 ZK Receipt Available
-
-Your transaction receipt will be available on the dStealth dashboard once payment is processed.
-
-Features:
-• 🔒 Zero-knowledge proof
-• 🧾 Transaction verification
-• 📊 Payment analytics
-• 💼 Export options
-
-View receipts: ${this.DSTEALTH_APP_URL}
-
-The ZK proof ensures privacy while providing transaction verification.`;
 
         case 'create-another':
           return `➕ Create Another Payment Link
@@ -1924,60 +3754,72 @@ Just say the amount: "create payment link for $X"`;
                 return `❌ Conversation Error: Unable to find conversation for wallet request`;
               }
 
-              // Send the wallet send calls request
+              // Send wallet transaction request
               await userConversation.send(walletSendCalls, ContentTypeWalletSendCalls);
-              
-              console.log(`💰 Wallet transaction request sent: $${paymentData.amount} USDC to ${paymentData.stealthAddress}`);
-              
-              // Return confirmation message
-              return `💰 Wallet Transaction Request Sent!
 
-Amount: $${paymentData.amount} USDC
-Recipient: ${paymentData.fkeyId}.fkey.id  
-Stealth Address: ${paymentData.stealthAddress.slice(0, 8)}...${paymentData.stealthAddress.slice(-6)}
+              return `💰 Wallet Transaction Sent!
 
-✅ Please approve the transaction in your wallet
+A transaction request has been sent to your wallet to send $${paymentData.amount} USDC to ${paymentData.fkeyId}.fkey.id.
 
-Features:
-• 🥷 Anonymous sender privacy
-• ⚡ Direct to stealth address
-• 🧾 ZK proof receipt available
-• 🎯 Earn privacy rewards
+Check your wallet to approve the transaction.
 
-After approval: Share the transaction reference for ZK receipt!`;
+🎯 Privacy Features:
+• 🥷 Anonymous sender protection
+• 🔒 Sent to stealth address
+• 🧾 ZK proof receipt will be generated
 
+Transaction Details:
+• Amount: $${paymentData.amount} USDC
+• To: ${paymentData.fkeyId}.fkey.id
+• Address: ${paymentData.stealthAddress.slice(0, 8)}...${paymentData.stealthAddress.slice(-6)}
+
+Approve in your wallet to complete! 🚀`;
             } catch (error) {
-              console.error("Error sending wallet transaction request:", error);
-              return `❌ Transaction Error: Failed to create wallet transaction request. Please try again.`;
+              console.error('Error sending wallet transaction:', error);
+              return `❌ Transaction Error: Unable to send wallet transaction request. Please try again.`;
             }
           } else {
-            return `❌ Payment Data Missing: No payment information found. Please create a payment link first.`;
+            return `❌ No payment data found. Please create a payment link first.`;
           }
 
-        case 'open-daimo-link':
-        case 'copy-payment-link':
         case 'daimo-pay-link':
-          const linkData = this.getPaymentDataForUser(senderInboxId);
-          if (linkData) {
+          const daimoData = this.getPaymentDataForUser(senderInboxId);
+          if (daimoData) {
             return `🔗 Daimo Pay Link
 
-${linkData.daimoLink}`;
+Direct link to pay ${daimoData.fkeyId}.fkey.id:
+
+${daimoData.daimoLink}
+
+Features:
+• ⚡ One-click payment
+• 🥷 Anonymous sender privacy
+• 🔒 Direct to stealth address
+• 🧾 ZK proof receipt
+
+Share this link with anyone to receive payments!`;
           } else {
-            return `🔗 Daimo Pay Link
-
-Your payment link is ready! Use the Daimo link from your recent payment creation.`;
+            return `❌ No payment data found. Please create a payment link first.`;
           }
 
         case 'cbw-request-link':
-          const cbwLinkData = this.getPaymentDataForUser(senderInboxId);
-          if (cbwLinkData) {
-            return `📱 CBW Request Link
+          const cbwData = this.getPaymentDataForUser(senderInboxId);
+          if (cbwData) {
+            return `📱 Coinbase Wallet Request Link
 
-${cbwLinkData.cbwLink}`;
+Direct link to pay ${cbwData.fkeyId}.fkey.id:
+
+${cbwData.cbwLink}
+
+Features:
+• 📱 Mobile-friendly
+• 🥷 Anonymous sender privacy
+• 🔒 Direct to stealth address
+• 🧾 ZK proof receipt
+
+Share this link for easy mobile payments!`;
           } else {
-            return `📱 CBW Request Link
-
-Your CBW payment link is ready! Use the CBW link from your recent payment creation.`;
+            return `❌ No payment data found. Please create a payment link first.`;
           }
 
         case 'share-link':
@@ -2091,28 +3933,32 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
   }
 
   /**
-   * 🔧 TBA PATTERN: Send help actions message (following TBA pattern)
+   * 🔧 FIXED: Send help actions to the conversation where requested (group or DM)
    */
-  private async sendHelpActionsMessage(senderInboxId: string): Promise<void> {
+  private async sendHelpActionsMessage(senderInboxId: string, isGroup: boolean, conversation?: any): Promise<void> {
     try {
       if (!this.client) {
         console.log("⚠️ Base agent not available, skipping Help Actions message");
         return;
       }
 
-      // Get user's conversations to send actions to
-      const conversations = await this.client.conversations.list();
-      
-      // Find the conversation with this user
-      const userConversation = conversations.find(conv => {
-        // For DMs, check if this is a 1:1 conversation with the user
-        if (!(conv instanceof Group)) {
-          return conv.peerInboxId === senderInboxId;
-        }
-        return false;
-      });
+      let targetConversation = conversation;
 
-      if (!userConversation) {
+      // If no conversation provided, find the conversation with this user
+      if (!targetConversation) {
+        const conversations = await this.client.conversations.list();
+        
+        // Find the conversation with this user
+        targetConversation = conversations.find(conv => {
+          // For DMs, check if this is a 1:1 conversation with the user
+          if (!(conv instanceof Group)) {
+            return conv.peerInboxId === senderInboxId;
+          }
+          return false;
+        });
+      }
+
+      if (!targetConversation) {
         console.log("⚠️ User conversation not found, skipping Help Actions message");
         return;
       }
@@ -2143,6 +3989,11 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
             style: "primary"
           },
           {
+            id: `search-user-${renderTimestamp}-${randomSuffix}`,
+            label: "🔍 Search User",
+            style: "secondary"
+          },
+          {
             id: `get-help-${renderTimestamp}-${randomSuffix}`,
             label: "❓ Get Help",
             style: "secondary"
@@ -2151,8 +4002,8 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
       };
 
       // Send actions using the ActionsCodec
-      await userConversation.send(actionsContent, ContentTypeActions);
-      console.log(`✅ Help Actions sent with unique ID: ${actionsContent.id}`);
+      await targetConversation.send(actionsContent, ContentTypeActions);
+      console.log(`✅ Help Actions sent to ${isGroup ? 'group' : 'DM'} with unique ID: ${actionsContent.id}`);
       
       // Track this action set in recent sets (instead of just latest)
       this.addRecentActionSet(senderInboxId, actionsContent.id);
@@ -2240,14 +4091,17 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
   }
 
   /**
-   * 🔧 ENHANCED: Send payment-related actions with self-contained information
+   * 🔧 FIXED: Send payment-related actions with proper conversation handling
    */
   private async sendTransactionActions(
     senderInboxId: string,
     amount: string,
     fkeyId: string,
     daimoLink: string,
-    stealthAddress: string
+    stealthAddress: string,
+    conversationId?: string,
+    isGroup?: boolean,
+    conversation?: any
   ): Promise<void> {
     try {
       if (!this.client) {
@@ -2255,22 +4109,37 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
         return;
       }
 
-      // Get user's conversations to send actions to (same pattern as other methods)
-      const conversations = await this.client.conversations.list();
-      
-      // Find the conversation with this user
-      const userConversation = conversations.find(conv => {
-        // For DMs, check if this is a 1:1 conversation with the user
-        if (!(conv instanceof Group)) {
-          return conv.peerInboxId === senderInboxId;
-        }
-        return false;
-      });
+      let targetConversation = conversation;
 
-      if (!userConversation) {
+      // If no conversation provided, find the conversation with this user
+      if (!targetConversation) {
+        const conversations = await this.client.conversations.list();
+        
+        // Find the specific conversation by ID if provided
+        targetConversation = conversationId ? 
+          conversations.find(conv => conv.id === conversationId) : null;
+
+        // If no specific conversation or conversation not found, find DM with user
+        if (!targetConversation) {
+          targetConversation = conversations.find(conv => {
+            // For DMs, check if this is a 1:1 conversation with the user
+            if (!(conv instanceof Group)) {
+              return conv.peerInboxId === senderInboxId;
+            }
+            return false;
+          });
+        }
+      }
+
+      if (!targetConversation) {
         console.log("⚠️ User conversation not found, skipping Transaction Actions");
         return;
       }
+
+      // 🔧 FIXED: Send payment actions to the same conversation where requested (group or DM)
+      console.log(`💳 Sending payment actions to ${isGroup ? 'group' : 'DM'} conversation`);
+      
+      // 🔧 REMOVED: Don't skip groups - send actions to the requesting conversation
 
       // Generate unique timestamp for this render to reset button states
       const renderTimestamp = Date.now();
@@ -2320,8 +4189,8 @@ Choose your next action:`,
       };
 
       // Send actions using the ActionsCodec
-      await userConversation.send(actionsContent, ContentTypeActions);
-      console.log(`✅ Transaction Actions sent with unique ID: ${actionsContent.id}`);
+      await targetConversation.send(actionsContent, ContentTypeActions);
+      console.log(`✅ Transaction Actions sent to ${isGroup ? 'group' : 'DM'} with unique ID: ${actionsContent.id}`);
       
       // Track this action set in recent sets (instead of just latest)
       this.addRecentActionSet(senderInboxId, actionsContent.id);
@@ -2432,6 +4301,9 @@ Choose your next action:`,
       if (isStealthPayment) {
         console.log("🥷 Stealth payment transaction detected!");
         
+        // Generate explorer URL first for use in storage
+        const explorerUrl = this.getExplorerUrl(txHash, networkId?.toString() || "base");
+        
         // Store transaction for ZK receipt processing
         const userData = await agentDb.getStealthDataByUser(senderInboxId);
         if (userData) {
@@ -2458,10 +4330,42 @@ Choose your next action:`,
               }
             };
             
-            // Store in Redis for frontend access (expires in 30 days)
+            // Store in Redis for frontend access (expires in 7 days - local-first system)
             if (redis) {
-              await redis.set(zkReceiptKey, JSON.stringify(zkReceiptData), { ex: 86400 * 30 });
+              await redis.set(zkReceiptKey, JSON.stringify(zkReceiptData), { ex: 86400 * 7 });
               console.log(`✅ ZK receipt stored for frontend access: ${zkReceiptKey}`);
+              
+              // 🔧 ENHANCED: Also update any pending payment links for this transaction
+              try {
+                const pattern = `zk_receipt:*:${senderAddress.toLowerCase()}:*`;
+                const keys = await redis.keys(pattern);
+                
+                for (const key of keys) {
+                  const existingData = await redis.get(key);
+                  if (existingData) {
+                    const parsed = typeof existingData === 'string' ? JSON.parse(existingData) : existingData;
+                    
+                    // Update pending payment links that match this transaction
+                    if (parsed.status === 'pending_payment' && 
+                        parsed.recipientAddress === userData.stealthAddress &&
+                        parsed.fkeyId === userData.fkeyId) {
+                      
+                      const updatedData = {
+                        ...parsed,
+                        transactionHash: txHash,
+                        status: 'completed',
+                        completedAt: Date.now(),
+                        txUrl: explorerUrl
+                      };
+                      
+                      await redis.set(key, JSON.stringify(updatedData), { ex: 86400 * 7 });
+                      console.log(`✅ Updated pending payment link as completed: ${key}`);
+                    }
+                  }
+                }
+              } catch (updateError) {
+                console.warn('⚠️ Failed to update pending payment links:', updateError);
+              }
             }
           } catch (receiptError) {
             console.warn('⚠️ Failed to store ZK receipt for frontend:', receiptError);
@@ -2469,9 +4373,6 @@ Choose your next action:`,
           
           console.log(`💾 Storing transaction reference for ZK receipt: ${txHash}`);
         }
-        
-        // Generate ZK receipt response
-        const explorerUrl = this.getExplorerUrl(txHash, networkId?.toString() || "base");
         
         return `🧾 ZK Receipt - Stealth Payment Confirmed!
 
@@ -2545,12 +4446,52 @@ Need help? Contact support at ${this.DSTEALTH_APP_URL}`;
   }
 
   /**
+   * 🔧 NEW: Get consistent message for non-onboarded users trying to use features requiring fkey
+   */
+  private getRequiresFkeyMessage(isGroup: boolean = false): string {
+    if (isGroup) {
+      return `🔒 fkey.id Required
+
+This feature requires fkey.id setup. To get started:
+
+💬 DM me to set up your fkey.id:
+• Send me your username (e.g., tantodefi)
+• Or use: /set yourUsername
+
+🎭 Or cast on Farcaster:
+• Cast: "@dstealth username.fkey.id"
+
+Need FluidKey? Get it here:
+${this.FLUIDKEY_REFERRAL_URL}
+
+Once set up, you can use all features! 🚀`;
+    } else {
+      return `🔑 Setup Required
+
+You need to set your fkey.id to use this feature.
+
+Quick Setup:
+• Type your username (e.g., tantodefi)
+• Or use: /set yourUsername
+
+🎭 Alternative: Cast on Farcaster
+• Cast: "@dstealth username.fkey.id"
+
+Need FluidKey? Get it here:
+${this.FLUIDKEY_REFERRAL_URL}
+
+Type /help for full setup instructions.`;
+    }
+  }
+
+  /**
    * Check if user has fkey.id set and is fully onboarded
    */
   private async isUserOnboarded(senderInboxId: string): Promise<boolean> {
     try {
-      const userData = await agentDb.getStealthDataByUser(senderInboxId);
-      return !!(userData?.fkeyId && userData.fkeyId.trim().length > 0);
+      // Use cross-platform checking for comprehensive onboarding status
+      const crossPlatformData = await this.checkFkeyAcrossAllSources(senderInboxId);
+      return !!(crossPlatformData.fkeyId && crossPlatformData.fkeyId.trim().length > 0);
     } catch (error) {
       console.error("Error checking user onboarding status:", error);
       return false;
@@ -2558,12 +4499,18 @@ Need help? Contact support at ${this.DSTEALTH_APP_URL}`;
   }
 
   /**
-   * Send welcome message with action buttons for fkey.id onboarding
+   * 🔧 FIXED: Send welcome message with duplicate prevention
    */
   private async sendWelcomeWithActions(senderInboxId: string, conversation?: any): Promise<void> {
     try {
       if (!this.client) {
         console.log("⚠️ Client not available, skipping welcome actions");
+        return;
+      }
+
+      // 🔧 DUPLICATE PREVENTION: Check if welcome was already sent
+      if (this.userWelcomesSent.has(senderInboxId)) {
+        console.log(`⚠️ Welcome actions already sent to user: ${senderInboxId}`);
         return;
       }
 
@@ -2586,6 +4533,15 @@ Need help? Contact support at ${this.DSTEALTH_APP_URL}`;
           return;
         }
       }
+
+      // 🔧 DUPLICATE PREVENTION: Don't send welcome to groups
+      if (targetConversation instanceof Group) {
+        console.log("⚠️ Skipping welcome actions for group conversation");
+        return;
+      }
+
+      // Mark welcome as sent BEFORE sending to prevent race conditions
+      this.userWelcomesSent.add(senderInboxId);
 
       // Generate unique timestamp for this welcome message
       const renderTimestamp = Date.now();
@@ -2629,11 +4585,10 @@ Choose your path:`,
       // Track this action set
       this.addRecentActionSet(senderInboxId, welcomeActions.id);
 
-      // Mark welcome as sent
-      this.userWelcomesSent.add(senderInboxId);
-
     } catch (error) {
       console.error("❌ Error sending welcome actions:", error);
+      // Remove from sent set if sending failed
+      this.userWelcomesSent.delete(senderInboxId);
     }
   }
 
@@ -2795,8 +4750,17 @@ Examples:
       // Confirmed - now verify and save the fkey.id
       const fkeyId = pendingConfirmation.fkeyId;
       
-      // Call the existing fkey verification logic
-      const verificationResult = await this.callFkeyLookupAPI(fkeyId);
+      // Get user address for ZK receipt storage
+      let userAddress: string | undefined = undefined;
+      try {
+        const inboxState = await this.client?.preferences.inboxStateFromInboxIds([senderInboxId]);
+        userAddress = inboxState?.[0]?.identifiers[0]?.identifier;
+      } catch (error) {
+        console.warn('⚠️ Could not resolve user address for fkey confirmation:', error);
+      }
+      
+      // Call the existing fkey verification logic with ZK receipt generation
+      const verificationResult = await this.callFkeyLookupAPI(fkeyId, userAddress, 'xmtp-agent-fkey-confirmation');
       
       if (verificationResult.error) {
         return `❌ Verification Failed
@@ -2820,7 +4784,7 @@ Try again with: /set ${fkeyId}`;
         zkProof: verificationResult.proof || null,
         lastUpdated: Date.now(),
         requestedBy: this.client?.inboxId || "",
-        setupStatus: "fkey_set" as const
+        setupStatus: 'fkey_set' as const
       };
 
       await agentDb.storeUserStealthData(stealthData);
@@ -2909,6 +4873,734 @@ Something went wrong while saving your fkey.id. Please try again or contact supp
 
     } catch (error) {
       console.error("❌ Error sending post-onboarding help:", error);
+    }
+  }
+
+  /**
+   * 🔧 ENHANCED: Handle direct user search with comprehensive address resolution
+   */
+  private async handleDirectUserSearch(username: string, senderInboxId: string): Promise<string | null> {
+    try {
+      const cleanUsername = username.trim();
+      
+      if (!cleanUsername || cleanUsername.length < 2) {
+        return null; // Not a valid username search
+      }
+
+      console.log(`🔍 Enhanced direct user search for: ${cleanUsername}`);
+
+      // 🔧 STEP 1: Resolve user input to address if possible
+      const resolution = await this.resolveUserInput(cleanUsername);
+      
+      console.log(`📍 Input resolution:`, {
+        input: resolution.originalInput,
+        type: resolution.inputType,
+        resolved: resolution.resolvedAddress ? `${resolution.resolvedAddress.slice(0, 8)}...` : 'null'
+      });
+
+      // 🔧 STEP 2: Search shared database with both username and resolved address
+      const searchResult = await this.searchDatabaseForFkey(cleanUsername, resolution.resolvedAddress || undefined);
+      
+      if (searchResult.fkeyId) {
+        // Found fkey.id in shared database
+        const resolvedInfo = resolution.resolvedAddress ? `\n🔗 Resolved from: ${resolution.resolvedFrom || resolution.originalInput}` : '';
+        
+        return `🔍 User Found! 🔗
+
+👤 ${cleanUsername}${resolvedInfo}
+🔑 FluidKey: ${searchResult.fkeyId}.fkey.id
+💳 Privacy payments enabled
+
+💰 You can send anonymous payments to this user!
+
+🚀 Try it:
+• "create payment link for $25"
+• Share the link with them
+• They'll receive payments to their stealth address
+
+🥷 Privacy enabled! 🔒
+
+📊 Found by: ${searchResult.foundBy} search
+📍 Sources: Agent DMs, dStealth miniapp, Farcaster casts`;
+      }
+
+      // 🔧 STEP 3: If not found in database, check if we resolved an address
+      if (resolution.resolvedAddress) {
+        const addressType = resolution.inputType === 'ens_name' ? 'ENS name' : 
+                          resolution.inputType === 'base_name' ? 'Base name' : 
+                          resolution.inputType === 'farcaster_username' ? 'Farcaster username' : 'address';
+        
+        return `🔍 Address Found (No FluidKey)
+
+👤 ${cleanUsername}
+🔗 ${addressType} resolved to: ${resolution.resolvedAddress.slice(0, 8)}...${resolution.resolvedAddress.slice(-6)}
+❌ No fkey.id set up yet
+
+💡 Help them get started:
+• Share FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+• Tell them to cast "@dstealth username.fkey.id" on Farcaster
+• They can also DM me at @dstealth.base.eth
+
+🚀 Grow the privacy network together!
+
+📊 Address resolution: ${resolution.inputType} → wallet address`;
+      }
+
+      // 🔧 STEP 4: Nothing found anywhere
+      const inputTypeHelp = resolution.inputType === 'ens_name' ? 'ENS name' : 
+                           resolution.inputType === 'base_name' ? 'Base name' : 
+                           resolution.inputType === 'farcaster_username' ? 'Farcaster username' : 'username';
+      
+      return `🔍 User Search Results
+
+Sorry, I couldn't find "${cleanUsername}" anywhere.
+
+🔍 Searched as: ${inputTypeHelp}
+🌐 Checked: All available users
+📍 Sources: Agent DMs, dStealth miniapp, Farcaster casts
+${resolution.inputType !== 'plain_username' ? `🔗 Address resolution: ${resolution.inputType === 'ens_name' ? 'ENS' : resolution.inputType === 'base_name' ? 'Base' : 'Farcaster'} lookup attempted` : ''}
+
+💡 Suggestions:
+• Check the spelling
+• Try with @ prefix for Farcaster: @${cleanUsername}
+• Try with .eth or .base.eth suffix
+• Use /search ${cleanUsername} for broader search
+
+Want to invite them to dStealth? Share this:
+• Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+• Cast "@dstealth username.fkey.id" on Farcaster
+• DM me at @dstealth.base.eth`;
+
+    } catch (error) {
+      console.error('Error in enhanced direct user search:', error);
+      return null; // Fall back to normal message processing
+    }
+  }
+
+  /**
+   * 🔧 NEW: Resolve ENS names to addresses
+   */
+  private async resolveENSName(ensName: string): Promise<string | null> {
+    try {
+      // Remove .eth if present for processing
+      const cleanName = ensName.endsWith('.eth') ? ensName : `${ensName}.eth`;
+      
+      console.log(`🔍 Resolving ENS name: ${cleanName}`);
+      
+      // Use ethers to resolve ENS name
+      const provider = new ethers.JsonRpcProvider('https://ethereum-rpc.publicnode.com');
+      const address = await provider.resolveName(cleanName);
+      
+      if (address) {
+        console.log(`✅ ENS resolved: ${cleanName} -> ${address}`);
+        return address.toLowerCase();
+      }
+      
+      console.log(`❌ ENS resolution failed for: ${cleanName}`);
+      return null;
+    } catch (error) {
+      console.error(`❌ Error resolving ENS name ${ensName}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 🔧 NEW: Resolve Base names to addresses
+   */
+  private async resolveBaseName(baseName: string): Promise<string | null> {
+    try {
+      // Remove .base.eth if present for processing
+      const cleanName = baseName.endsWith('.base.eth') ? baseName : `${baseName}.base.eth`;
+      
+      console.log(`🔍 Resolving Base name: ${cleanName}`);
+      
+      // Use Base network provider to resolve Base name
+      const provider = new ethers.JsonRpcProvider('https://mainnet.base.org');
+      const address = await provider.resolveName(cleanName);
+      
+      if (address) {
+        console.log(`✅ Base name resolved: ${cleanName} -> ${address}`);
+        return address.toLowerCase();
+      }
+      
+      console.log(`❌ Base name resolution failed for: ${cleanName}`);
+      return null;
+    } catch (error) {
+      console.error(`❌ Error resolving Base name ${baseName}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 🔧 NEW: Resolve Farcaster username to wallet address
+   */
+  private async resolveFarcasterUsername(username: string): Promise<string | null> {
+    try {
+      if (!this.NEYNAR_API_KEY) {
+        console.warn('⚠️ NEYNAR_API_KEY not configured for Farcaster resolution');
+        return null;
+      }
+
+      const cleanUsername = username.replace(/^@/, '');
+      console.log(`🔍 Resolving Farcaster username: ${cleanUsername}`);
+
+      const response = await fetch(`${NEYNAR_API_BASE}/farcaster/user/by_username?username=${cleanUsername}`, {
+        headers: {
+          'api_key': this.NEYNAR_API_KEY
+        }
+      });
+
+      if (!response.ok) {
+        console.log(`❌ Farcaster user lookup failed: ${response.status}`);
+        return null;
+      }
+
+      const data = await response.json() as { user: any };
+      
+      if (data.user) {
+        // Prefer custody address, fallback to first verified address
+        const address = data.user.custody_address || data.user.verified_addresses?.eth_addresses?.[0];
+        
+        if (address) {
+          console.log(`✅ Farcaster username resolved: @${cleanUsername} -> ${address}`);
+          return address.toLowerCase();
+        }
+      }
+      
+      console.log(`❌ No address found for Farcaster username: ${cleanUsername}`);
+      return null;
+    } catch (error) {
+      console.error(`❌ Error resolving Farcaster username ${username}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 🔧 NEW: Comprehensive address resolution for different input types
+   */
+  private async resolveUserInput(input: string): Promise<{
+    originalInput: string;
+    resolvedAddress: string | null;
+    inputType: 'ethereum_address' | 'ens_name' | 'base_name' | 'farcaster_username' | 'plain_username';
+    resolvedFrom?: string;
+  }> {
+    const cleanInput = input.trim().toLowerCase();
+    
+    // Check if it's already an Ethereum address
+    if (cleanInput.match(/^0x[a-fA-F0-9]{40}$/)) {
+      return {
+        originalInput: input,
+        resolvedAddress: cleanInput,
+        inputType: 'ethereum_address'
+      };
+    }
+    
+    // Check if it's a Base name
+    if (cleanInput.includes('.base.eth')) {
+      const resolvedAddress = await this.resolveBaseName(cleanInput);
+      return {
+        originalInput: input,
+        resolvedAddress,
+        inputType: 'base_name',
+        resolvedFrom: cleanInput
+      };
+    }
+    
+    // Check if it's an ENS name
+    if (cleanInput.includes('.eth')) {
+      const resolvedAddress = await this.resolveENSName(cleanInput);
+      return {
+        originalInput: input,
+        resolvedAddress,
+        inputType: 'ens_name',
+        resolvedFrom: cleanInput
+      };
+    }
+    
+    // Check if it's a Farcaster username (starts with @)
+    if (cleanInput.startsWith('@')) {
+      const resolvedAddress = await this.resolveFarcasterUsername(cleanInput);
+      return {
+        originalInput: input,
+        resolvedAddress,
+        inputType: 'farcaster_username',
+        resolvedFrom: cleanInput
+      };
+    }
+    
+    // Plain username - could be Farcaster or just a username
+    // Try Farcaster first
+    const farcasterAddress = await this.resolveFarcasterUsername(cleanInput);
+    if (farcasterAddress) {
+      return {
+        originalInput: input,
+        resolvedAddress: farcasterAddress,
+        inputType: 'farcaster_username',
+        resolvedFrom: `@${cleanInput}`
+      };
+    }
+    
+    // If not found on Farcaster, treat as plain username
+    return {
+      originalInput: input,
+      resolvedAddress: null,
+      inputType: 'plain_username'
+    };
+  }
+
+  /**
+   * 🔧 UNIFIED: Search shared database for fkey.id by multiple methods
+   */
+  private async searchDatabaseForFkey(username: string, resolvedAddress?: string): Promise<{
+    fkeyId: string | null;
+    foundBy: 'username' | 'address' | 'not_found';
+    source: 'shared_db';
+  }> {
+    // All data is stored in the same shared database (agentDb using Redis)
+    // This includes users from: Agent DMs, dStealth miniapp, and Farcaster casts
+    
+    // First try username search in shared database
+    const usernameResult = await this.findFkeyByUsername(username);
+    if (usernameResult) {
+      return {
+        fkeyId: usernameResult,
+        foundBy: 'username',
+        source: 'shared_db'
+      };
+    }
+    
+    // Then try address search if we have a resolved address
+    if (resolvedAddress) {
+      const addressResult = await this.findFkeyByWallet(resolvedAddress);
+      if (addressResult) {
+        return {
+          fkeyId: addressResult,
+          foundBy: 'address',
+          source: 'shared_db'
+        };
+      }
+    }
+    
+    return {
+      fkeyId: null,
+      foundBy: 'not_found',
+      source: 'shared_db'
+    };
+  }
+
+  /**
+   * 🔧 NEW: Search for fkey.id by username in database
+   */
+  private async findFkeyByUsername(username: string): Promise<string | null> {
+    try {
+      const allUsers = await agentDb.getAllStealthData();
+      
+      for (const userData of allUsers) {
+        if (userData.fkeyId && userData.fkeyId.toLowerCase() === username.toLowerCase()) {
+          return userData.fkeyId;
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Error finding fkey by username:', error);
+      return null;
+    }
+  }
+
+
+  /**
+   * 🔧 NEW: Context-aware action button expiration
+   */
+  private calculateSmartExpiration(actionType: string, userContext: any): string {
+    const now = Date.now();
+    
+    switch (actionType) {
+      case 'welcome':
+        // Welcome actions expire quickly to prevent confusion
+        return new Date(now + 5 * 60 * 1000).toISOString(); // 5 minutes
+      
+      case 'payment':
+        // Payment actions have longer expiration
+        return new Date(now + 60 * 60 * 1000).toISOString(); // 1 hour
+      
+      case 'confirmation':
+        // Confirmation actions expire quickly
+        return new Date(now + 10 * 60 * 1000).toISOString(); // 10 minutes
+      
+      case 'help':
+        // Help actions can last longer
+        return new Date(now + 24 * 60 * 60 * 1000).toISOString(); // 24 hours
+      
+      default:
+        // Default expiration
+        return new Date(now + 12 * 60 * 60 * 1000).toISOString(); // 12 hours
+    }
+  }
+
+  /**
+   * 🔧 NEW: Dynamic action button generation based on user context
+   */
+  private generateContextualActions(userStatus: any, actionType: string = 'general'): ActionsContent {
+    const renderTimestamp = Date.now();
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
+    const actions = [];
+
+    // Base actions available to all users
+    if (!userStatus.hasValidFkey) {
+      actions.push({
+        id: `setup-fkey-${renderTimestamp}-${randomSuffix}`,
+        label: "🔑 Setup fkey.id",
+        style: "primary" as const
+      });
+    }
+
+    if (userStatus.hasValidFkey) {
+      actions.push({
+        id: `create-payment-link-${renderTimestamp}-${randomSuffix}`,
+        label: "💳 Create Payment Link",
+        style: "primary" as const
+      });
+      
+      actions.push({
+        id: `check-balance-${renderTimestamp}-${randomSuffix}`,
+        label: "💰 Check Balance",
+        style: "secondary" as const
+      });
+    }
+
+    // Farcaster-specific actions
+    if (userStatus.hasFarcasterProfile) {
+      actions.push({
+        id: `send-rewards-${renderTimestamp}-${randomSuffix}`,
+        label: "🎯 Send Rewards",
+        style: "secondary" as const
+      });
+      
+      actions.push({
+        id: `search-followers-${renderTimestamp}-${randomSuffix}`,
+        label: "👥 Search Followers",
+        style: "secondary" as const
+      });
+    }
+
+    // Universal actions
+    actions.push({
+      id: `dstealth-miniapp-${renderTimestamp}-${randomSuffix}`,
+      label: "🌐 dStealth App",
+      style: "secondary" as const
+    });
+
+    actions.push({
+      id: `get-help-${renderTimestamp}-${randomSuffix}`,
+      label: "❓ Get Help",
+      style: "secondary" as const
+    });
+
+    const description = this.getContextualDescription(userStatus, actionType);
+    const expiration = this.calculateSmartExpiration(actionType, userStatus);
+
+    return {
+      id: `contextual-actions-${renderTimestamp}-${randomSuffix}`,
+      description,
+      actions,
+      expiresAt: expiration
+    };
+  }
+
+  /**
+   * 🔧 NEW: Get contextual description for action buttons
+   */
+  private getContextualDescription(userStatus: any, actionType: string): string {
+    const timestamp = new Date().toLocaleTimeString();
+    
+    if (actionType === 'welcome') {
+      return `👋 Welcome to dStealth! Choose an action to get started (${timestamp}):`;
+    }
+    
+    if (actionType === 'payment') {
+      return `💳 Payment options for ${userStatus.fkeyId || 'your account'} (${timestamp}):`;
+    }
+    
+    if (actionType === 'help') {
+      const fkeyStatus = userStatus.hasValidFkey ? `✅ ${userStatus.fkeyId}` : '❌ No fkey.id';
+      const fcStatus = userStatus.hasFarcasterProfile ? `✅ @${userStatus.farcasterUsername}` : '❌ No FC';
+      return `🤖 dStealth Agent - ${fkeyStatus} | ${fcStatus} (${timestamp}):`;
+    }
+    
+    return `🥷 dStealth Agent - Choose an action (${timestamp}):`;
+  }
+
+  /**
+   * 🔧 NEW: Batch operations for database queries
+   */
+  private async batchGetStealthData(userIds: string[]): Promise<Map<string, any>> {
+    const results = new Map<string, any>();
+    
+    try {
+      // Process in batches of 10 to avoid overwhelming the database
+      const batchSize = 10;
+      const batches = [];
+      
+      for (let i = 0; i < userIds.length; i += batchSize) {
+        batches.push(userIds.slice(i, i + batchSize));
+      }
+      
+      // Process batches in parallel
+      const batchPromises = batches.map(async (batch) => {
+        const batchResults = await Promise.all(
+          batch.map(async (userId) => {
+            const data = await agentDb.getStealthDataByUser(userId);
+            return { userId, data };
+          })
+        );
+        
+        return batchResults;
+      });
+      
+      const allBatchResults = await Promise.all(batchPromises);
+      
+      // Flatten results and populate map
+      for (const batchResult of allBatchResults) {
+        for (const { userId, data } of batchResult) {
+          if (data) {
+            results.set(userId, data);
+          }
+        }
+      }
+      
+      console.log(`✅ Batch loaded ${results.size} user records from ${userIds.length} requests`);
+      return results;
+    } catch (error) {
+      console.error('Error in batch get stealth data:', error);
+      return results;
+    }
+  }
+
+  /**
+   * 🔧 NEW: Batch operations for fkey lookups
+   */
+  private async batchFkeyLookups(fkeyIds: string[]): Promise<Map<string, any>> {
+    const results = new Map<string, any>();
+    
+    try {
+      // Process in batches of 5 to avoid API rate limits
+      const batchSize = 5;
+      const batches = [];
+      
+      for (let i = 0; i < fkeyIds.length; i += batchSize) {
+        batches.push(fkeyIds.slice(i, i + batchSize));
+      }
+      
+      // Process batches sequentially to respect rate limits
+      for (const batch of batches) {
+        const batchResults = await Promise.all(
+          batch.map(async (fkeyId) => {
+            const data = await this.callFkeyLookupAPI(fkeyId);
+            return { fkeyId, data };
+          })
+        );
+        
+        for (const { fkeyId, data } of batchResults) {
+          if (data && !data.error) {
+            results.set(fkeyId, data);
+          }
+        }
+        
+        // Add small delay between batches to respect rate limits
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      console.log(`✅ Batch looked up ${results.size} fkey records from ${fkeyIds.length} requests`);
+      return results;
+    } catch (error) {
+      console.error('Error in batch fkey lookups:', error);
+      return results;
+    }
+  }
+
+  /**
+   * 🔧 NEW: Enhanced /search command with follower fallback
+   */
+  private async handleEnhancedSearchCommand(searchQuery: string, senderInboxId: string): Promise<string> {
+    try {
+      // If no query provided, return user's followers/following
+      if (!searchQuery || searchQuery.trim() === '') {
+        return await this.handleFollowerSearch(senderInboxId);
+      }
+      
+      // Otherwise, perform regular search
+      return await this.handleSearchCommand(searchQuery, senderInboxId);
+    } catch (error) {
+      console.error('Error in enhanced search command:', error);
+      return "❌ Search temporarily unavailable. Please try again later.";
+    }
+  }
+
+  /**
+   * 🔧 NEW: Handle follower search when no username provided
+   */
+  private async handleFollowerSearch(senderInboxId: string): Promise<string> {
+    try {
+      if (!this.client) {
+        return "❌ Agent not available";
+      }
+
+      // Get sender's wallet address
+      const inboxState = await this.client.preferences.inboxStateFromInboxIds([senderInboxId]);
+      const senderAddress = inboxState[0]?.identifiers[0]?.identifier;
+
+      if (!senderAddress) {
+        return "❌ Could not get your wallet address";
+      }
+
+      // Get Farcaster context
+      const farcasterContext = await this.getFarcasterContext(senderAddress);
+
+      if (!farcasterContext) {
+        return `🔍 No Search Query & No Farcaster Profile
+
+You didn't provide a search query and you're not connected to Farcaster.
+
+🔗 To search your followers/following:
+1. Connect your wallet to Farcaster at warpcast.com
+2. Return here and use /search with no parameters
+
+🔍 To search for specific users:
+• /search username
+• /search @username
+• /search user.base.eth
+
+Examples:
+• /search tantodefi
+• /search @vitalik
+• /search user.base.eth`;
+      }
+
+      // Get both followers and following
+      const [followers, following] = await Promise.all([
+        this.fetchUserFollowers(farcasterContext.fid, 50),
+        this.fetchUserFollowing(farcasterContext.fid, 50)
+      ]);
+
+      const totalConnections = followers.length + following.length;
+      const allConnections = [...followers, ...following];
+
+      // Check which ones have dStealth
+      const dStealthUsers = [];
+      for (const user of allConnections) {
+        const fkeyId = await this.findFkeyByWallet(user.custodyAddress) || 
+                      await this.findFkeyByWallet(user.verifiedAddresses[0]);
+        
+        if (fkeyId) {
+          dStealthUsers.push({
+            ...user,
+            fkeyId,
+            type: followers.includes(user) ? 'follower' : 'following'
+          });
+        }
+      }
+
+      if (dStealthUsers.length === 0) {
+        return `🔍 Your Farcaster Network Analysis
+
+@${farcasterContext.username}, I analyzed your network:
+
+📊 Network Size:
+• Followers: ${followers.length}
+• Following: ${following.length}
+• Total: ${totalConnections}
+
+❌ No dStealth Users Found
+
+None of your followers or following have set up fkey.id yet.
+
+🚀 Grow the Privacy Network:
+• Share dStealth with your community
+• Tell them about FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
+• Earn referral rewards (coming soon)
+
+Try specific searches: /search username`;
+      }
+
+      const userList = dStealthUsers
+        .slice(0, 10)
+        .map(user => {
+          const verifiedBadge = user.verified ? ' ✅' : '';
+          const typeIcon = user.type === 'follower' ? '👥' : '🔗';
+          return `${typeIcon} @${user.username}${verifiedBadge} → ${user.fkeyId}.fkey.id`;
+        })
+        .join('\n');
+
+      const moreResults = dStealthUsers.length > 10 ? `\n\n... and ${dStealthUsers.length - 10} more dStealth users!` : '';
+
+      return `🔍 Your Farcaster Network Analysis
+
+@${farcasterContext.username}, found ${dStealthUsers.length} dStealth users in your network:
+
+${userList}${moreResults}
+
+📊 Network Summary:
+• Total connections: ${totalConnections}
+• dStealth users: ${dStealthUsers.length}
+• Privacy adoption: ${((dStealthUsers.length / totalConnections) * 100).toFixed(1)}%
+
+🎯 Icons:
+• 👥 = Your followers
+• 🔗 = People you follow
+
+Ready to connect with them privately! 🥷`;
+
+    } catch (error) {
+      console.error('Error in follower search:', error);
+      return "❌ Error analyzing your network. Please try again later.";
+    }
+  }
+
+  /**
+   * 🔧 NEW: Fetch user's following list
+   */
+  private async fetchUserFollowing(fid: number, limit: number = 50): Promise<FarcasterUser[]> {
+    try {
+      if (!this.NEYNAR_API_KEY) {
+        console.warn('⚠️ NEYNAR_API_KEY not configured for following');
+        return [];
+      }
+
+      console.log(`🔗 Fetching following for FID: ${fid}`);
+
+      const response = await fetch(`${NEYNAR_API_BASE}/farcaster/following?fid=${fid}&limit=${limit}`, {
+        headers: {
+          'api_key': this.NEYNAR_API_KEY
+        }
+      });
+
+      if (!response.ok) {
+        console.log(`❌ Neynar following API error: ${response.status}`);
+        return [];
+      }
+
+      const data = await response.json() as NeynarFollowersResponse;
+      
+      const following: FarcasterUser[] = data.users.map(user => ({
+        fid: user.fid,
+        username: user.username,
+        displayName: user.display_name,
+        avatarUrl: user.pfp_url,
+        verified: user.verified,
+        custodyAddress: user.custody_address,
+        verifiedAddresses: user.verified_addresses?.eth_addresses || [],
+        bio: user.profile?.bio?.text,
+        followerCount: user.follower_count,
+        followingCount: user.following_count
+      }));
+
+      console.log(`✅ Found ${following.length} following for FID ${fid}`);
+      return following;
+
+    } catch (error) {
+      console.error('Error fetching user following:', error);
+      return [];
     }
   }
 }
