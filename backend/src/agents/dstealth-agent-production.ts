@@ -440,7 +440,10 @@ export class DStealthAgentProduction {
 
       // Handle text messages  
       if (message.contentType?.typeId === "text") {
-        // Send ninja reaction
+        // Send ninja reaction with enhanced logging
+        console.log(`🥷 Sending ninja reaction to message: ${message.id}`);
+        console.log(`   Message content: "${message.content}"`);
+        console.log(`   From: ${senderInboxId}`);
         try {
           const reaction: Reaction = {
             reference: message.id,
@@ -449,9 +452,14 @@ export class DStealthAgentProduction {
             schema: "unicode"
           };
           await conversation.send(reaction, ContentTypeReaction);
+          console.log("✅ Ninja reaction sent successfully!");
         } catch (reactionError) {
-          console.error("⚠️ Failed to send ninja reaction:", reactionError);
+          console.error("❌ Failed to send ninja reaction:", reactionError);
+          console.error("   Error details:", JSON.stringify(reactionError, null, 2));
         }
+
+        // Small delay to ensure reaction is processed
+        await new Promise(resolve => setTimeout(resolve, 100));
 
         // Check if message should be processed
         const isGroup = conversation instanceof Group;
@@ -464,13 +472,32 @@ export class DStealthAgentProduction {
         );
 
         if (!shouldProcess) {
+          console.log("🔇 Message should not be processed, but ninja reaction was sent");
           return;
         }
 
         // Process the message with our dStealth logic
+        console.log("🔄 Processing text message for response...");
         const response = await this.processTextMessage(message.content, senderInboxId, isGroup, conversation, farcasterContext);
+        
         if (response) {
-          await conversation.send(response);
+          console.log(`📤 Sending response: "${response.substring(0, 100)}${response.length > 100 ? '...' : ''}"`);
+          try {
+            // Small delay to ensure proper message ordering for client compatibility
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            await conversation.send(response);
+            console.log("✅ Response sent successfully!");
+            
+            // Additional delay for client sync (helps with CBW XMTP client)
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+          } catch (sendError) {
+            console.error("❌ Failed to send response:", sendError);
+            console.error("   Error details:", JSON.stringify(sendError, null, 2));
+          }
+        } else {
+          console.log("🔇 No response generated (empty string - likely action buttons sent instead)");
         }
         return;
       }
