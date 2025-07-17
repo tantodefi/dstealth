@@ -219,21 +219,33 @@ router.post('/farcaster/cast', async (req, res) => {
       }
     }
 
-    // Extract fkey.id from the cast text for setup - only for very specific patterns
+    // Extract fkey.id from the cast text for setup - VERY RESTRICTIVE PATTERN
     // This should only match when someone is clearly trying to set an fkey.id
-    // Pattern: @dstealth followed by a potential fkey.id (but not handled above)
-    const fkeySettingPattern = /@dstealth\s+([a-zA-Z0-9_-]{2,30})(?:\s|$)/i;
-    const fkeyMatch = cast.text.match(fkeySettingPattern);
+    // Must be: @dstealth followed by ONLY a username, nothing else
+    const fkeySettingPattern = /@dstealth\s+([a-zA-Z0-9_-]{2,30})$/i;
+    const fkeyMatch = cast.text.trim().match(fkeySettingPattern);
     
     let fkeyId = null;
     
-    // Only extract fkey.id if it looks like a direct setting command
-    if (fkeyMatch && cast.text.split(' ').length <= 3) {
+    // Only extract fkey.id if it's EXACTLY "@dstealth username" with no other text
+    if (fkeyMatch && cast.text.trim().split(' ').length === 2) {
       const potentialFkey = fkeyMatch[1].toLowerCase();
+      
+      // Very restrictive blacklist - reject any conversational words
+      const conversationalWords = [
+        'help', 'info', 'status', 'what', 'how', 'why', 'when', 'where', 'who',
+        'introduce', 'yourself', 'channel', 'integration', 'think', 'about',
+        'hello', 'hi', 'hey', 'gm', 'good', 'morning', 'afternoon', 'evening',
+        'thanks', 'thank', 'please', 'can', 'could', 'would', 'should',
+        'awesome', 'great', 'cool', 'nice', 'wow', 'yes', 'no', 'ok', 'okay',
+        'sure', 'maybe', 'perhaps', 'probably', 'definitely', 'absolutely',
+        'exactly', 'indeed', 'really', 'actually', 'basically', 'literally',
+        'obviously', 'clearly', 'apparently', 'supposedly', 'presumably'
+      ];
       
       // Additional checks to ensure this is actually a fkey.id setting attempt
       if (potentialFkey.length >= 2 && potentialFkey.length <= 30 && 
-          !['help', 'info', 'status', 'what', 'how', 'why', 'when', 'where', 'introduce', 'yourself', 'channel', 'integration', 'think'].includes(potentialFkey)) {
+          !conversationalWords.includes(potentialFkey)) {
         fkeyId = potentialFkey;
       }
     }

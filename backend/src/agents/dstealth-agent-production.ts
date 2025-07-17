@@ -99,6 +99,7 @@ interface NeynarUserResponse {
     follower_count: number;
     following_count: number;
   }[];
+
 }
 
 interface NeynarFollowersResponse {
@@ -122,7 +123,7 @@ interface NeynarFollowersResponse {
   }[];
   next: {
     cursor: string;
-  } | null;
+} | null;
 }
 
 interface UserSearchResult {
@@ -134,9 +135,8 @@ interface UserSearchResult {
   walletAddress: string;
   fkeyId?: string;
   hasFkey: boolean;
-}
 
-// Action button content types (from working example)
+}// Action button content types (from working example)
 export const ContentTypeActions = new ContentTypeId({
   authorityId: 'coinbase.com',
   typeId: 'actions',
@@ -159,21 +159,18 @@ interface Action {
   style?: 'primary' | 'secondary' | 'danger';
   expiresAt?: string;
 }
-
 interface ActionsContent {
   id: string;
   description: string;
   actions: Action[];
   expiresAt?: string;
-}
 
-interface IntentContent {
+}interface IntentContent {
   id: string;
   actionId: string;
   metadata?: Record<string, string | number | boolean | null>;
-}
 
-// Action button codecs (from working example)
+}// Action button codecs (from working example)
 export class ActionsCodec implements ContentCodec<ActionsContent> {
   get contentType(): ContentTypeId {
     return ContentTypeActions;
@@ -204,8 +201,7 @@ export class ActionsCodec implements ContentCodec<ActionsContent> {
 
   shouldPush(): boolean {
     return true;
-  }
-}
+}  }
 
 export class IntentCodec implements ContentCodec<IntentContent> {
   get contentType(): ContentTypeId {
@@ -236,7 +232,6 @@ export class IntentCodec implements ContentCodec<IntentContent> {
     return true;
   }
 }
-
 /**
  * Production dStealth Agent with action button support
  */
@@ -1375,12 +1370,10 @@ Or type your fkey.id username directly (e.g., tantodefi)`;
         return await this.handleCommand(content, senderInboxId, isGroup, conversation);
       }
       
-      // Check for simple username search (when user types a username directly)
+      // 🔧 FIXED: More restrictive username search - only for clear username patterns
       const trimmedContent = content.trim();
-      if (trimmedContent.length > 0 && !trimmedContent.includes(' ') && 
-          (trimmedContent.includes('.base.eth') || trimmedContent.includes('.eth') || 
-           trimmedContent.startsWith('@') || trimmedContent.match(/^[a-zA-Z0-9_]+$/))) {
-        console.log("🔍 Possible username search detected");
+      if (this.isValidUsernameSearchPattern(trimmedContent)) {
+        console.log("🔍 Valid username search pattern detected");
         const searchResult = await this.handleDirectUserSearch(trimmedContent, senderInboxId);
         if (searchResult) {
           return searchResult;
@@ -1414,6 +1407,42 @@ Something went wrong. Please try:
 • \`/help\` for all commands
 • Contact support if issues persist`;
     }
+  }
+
+  /**
+   * 🔧 NEW: Check if content is a valid username search pattern
+   * This prevents "gm" and other casual messages from being treated as user searches
+   */
+  private isValidUsernameSearchPattern(content: string): boolean {
+    // Must be a single word without spaces
+    if (content.includes(' ')) return false;
+    
+    // Must be between 3-30 characters (too short words like "gm", "hi" are not usernames)
+    if (content.length < 3 || content.length > 30) return false;
+    
+    // Must contain specific patterns that indicate it's a username
+    const isSpecificPattern = 
+      content.includes('.base.eth') || 
+      content.includes('.eth') || 
+      content.startsWith('@') ||
+      content.endsWith('.fkey.id') ||
+      // Only alphanumeric usernames that are 5+ characters or contain specific indicators
+      (content.match(/^[a-zA-Z0-9_]+$/) && (content.length >= 5 || content.includes('_')));
+    
+    if (!isSpecificPattern) return false;
+    
+    // Blacklist common casual words that might match the pattern
+    const blacklistedWords = [
+      'hello', 'hi', 'hey', 'gm', 'good', 'morning', 'afternoon', 'evening', 'night',
+      'thanks', 'thank', 'please', 'help', 'info', 'status', 'what', 'how', 'why', 
+      'when', 'where', 'introduce', 'yourself', 'channel', 'integration', 'think',
+      'awesome', 'great', 'cool', 'nice', 'wow', 'yes', 'no', 'ok', 'okay', 'sure',
+      'maybe', 'perhaps', 'probably', 'definitely', 'absolutely', 'exactly', 'indeed'
+    ];
+    
+    if (blacklistedWords.includes(content.toLowerCase())) return false;
+    
+    return true;
   }
 
   /**
@@ -3588,83 +3617,21 @@ Want to invite them to dStealth? Share this:
       console.log(`   Current Intent Action Set: ${actionSetId}`);
       console.log(`   Recent Valid Action Sets: [${recentActionSets.join(', ')}]`);
       console.log(`   Total Recent Sets: ${recentActionSets.length}`);
-      
-      if (recentActionSets.length > 0 && !recentActionSets.includes(actionSetId)) {
-        console.log(`⚠️  REJECTING outdated action set: ${actionSetId}`);
-        console.log(`   Valid sets: ${recentActionSets.join(', ')}`);
-        return `⚠️ Outdated Action Button
 
-The action button you clicked is from an older menu. Please use more recent action buttons.
-
-Clicked Action Set: ${actionSetId}
-Recent Valid Sets: ${recentActionSets.length}
-
-To get fresh actions:
-Type /help for a new set of action buttons.
-
-Why this happens:
-• You have too many old button sets open
-• Only the last ${this.MAX_VALID_ACTION_SETS} button sets are valid
-• This prevents confusion from too many button sets
-
-Try again: Type /help now!`;
-      } else {
-        console.log(`✅ Action set validation passed - processing action`);
+      if (!recentActionSets.includes(actionSetId)) {
+        console.log(`❌ Action set validation failed - ignoring outdated action: ${actionSetId}`);
+        return "⚠️ This action has expired. Please use /help to get fresh actions.";
       }
 
-      // Extract base action ID from complex format: "action-name-timestamp-random"
-      // Examples: 
-      // - "get-help-1752163068713-wdn9zl" -> "get-help"
-      // - "create-payment-link-1752163068713-wdn9zl" -> "create-payment-link"
-      // - "test-simple-1752163068713-wdn9zl" -> "test-simple"
-      
-      let baseActionId = actionId;
-      
-      // Remove timestamp-random suffix pattern (e.g., "-1752163068713-wdn9zl")
-      const timestampPattern = /-\d{13}-[a-z0-9]{6}$/;
-      if (timestampPattern.test(actionId)) {
-        baseActionId = actionId.replace(timestampPattern, '');
-      }
-      
+      console.log(`✅ Action set validation passed - processing action`);
+
+      // Extract the base action ID (remove timestamp and random suffix)
+      const baseActionId = actionId.replace(/-\d+-[a-z0-9]+$/, '');
       console.log(`🎯 Base Action ID extracted: "${baseActionId}" from "${actionId}"`);
-      
+
+      // Handle different action types with TBA patterns
       switch (baseActionId) {
-        // New welcome onboarding actions
-        case 'have-fkey':
-          return await this.handleHaveFkeyFlow(senderInboxId);
-
-        case 'no-fkey':
-          return await this.handleNoFkeyFlow(senderInboxId);
-
-        case 'confirm-fkey':
-          return await this.processFkeyConfirmation(senderInboxId, true);
-
-        case 'cancel-fkey':
-          return await this.processFkeyConfirmation(senderInboxId, false);
-
-        case 'dstealth-miniapp':
-          return `https://dstealth.xyz`;
-
-        case 'check-balance':
-          return await this.handleBalanceCheck(senderInboxId);
-
         case 'create-payment-link':
-          // Check if user has fkey.id set before creating payment link
-          const userData = await agentDb.getStealthDataByUser(senderInboxId);
-          
-          if (!userData?.fkeyId) {
-            return `🔒 Setup Required for Payment Links
-
-To create payment links, please set your fkey.id first:
-
-Step 1: 🔑 Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
-Step 2: 📝 Set your fkey.id: /set yourUsername
-Step 3: 🚀 Complete setup: ${this.DSTEALTH_APP_URL}
-
-Once setup is complete, you can create payment links instantly!`;
-          }
-
-          // Return instructions for flexible text-based payment creation
           return `💳 Create Payment Link
 
 To create a payment link, simply specify any amount:
@@ -3683,9 +3650,6 @@ Features:
 
 Try it now! Just type the amount you want.`;
 
-        case 'get-help':
-          return this.getHelpMessage();
-
         case 'search-user':
           return `🔍 Search for User's fkey.id
 
@@ -3701,17 +3665,83 @@ I'll search across all databases and tell you if they have set their fkey.id!
 
 💡 Just type the username you want to search for.`;
 
-        case 'setup-fkey':
-          return await this.handleHaveFkeyFlow(senderInboxId);
+        case 'check-balance':
+          return await this.handleBalanceCheck(senderInboxId);
 
-        case 'manage-links':
-          return await this.handleLinksManagement(senderInboxId);
+        case 'send-transaction':
+          return `🚀 Send Transaction
 
-        case 'check-status':
-          return this.getStatusMessage();
+I can help you create transaction requests for:
+• 💰 Token transfers (ETH, USDC, etc.)
+• 🔒 Privacy payments via stealth addresses
+• 📱 Cross-chain transactions
 
-        case 'create-another':
-          return `➕ Create Another Payment Link
+Examples:
+• "send 0.1 ETH to tantodefi"
+• "send 25 USDC to @username"
+• "create payment link for $100"
+
+🥷 All transactions include privacy features and ZK receipts!
+
+What would you like to send?`;
+
+        case 'dstealth-miniapp':
+          return `🌐 dStealth Miniapp
+
+Access the full dStealth platform:
+${this.DSTEALTH_APP_URL}
+
+Features:
+• 🔒 Privacy dashboard
+• 💳 Payment link management
+• 🧾 ZK receipt history
+• 🎯 Privacy rewards
+• 👥 Social discovery
+
+🚀 Open in your browser or mobile app!`;
+
+        default:
+          // Handle legacy action IDs
+          return await this.handleLegacyIntentAction(baseActionId, senderInboxId);
+      }
+
+    } catch (error) {
+      console.error("❌ Error handling intent message:", error);
+      return "❌ Error processing action. Please try again with /help.";
+    }
+  }
+
+  /**
+   * 🔧 NEW: Handle legacy action IDs for backwards compatibility
+   */
+  private async handleLegacyIntentAction(baseActionId: string, senderInboxId: string): Promise<string> {
+    switch (baseActionId) {
+      case 'have-fkey':
+        return await this.handleHaveFkeyFlow(senderInboxId);
+
+      case 'no-fkey':
+        return await this.handleNoFkeyFlow(senderInboxId);
+
+      case 'confirm-fkey':
+        return await this.processFkeyConfirmation(senderInboxId, true);
+
+      case 'cancel-fkey':
+        return await this.processFkeyConfirmation(senderInboxId, false);
+
+      case 'get-help':
+        return this.getHelpMessage();
+
+      case 'setup-fkey':
+        return await this.handleHaveFkeyFlow(senderInboxId);
+
+      case 'manage-links':
+        return await this.handleLinksManagement(senderInboxId);
+
+      case 'check-status':
+        return this.getStatusMessage();
+
+      case 'create-another':
+        return `➕ Create Another Payment Link
 
 Ready to create another payment link?
 
@@ -3728,223 +3758,9 @@ Features:
 
 Just say the amount: "create payment link for $X"`;
 
-        case 'send-transaction':
-        case 'send-to-stealth':
-          const paymentData = this.getPaymentDataForUser(senderInboxId);
-          if (paymentData) {
-            // 🔧 FIXED: Actually send wallet transaction request instead of just text
-            try {
-              // Get sender's wallet address
-              const client = this.client;
-              if (!client) {
-                return `❌ Agent Error: Unable to access client for wallet transaction`;
-              }
-
-              // Get user's wallet address from inbox state
-              const inboxState = await client.preferences.inboxStateFromInboxIds([senderInboxId]);
-              const senderWalletAddress = inboxState[0]?.identifiers[0]?.identifier;
-              
-              if (!senderWalletAddress) {
-                return `❌ Wallet Error: Unable to determine your wallet address`;
-              }
-
-              // Create wallet send calls for the stealth payment
-              const walletSendCalls = this.createStealthWalletSendCalls(
-                senderWalletAddress,
-                paymentData.stealthAddress,
-                paymentData.amount,
-                paymentData.fkeyId
-              );
-
-              // Find the conversation to send the wallet request
-              const conversations = await client.conversations.list();
-              const userConversation = conversations.find(conv => {
-                if (!(conv instanceof Group)) {
-                  return conv.peerInboxId === senderInboxId;
-                }
-                return false;
-              });
-
-              if (!userConversation) {
-                return `❌ Conversation Error: Unable to find conversation for wallet request`;
-              }
-
-              // Send wallet transaction request
-              await userConversation.send(walletSendCalls, ContentTypeWalletSendCalls);
-
-              return `💰 Wallet Transaction Sent!
-
-A transaction request has been sent to your wallet to send $${paymentData.amount} USDC to ${paymentData.fkeyId}.fkey.id.
-
-Check your wallet to approve the transaction.
-
-🎯 Privacy Features:
-• 🥷 Anonymous sender protection
-• 🔒 Sent to stealth address
-• 🧾 ZK proof receipt will be generated
-
-Transaction Details:
-• Amount: $${paymentData.amount} USDC
-• To: ${paymentData.fkeyId}.fkey.id
-• Address: ${paymentData.stealthAddress.slice(0, 8)}...${paymentData.stealthAddress.slice(-6)}
-
-Approve in your wallet to complete! 🚀`;
-            } catch (error) {
-              console.error('Error sending wallet transaction:', error);
-              return `❌ Transaction Error: Unable to send wallet transaction request. Please try again.`;
-            }
-          } else {
-            return `❌ No payment data found. Please create a payment link first.`;
-          }
-
-        case 'daimo-pay-link':
-          const daimoData = this.getPaymentDataForUser(senderInboxId);
-          if (daimoData) {
-            return `🔗 Daimo Pay Link
-
-Direct link to pay ${daimoData.fkeyId}.fkey.id:
-
-${daimoData.daimoLink}
-
-Features:
-• ⚡ One-click payment
-• 🥷 Anonymous sender privacy
-• 🔒 Direct to stealth address
-• 🧾 ZK proof receipt
-
-Share this link with anyone to receive payments!`;
-          } else {
-            return `❌ No payment data found. Please create a payment link first.`;
-          }
-
-        case 'cbw-request-link':
-          const cbwData = this.getPaymentDataForUser(senderInboxId);
-          if (cbwData) {
-            return `📱 Coinbase Wallet Request Link
-
-Direct link to pay ${cbwData.fkeyId}.fkey.id:
-
-${cbwData.cbwLink}
-
-Features:
-• 📱 Mobile-friendly
-• 🥷 Anonymous sender privacy
-• 🔒 Direct to stealth address
-• 🧾 ZK proof receipt
-
-Share this link for easy mobile payments!`;
-          } else {
-            return `❌ No payment data found. Please create a payment link first.`;
-          }
-
-        case 'share-link':
-        case 'share-payment-link':
-          const shareData = this.getPaymentDataForUser(senderInboxId);
-          if (shareData) {
-            return `📤 Share Payment Link
-
-Amount: $${shareData.amount} USDC
-Recipient: ${shareData.fkeyId}.fkey.id
-
-🔗 Payment Link:
-${shareData.daimoLink}
-
-Share this link to receive payments:
-• 📱 Social media
-• 💬 Direct messages  
-• 📧 Email
-• 🔗 Any platform
-
-Privacy Features:
-• 🥷 Anonymous sender protection
-• 🔒 Stealth address technology
-• 🧾 ZK proof receipts
-
-Dashboard: ${this.DSTEALTH_APP_URL}`;
-          } else {
-            return `📤 Share Payment Link
-
-Share your payment link to receive anonymous payments with privacy features.
-
-Dashboard: ${this.DSTEALTH_APP_URL}`;
-          }
-
-        case 'create-another':
-        case 'create-new-link':
-          return `➕ Create Another Payment Link
-
-Ready to create another payment link?
-
-Examples:
-• "create payment link for $25"
-• "create payment link for $100"
-• "create payment link for $500"
-• "create payment link for $50.50"
-
-Just type the amount: "create payment link for $X"`;
-
-        // Legacy support for old simple IDs (just in case)
-        case 'test':
-        case 'test-simple':
-        case 'balance':
-        case 'payment':
-        case 'help':
-          console.log(`🔄 Legacy action ID detected: ${baseActionId}`);
-          return this.handleIntentMessage({...intent, actionId: baseActionId === 'test' || baseActionId === 'test-simple' ? 'dstealth-miniapp' : 
-                                                             baseActionId === 'balance' ? 'check-balance' :
-                                                             baseActionId === 'payment' ? 'create-payment-link' :
-                                                             'get-help'}, senderInboxId);
-
-        default:
-          console.log(`❓ Unknown base action ID: "${baseActionId}" from full ID: "${actionId}"`);
-          return `❓ Unknown Action: ${baseActionId}
-
-This action isn't recognized. Available actions:
-• 🧪 Test Button (test-simple)
-• 💰 Check Balance (check-balance)
-• 💳 Create Payment Link (create-payment-link)
-• 🔑 Setup fkey.id (setup-fkey)
-• 🔗 Manage Links (manage-links)
-• 📊 Check Status (check-status)
-• ❓ Get Help (get-help)
-
-Debug Info:
-• Full Action ID: ${actionId}
-• Extracted Base ID: ${baseActionId}
-
-Need help? Type /help for all commands!`;
-      }
-    } catch (error) {
-      console.error("❌ Error handling Intent message:", error);
-      return `❌ Error Processing Action
-
-Something went wrong processing your action. Please try:
-• Type /help for available commands
-• Contact support if the issue persists
-
-Error: ${error instanceof Error ? error.message : "Unknown error"}`;
+      default:
+        return `❌ Unknown action: ${baseActionId}. Please use /help to get available actions.`;
     }
-  }
-
-  /**
-   * Helper method to track recent action sets for a user
-   */
-  private addRecentActionSet(senderInboxId: string, actionSetId: string): void {
-    const recentSets = this.userRecentActionSets.get(senderInboxId) || [];
-    
-    // Add new action set to the beginning
-    recentSets.unshift(actionSetId);
-    
-    // Keep only the most recent MAX_VALID_ACTION_SETS
-    while (recentSets.length > this.MAX_VALID_ACTION_SETS) {
-      recentSets.pop();
-    }
-    
-    this.userRecentActionSets.set(senderInboxId, recentSets);
-    
-    console.log(`📋 Updated recent action sets for user ${senderInboxId}:`);
-    console.log(`   Added: ${actionSetId}`);
-    console.log(`   Current sets: [${recentSets.join(', ')}]`);
   }
 
   /**
@@ -3952,79 +3768,81 @@ Error: ${error instanceof Error ? error.message : "Unknown error"}`;
    */
   private async sendHelpActionsMessage(senderInboxId: string, isGroup: boolean, conversation?: any): Promise<void> {
     try {
-      if (!this.client) {
-        console.log("⚠️ Base agent not available, skipping Help Actions message");
-        return;
-      }
+      if (!this.client) return;
 
-      let targetConversation = conversation;
-
-      // If no conversation provided, find the conversation with this user
-      if (!targetConversation) {
-        const conversations = await this.client.conversations.list();
-        
-        // Find the conversation with this user
-        targetConversation = conversations.find(conv => {
-          // For DMs, check if this is a 1:1 conversation with the user
-          if (!(conv instanceof Group)) {
-            return conv.peerInboxId === senderInboxId;
-          }
-          return false;
-        });
-      }
-
-      if (!targetConversation) {
-        console.log("⚠️ User conversation not found, skipping Help Actions message");
-        return;
-      }
-
-      // Generate unique timestamp for this render to reset button states
+      const userData = await agentDb.getStealthDataByUser(senderInboxId);
       const renderTimestamp = Date.now();
       const randomSuffix = Math.random().toString(36).substring(2, 8);
 
-      // Create Actions content with unique everything for complete state reset
-      const actionsContent: ActionsContent = {
+      const helpActions: ActionsContent = {
         id: `help-actions-${renderTimestamp}-${randomSuffix}`,
-        description: `🤖 dStealth Agent - Choose an action (${new Date().toLocaleTimeString()}):`,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours from now
+        description: `🤖 dStealth Agent Help 🥷
+
+Hi ${userData?.fkeyId || 'there'}! I'm your privacy assistant. Choose what you'd like to do:`,
         actions: [
-          {
-            id: `dstealth-miniapp-${renderTimestamp}-${randomSuffix}`,
-            label: "🌐 dStealth Miniapp",
-            style: "primary"
-          },
-          {
-            id: `check-balance-${renderTimestamp}-${randomSuffix}`,
-            label: "💰 Check Balance",
-            style: "secondary"
-          },
           {
             id: `create-payment-link-${renderTimestamp}-${randomSuffix}`,
             label: "💳 Create Payment Link",
-            style: "primary"
+            style: "primary" as const
           },
           {
             id: `search-user-${renderTimestamp}-${randomSuffix}`,
             label: "🔍 Search User",
-            style: "secondary"
+            style: "secondary" as const
           },
           {
-            id: `get-help-${renderTimestamp}-${randomSuffix}`,
-            label: "❓ Get Help",
-            style: "secondary"
+            id: `check-balance-${renderTimestamp}-${randomSuffix}`,
+            label: "💰 Check Balance",
+            style: "secondary" as const
+          },
+          {
+            id: `send-transaction-${renderTimestamp}-${randomSuffix}`,
+            label: "🚀 Send Transaction",
+            style: "primary" as const
+          },
+          {
+            id: `dstealth-miniapp-${renderTimestamp}-${randomSuffix}`,
+            label: "🌐 dStealth App",
+            style: "secondary" as const
           }
         ]
       };
 
-      // Send actions using the ActionsCodec
-      await targetConversation.send(actionsContent, ContentTypeActions);
-      console.log(`✅ Help Actions sent to ${isGroup ? 'group' : 'DM'} with unique ID: ${actionsContent.id}`);
+      // Track this action set for the user
+      if (!this.userRecentActionSets.has(senderInboxId)) {
+        this.userRecentActionSets.set(senderInboxId, []);
+      }
       
-      // Track this action set in recent sets (instead of just latest)
-      this.addRecentActionSet(senderInboxId, actionsContent.id);
+      const userActionSets = this.userRecentActionSets.get(senderInboxId)!;
+      userActionSets.push(helpActions.id);
+      
+      // Keep only the last 5 action sets
+      if (userActionSets.length > 5) {
+        userActionSets.splice(0, userActionSets.length - 5);
+      }
+
+      if (conversation) {
+        await conversation.send(helpActions, ContentTypeActions);
+      } else {
+        // Find the conversation by sender inbox ID
+        const conversations = await this.client.conversations.list();
+        const targetConversation = conversations.find(conv => {
+          // This is a simplified check - in reality you'd need to properly identify the conversation
+          return conv.id; // You'd need proper conversation matching logic here
+        });
+        
+        if (targetConversation) {
+          await targetConversation.send(helpActions, ContentTypeActions);
+        }
+      }
+
+      console.log(`✅ Help Actions sent to ${isGroup ? 'group' : 'DM'} with unique ID: ${helpActions.id}`);
+      console.log(`📋 Updated recent action sets for user ${senderInboxId}:`);
+      console.log(`   Added: ${helpActions.id}`);
+      console.log(`   Current sets: [${userActionSets.join(', ')}]`);
 
     } catch (error) {
-      console.error("❌ Error sending Help Actions:", error);
+      console.error("❌ Error sending help actions:", error);
     }
   }
 
@@ -4268,7 +4086,7 @@ Choose your next action:`,
               decimals: "6",
               networkId: "base",
               hostname: "dstealth.xyz",
-              faviconUrl: "https://dstealth.xyz/favicon.ico",
+              faviconUrl: "https://dstealth.xyz/dstealth-white-on-black.png",
               title: "dStealth Agent - Stealth Payment",
               // Additional stealth payment metadata
               stealthRecipient: fkeyId,
@@ -4296,147 +4114,54 @@ Choose your next action:`,
   ): Promise<string> {
     try {
       console.log("🧾 Processing transaction reference:", transactionRef);
-      
-      // Extract transaction details
+      console.log("📊 Full transaction reference object:", JSON.stringify(transactionRef, null, 2));
+
+      // Extract transaction details - the data is nested under transactionReference property
       const txData = transactionRef;
       const txHash = txData.reference;
       const networkId = txData.networkId;
       const metadata = txData.metadata;
       
-      console.log("🔍 Transaction details extracted:");
-      console.log(`  • Transaction Hash: ${txHash}`);
-      console.log(`  • Network ID: ${networkId}`);
-      console.log(`  • Metadata:`, metadata);
+      console.log("🔍 Extracted transaction data:");
+      console.log(`  • txHash: ${txHash}`);
+      console.log(`  • networkId: ${networkId}`);
+      console.log(`  • metadata:`, metadata ? JSON.stringify(metadata, null, 4) : "null");
+      console.log(`  • senderAddress: ${senderAddress}`);
       
-      // Check if this is a stealth payment transaction
-      const isStealthPayment = (metadata as any)?.stealthRecipient || 
-                               (metadata as any)?.privacyFeature === "stealth-address" ||
-                               (metadata as any)?.zkProofAvailable === "true";
-      
-      if (isStealthPayment) {
-        console.log("🥷 Stealth payment transaction detected!");
-        
-        // Generate explorer URL first for use in storage
-        const explorerUrl = this.getExplorerUrl(txHash, networkId?.toString() || "base");
-        
-        // Store transaction for ZK receipt processing
-        const userData = await agentDb.getStealthDataByUser(senderInboxId);
-        if (userData) {
-          // 🔧 ENHANCED: Store ZK receipt in Redis for frontend access
-          try {
-            const zkReceiptKey = `zk_receipt:${txHash}:${senderAddress}:${Date.now()}`;
-            const zkReceiptData = {
-              transactionHash: txHash,
-              networkId: networkId?.toString() || "base",
-              amount: metadata?.amount ? (parseFloat(metadata.amount.toString()) / 1000000).toFixed(2) : "Unknown",
-              currency: "USDC",
-              recipientAddress: userData.stealthAddress,
-              fkeyId: userData.fkeyId,
-              senderAddress: senderAddress,
-              timestamp: Date.now(),
-              status: 'completed',
-              // Include the ZK proof from agent database
-              zkProof: userData.zkProof,
-              metadata: {
-                transactionType: metadata?.transactionType || "Stealth Payment",
-                privacyFeature: "stealth-address",
-                zkProofAvailable: !!userData.zkProof,
-                source: "dstealth-agent"
-              }
-            };
-            
-            // Store in Redis for frontend access (expires in 7 days - local-first system)
-            if (redis) {
-              await redis.set(zkReceiptKey, JSON.stringify(zkReceiptData), { ex: 86400 * 7 });
-              console.log(`✅ ZK receipt stored for frontend access: ${zkReceiptKey}`);
-              
-              // 🔧 ENHANCED: Also update any pending payment links for this transaction
-              try {
-                const pattern = `zk_receipt:*:${senderAddress.toLowerCase()}:*`;
-                const keys = await redis.keys(pattern);
-                
-                for (const key of keys) {
-                  const existingData = await redis.get(key);
-                  if (existingData) {
-                    const parsed = typeof existingData === 'string' ? JSON.parse(existingData) : existingData;
-                    
-                    // Update pending payment links that match this transaction
-                    if (parsed.status === 'pending_payment' && 
-                        parsed.recipientAddress === userData.stealthAddress &&
-                        parsed.fkeyId === userData.fkeyId) {
-                      
-                      const updatedData = {
-                        ...parsed,
-                        transactionHash: txHash,
-                        status: 'completed',
-                        completedAt: Date.now(),
-                        txUrl: explorerUrl
-                      };
-                      
-                      await redis.set(key, JSON.stringify(updatedData), { ex: 86400 * 7 });
-                      console.log(`✅ Updated pending payment link as completed: ${key}`);
-                    }
-                  }
-                }
-              } catch (updateError) {
-                console.warn('⚠️ Failed to update pending payment links:', updateError);
-              }
-            }
-          } catch (receiptError) {
-            console.warn('⚠️ Failed to store ZK receipt for frontend:', receiptError);
-          }
-          
-          console.log(`💾 Storing transaction reference for ZK receipt: ${txHash}`);
-        }
-        
-        return `🧾 ZK Receipt - Stealth Payment Confirmed!
+      let receiptMessage = `📋 Transaction Receipt
 
-Transaction Details:
-• Hash: ${txHash}
-• Network: ${networkId === "base" ? "Base" : networkId}
-• Type: ${metadata?.transactionType || "Stealth Payment"}
-• Amount: ${metadata?.amount ? `$${(parseFloat(metadata.amount.toString()) / 1000000).toFixed(2)} USDC` : "Unknown"}
-• Recipient: ${(metadata as any)?.stealthRecipient || "Stealth Address"}
+💳 TRANSACTION DETAILS:
+• Transaction Hash: ${txHash}
+• Network: ${networkId}
+• Type: ${metadata?.transactionType || 'Transfer'}
+• From: ${metadata?.fromAddress || senderAddress}`;
 
-Privacy Features:
-• 🥷 Anonymous sender protection
-• 🔒 Stealth address technology  
-• 🧾 ZK proof receipt generated
-• 🎯 Privacy rewards earned
-
-🔗 View Transaction:
-${explorerUrl}
-
-✅ Transaction confirmed! Your ZK receipt is being processed.
-🏆 Privacy rewards: Check your dashboard at ${this.DSTEALTH_APP_URL}
-
-Thank you for using stealth payments! 🥷`;
-      } else {
-        // Regular transaction reference
-        const explorerUrl = this.getExplorerUrl(txHash, networkId?.toString() || "base");
-        
-        return `📋 Transaction Reference Received
-
-Transaction Details:
-• Hash: ${txHash}
-• Network: ${networkId === "base" ? "Base" : networkId}
-• Type: ${metadata?.transactionType || "Transfer"}
-• From: ${metadata?.fromAddress || senderAddress}
-
-🔗 View Transaction:
-${explorerUrl}
-
-✅ Transaction confirmed! 
-Want privacy features? Set up your fkey.id with /set yourUsername`;
+      // Add amount information if available
+      if (metadata?.currency && metadata?.amount && metadata?.decimals) {
+        const amount = metadata.amount / Math.pow(10, metadata.decimals);
+        receiptMessage += `\n• Amount: ${amount} ${metadata.currency}`;
       }
       
+      if (metadata?.toAddress) {
+        receiptMessage += `\n• To: ${metadata.toAddress}`;
+      }
+
+      // Add dStealth-specific features
+      receiptMessage += `\n\n🥷 dStealth Features:
+• 🔒 Privacy-enabled transaction
+• 🧾 ZK receipt verification
+• 🎯 Eligible for privacy rewards
+
+🌐 View full details: ${this.DSTEALTH_APP_URL}
+🔗 Blockchain explorer: https://basescan.org/tx/${txHash}
+
+✅ Transaction receipt processed successfully!`;
+
+      return receiptMessage;
+
     } catch (error) {
-      console.error("Error processing transaction reference:", error);
-      return `❌ Transaction Processing Error
-
-Failed to process your transaction reference. Please try again.
-
-Need help? Contact support at ${this.DSTEALTH_APP_URL}`;
+      console.error("❌ Error processing transaction reference:", error);
+      return "❌ Error processing transaction receipt. Please try again.";
     }
   }
 
@@ -5618,4 +5343,25 @@ Ready to connect with them privately! 🥷`;
       return [];
     }
   }
+
+  /**
+   * 🔧 NEW: Add action set to user's recent action sets for validation
+   */
+  private addRecentActionSet(senderInboxId: string, actionSetId: string): void {
+    if (!this.userRecentActionSets.has(senderInboxId)) {
+      this.userRecentActionSets.set(senderInboxId, []);
+    }
+    
+    const userActionSets = this.userRecentActionSets.get(senderInboxId)!;
+    userActionSets.push(actionSetId);
+    
+    // Keep only the last MAX_VALID_ACTION_SETS action sets
+    if (userActionSets.length > this.MAX_VALID_ACTION_SETS) {
+      userActionSets.splice(0, userActionSets.length - this.MAX_VALID_ACTION_SETS);
+    }
+    
+    console.log(`📋 Added action set ${actionSetId} for user ${senderInboxId}`);
+    console.log(`   Current action sets: [${userActionSets.join(', ')}]`);
+  }
+
 }

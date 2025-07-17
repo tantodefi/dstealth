@@ -399,6 +399,13 @@ app.use((req, res, next) => {
   next();
 });
 
+// Serve static favicon/logo
+app.get('/dstealth-white-on-black.png', (req, res) => {
+  const path = require('path');
+  const filePath = path.join(__dirname, '../../dstealth-white-on-black.png');
+  res.sendFile(filePath);
+});
+
 // Routes
 app.get("/health", (req, res) => {
   console.log("✅ HEALTH CHECK ENDPOINT HIT");
