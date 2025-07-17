@@ -4434,7 +4434,7 @@ FluidKey is a privacy-focused wallet that creates stealth addresses for anonymou
 
 📝 Sign Up Steps:
 1. Visit: ${this.FLUIDKEY_REFERRAL_URL}
-2. Create your account (use a non-wallet browser)
+2. Copy and paste signup link into safari
 3. Choose your unique username
 4. Complete profile setup
 
@@ -4448,7 +4448,7 @@ FluidKey is a privacy-focused wallet that creates stealth addresses for anonymou
 • Protect your privacy
 • Earn rewards with dStealth
 
-Ready to get started? Visit the link above! 🚀`;
+`;
   }
 
   /**
@@ -4774,7 +4774,7 @@ Sorry, I couldn't find "${cleanUsername}" anywhere.
 🔍 Searched as: ${inputTypeHelp}
 🌐 Checked: All available users
 📍 Sources: Agent DMs, dStealth miniapp, Farcaster casts
-${resolution.inputType !== 'plain_username' ? `🔗 Address resolution: ${resolution.inputType === 'ens_name' ? 'ENS' : resolution.inputType === 'base_name' ? 'Base' : 'Farcaster'} lookup attempted` : ''}
+${resolution.inputType !== 'plain_username' ? `�� Address resolution: ${resolution.inputType === 'ens_name' ? 'ENS' : resolution.inputType === 'base_name' ? 'Base' : 'Farcaster'} lookup attempted` : ''}
 
 💡 Suggestions:
 • Check the spelling
