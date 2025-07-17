@@ -1,10 +1,52 @@
-import express from 'express';
-import crypto from 'crypto';
+import { Router } from "express";
+import * as crypto from 'crypto';
 import { agentDb } from '../lib/agent-database.js';
 import { env } from '../config/env.js';
 import { resolvePrimaryFromFarcaster } from '../lib/primary-address-resolver.js';
 
-const router = express.Router();
+const router = Router();
+
+// 🔧 NEW: Cast deduplication to prevent duplicate processing
+const processedCasts = new Set<string>();
+const MAX_PROCESSED_CASTS = 1000; // Keep track of last 1000 casts
+const CAST_EXPIRY_TIME = 60 * 60 * 1000; // 1 hour
+
+// 🔧 NEW: Rate limiting for cast replies
+const userLastReply = new Map<string, number>();
+const REPLY_COOLDOWN = 30 * 1000; // 30 seconds between replies per user
+
+// 🔧 NEW: Clean up old processed casts periodically
+function cleanupProcessedCasts() {
+  if (processedCasts.size > MAX_PROCESSED_CASTS) {
+    const castsArray = Array.from(processedCasts);
+    const toRemove = castsArray.slice(0, castsArray.length - MAX_PROCESSED_CASTS);
+    toRemove.forEach(cast => processedCasts.delete(cast));
+    console.log(`🧹 Cleaned up ${toRemove.length} old processed casts`);
+  }
+}
+
+// 🔧 NEW: Check if user is in cooldown period
+function isUserInCooldown(userId: string): boolean {
+  const lastReply = userLastReply.get(userId);
+  if (!lastReply) return false;
+  
+  const timeSinceLastReply = Date.now() - lastReply;
+  return timeSinceLastReply < REPLY_COOLDOWN;
+}
+
+// 🔧 NEW: Update user's last reply timestamp
+function updateUserLastReply(userId: string) {
+  userLastReply.set(userId, Date.now());
+  
+  // Clean up old entries (keep last 100 users)
+  if (userLastReply.size > 100) {
+    const entries = Array.from(userLastReply.entries());
+    const sorted = entries.sort((a, b) => b[1] - a[1]);
+    const toKeep = sorted.slice(0, 100);
+    userLastReply.clear();
+    toKeep.forEach(([userId, timestamp]) => userLastReply.set(userId, timestamp));
+  }
+}
 
 // Verify Neynar webhook signature
 function verifyNeynarWebhookSignature(payload: string, signature: string, secret: string): boolean {
@@ -145,109 +187,37 @@ router.post('/farcaster/cast', async (req, res) => {
       return res.status(200).json({ message: 'Cast does not mention @dstealth' });
     }
 
-    // 🔧 FIRST: Check if this is a fkey.id SETTING request (contains .fkey.id)
-    const fkeySettingMatch = cast.text.match(/@dstealth\s+@?([a-zA-Z0-9_.-]+\.fkey\.id)/i);
-    if (fkeySettingMatch) {
-      // This is a setting request - continue to the setting logic below
-      console.log(`🔧 Detected fkey.id setting request: ${fkeySettingMatch[1]}`);
-    } else {
-      // 🔧 SECOND: Handle fkey.id lookup requests on Farcaster (no .fkey.id suffix)
-      const fkeyLookupMatch = cast.text.match(/@dstealth\s+@?([a-zA-Z0-9_.-]+)$/i);
-      if (fkeyLookupMatch) {
-        let searchQuery = fkeyLookupMatch[1];
-        
-        // Handle Farcaster username patterns: @tantodefi.base.eth -> tantodefi
-        if (searchQuery.includes('.base.eth')) {
-          searchQuery = searchQuery.replace('.base.eth', '');
-        } else if (searchQuery.includes('.eth')) {
-          searchQuery = searchQuery.replace('.eth', '');
-        }
-        
-        console.log(`🔍 Farcaster fkey.id lookup request: ${searchQuery}`);
-        
-        // Search for the user's fkey.id
-        const fkeySearchResult = await searchUserForFarcasterResponse(searchQuery);
-        
-        if (fkeySearchResult.found && fkeySearchResult.fkeyId) {
-          // Reply with fkey.id URL only - ensure we don't double-add .fkey.id
-          const fkeyId = fkeySearchResult.fkeyId;
-          const replyText = fkeyId.endsWith('.fkey.id') ? fkeyId : `${fkeyId}.fkey.id`;
-          console.log(`✅ Replying with fkey.id: ${replyText}`);
-          
-          // Send reply to cast using Neynar API
-          try {
-            const replyResult = await replyToCast(cast.hash, replyText);
-            
-            if (replyResult.success) {
-              console.log(`✅ Successfully replied to lookup cast: ${replyResult.castHash}`);
-            } else {
-              console.warn(`⚠️ Failed to reply to lookup cast: ${replyResult.error}`);
-            }
-          } catch (replyError) {
-            console.error('❌ Error replying to lookup cast:', replyError);
-          }
-          
-          return res.status(200).json({ 
-            message: 'fkey.id found',
-            reply: replyText,
-            fkeyId: fkeySearchResult.fkeyId
-          });
-        } else {
-          // Reply with setup instructions
-          const replyText = `Sorry, ${searchQuery} hasn't set their fkey.id yet. They can do so by replying to this cast or if they don't have an fkey.id, they can sign up here: https://app.fluidkey.com/?ref=62YNSG`;
-          console.log(`❌ Replying with setup instructions: ${replyText}`);
-          
-          // Send reply to cast using Neynar API
-          try {
-            const replyResult = await replyToCast(cast.hash, replyText);
-            
-            if (replyResult.success) {
-              console.log(`✅ Successfully replied to not-found cast: ${replyResult.castHash}`);
-            } else {
-              console.warn(`⚠️ Failed to reply to not-found cast: ${replyResult.error}`);
-            }
-          } catch (replyError) {
-            console.error('❌ Error replying to not-found cast:', replyError);
-          }
-          
-          return res.status(200).json({ 
-            message: 'fkey.id not found',
-            reply: replyText,
-            searchQuery: searchQuery
-          });
-        }
-      }
+    // 🔧 NEW: Cast deduplication - prevent processing the same cast multiple times
+    if (processedCasts.has(cast.hash)) {
+      console.log(`🔄 DUPLICATE Cast detected - skipping: ${cast.hash}`);
+      return res.status(200).json({ message: 'Cast already processed' });
     }
 
-    // Extract fkey.id from the cast text for setup - VERY RESTRICTIVE PATTERN
-    // This should only match when someone is clearly trying to set an fkey.id
-    // Must be: @dstealth followed by ONLY a username, nothing else
-    const fkeySettingPattern = /@dstealth\s+([a-zA-Z0-9_-]{2,30})$/i;
-    const fkeyMatch = cast.text.trim().match(fkeySettingPattern);
+    // 🔧 NEW: Rate limiting - prevent spam from same user
+    const userId = cast.author.fid.toString();
+    if (isUserInCooldown(userId)) {
+      console.log(`🔄 User ${cast.author.username} (FID: ${cast.author.fid}) is in cooldown period - skipping`);
+      return res.status(200).json({ message: 'User in cooldown period' });
+    }
+
+    // Mark cast as processed and update user's last reply timestamp
+    processedCasts.add(cast.hash);
+    updateUserLastReply(userId);
     
+    // Clean up old processed casts periodically
+    cleanupProcessedCasts();
+
+    console.log(`✅ Cast validation passed for @${cast.author.username} (FID: ${cast.author.fid})`);
+
+    // 🔧 Check if this is a fkey.id SETTING request (MUST contain .fkey.id)
+    const fkeySettingMatch = cast.text.match(/@dstealth\s+@?([a-zA-Z0-9_.-]+\.fkey\.id)/i);
     let fkeyId = null;
     
-    // Only extract fkey.id if it's EXACTLY "@dstealth username" with no other text
-    if (fkeyMatch && cast.text.trim().split(' ').length === 2) {
-      const potentialFkey = fkeyMatch[1].toLowerCase();
-      
-      // Very restrictive blacklist - reject any conversational words
-      const conversationalWords = [
-        'help', 'info', 'status', 'what', 'how', 'why', 'when', 'where', 'who',
-        'introduce', 'yourself', 'channel', 'integration', 'think', 'about',
-        'hello', 'hi', 'hey', 'gm', 'good', 'morning', 'afternoon', 'evening',
-        'thanks', 'thank', 'please', 'can', 'could', 'would', 'should',
-        'awesome', 'great', 'cool', 'nice', 'wow', 'yes', 'no', 'ok', 'okay',
-        'sure', 'maybe', 'perhaps', 'probably', 'definitely', 'absolutely',
-        'exactly', 'indeed', 'really', 'actually', 'basically', 'literally',
-        'obviously', 'clearly', 'apparently', 'supposedly', 'presumably'
-      ];
-      
-      // Additional checks to ensure this is actually a fkey.id setting attempt
-      if (potentialFkey.length >= 2 && potentialFkey.length <= 30 && 
-          !conversationalWords.includes(potentialFkey)) {
-        fkeyId = potentialFkey;
-      }
+    if (fkeySettingMatch) {
+      // Extract the fkey.id (remove .fkey.id suffix for storage)
+      const fullFkeyId = fkeySettingMatch[1];
+      fkeyId = fullFkeyId.replace('.fkey.id', '');
+      console.log(`🔧 Detected fkey.id setting request: ${fullFkeyId} -> ${fkeyId}`);
     }
 
     if (!fkeyId) {
@@ -266,13 +236,21 @@ router.post('/farcaster/cast', async (req, res) => {
         }
       }
       
+      // Fetch thread context if this is part of a conversation
+      let threadContext = '';
+      try {
+        threadContext = await fetchThreadContext(cast.hash, cast.thread_hash);
+      } catch (error) {
+        console.log('⚠️ Could not fetch thread context:', error);
+      }
+      
       // Generate contextual response
       let response = '';
       
       if (env.OPENAI_API_KEY) {
         try {
-          // Use ChatGPT to generate response with dStealth agent identity
-          const chatGPTResponse = await generateChatGPTResponse(cast.text, cast.author.username, userHasFkey);
+          // Use ChatGPT to generate response with dStealth agent identity and thread context
+          const chatGPTResponse = await generateChatGPTResponse(cast.text, cast.author.username, userHasFkey, threadContext);
           response = chatGPTResponse;
         } catch (error) {
           console.error('❌ ChatGPT error:', error);
@@ -298,7 +276,8 @@ router.post('/farcaster/cast', async (req, res) => {
       return res.status(200).json({ 
         message: 'General conversation handled',
         hasOpenAI: !!env.OPENAI_API_KEY,
-        userHasFkey: userHasFkey
+        userHasFkey: userHasFkey,
+        hasThreadContext: !!threadContext
       });
     }
 
@@ -414,62 +393,6 @@ Please try again or check your fkey.id on https://app.fluidkey.com`
 });
 
 /**
- * Search for a user's fkey.id in the shared database for Farcaster cast responses
- */
-async function searchUserForFarcasterResponse(searchQuery: string): Promise<{
-  found: boolean;
-  fkeyId?: string;
-  searchedAs?: string;
-}> {
-  try {
-    console.log(`🔍 Searching for user's fkey.id: ${searchQuery}`);
-    
-    // Clean the search query (remove @ prefix, handle different formats)
-    const cleanQuery = searchQuery.replace(/^@/, '').toLowerCase().trim();
-    
-    // Search in shared database for fkey.id
-    const allUsers = await agentDb.getAllStealthData();
-    
-    // First try: exact fkey.id match
-    for (const userData of allUsers) {
-      if (userData.fkeyId && userData.fkeyId.toLowerCase() === cleanQuery) {
-        console.log(`✅ Found fkey.id by exact match: ${userData.fkeyId}`);
-        return {
-          found: true,
-          fkeyId: userData.fkeyId,
-          searchedAs: 'exact_fkey_match'
-        };
-      }
-    }
-    
-    // Second try: partial match (in case of typos or variations)
-    for (const userData of allUsers) {
-      if (userData.fkeyId && userData.fkeyId.toLowerCase().includes(cleanQuery)) {
-        console.log(`✅ Found fkey.id by partial match: ${userData.fkeyId}`);
-        return {
-          found: true,
-          fkeyId: userData.fkeyId,
-          searchedAs: 'partial_fkey_match'
-        };
-      }
-    }
-    
-    console.log(`❌ No fkey.id found for: ${searchQuery}`);
-    return {
-      found: false,
-      searchedAs: 'not_found'
-    };
-    
-  } catch (error) {
-    console.error('Error searching for user fkey.id:', error);
-    return {
-      found: false,
-      searchedAs: 'error'
-    };
-  }
-}
-
-/**
  * Helper function to call fkey.id lookup API
  */
 async function callFkeyLookupAPI(fkeyId: string, userAddress: string, source: string): Promise<{ address?: string; proof?: unknown; error?: string }> {
@@ -533,9 +456,18 @@ async function findUserByWalletAddress(walletAddress: string): Promise<string | 
  */
 async function replyToCast(parentCastHash: string, message: string): Promise<{success: boolean, castHash?: string, error?: string}> {
   try {
+    // 🔧 CRITICAL: Check if NEYNAR_API_KEY is configured
     if (!env.NEYNAR_API_KEY) {
-      console.warn('⚠️ NEYNAR_API_KEY not configured for cast replies');
+      console.error('❌ NEYNAR_API_KEY not configured for cast replies');
       return {success: false, error: 'Neynar API key not configured'};
+    }
+
+    // 🔧 CRITICAL: Check if NEYNAR_SIGNER_UUID is properly configured
+    if (!env.NEYNAR_SIGNER_UUID || env.NEYNAR_SIGNER_UUID === 'default-signer') {
+      console.error('❌ NEYNAR_SIGNER_UUID not properly configured for cast replies');
+      console.error('🔍 Current signer UUID:', env.NEYNAR_SIGNER_UUID || 'undefined');
+      console.error('💡 Please configure NEYNAR_SIGNER_UUID in environment variables');
+      return {success: false, error: 'Neynar signer UUID not configured'};
     }
 
     console.log(`📝 Posting cast reply to ${parentCastHash}: ${message}`);
@@ -543,7 +475,7 @@ async function replyToCast(parentCastHash: string, message: string): Promise<{su
     const requestPayload = {
       text: message,
       parent: parentCastHash,
-      signer_uuid: env.NEYNAR_SIGNER_UUID || 'default-signer' // This would need to be configured
+      signer_uuid: env.NEYNAR_SIGNER_UUID
     };
 
     const response = await fetch('https://api.neynar.com/v2/farcaster/cast', {
@@ -557,8 +489,17 @@ async function replyToCast(parentCastHash: string, message: string): Promise<{su
 
     if (!response.ok) {
       const errorData = await response.json();
-      console.log(`❌ Neynar cast reply error: ${response.status}`, errorData);
-      return {success: false, error: `API error: ${response.status}`};
+      console.error(`❌ Neynar cast reply error: ${response.status}`, errorData);
+      
+      // 🔧 ENHANCED: Specific error handling for common issues
+      if (response.status === 400 && errorData.message?.includes('signer')) {
+        console.error('🔍 Signer UUID issue detected - please verify NEYNAR_SIGNER_UUID');
+      }
+      if (response.status === 429) {
+        console.error('🔍 Rate limit exceeded - please wait before retrying');
+      }
+      
+      return {success: false, error: `API error: ${response.status} - ${errorData.message || 'Unknown error'}`};
     }
 
     const data = await response.json() as {cast: {hash: string}};
@@ -567,7 +508,7 @@ async function replyToCast(parentCastHash: string, message: string): Promise<{su
     return {success: true, castHash: data.cast.hash};
 
   } catch (error) {
-    console.error('Error posting cast reply:', error);
+    console.error('❌ Error posting cast reply:', error);
     return {success: false, error: error instanceof Error ? error.message : 'Unknown error'};
   }
 }
@@ -589,9 +530,68 @@ router.get('/farcaster/test', (req, res) => {
 });
 
 /**
+ * Fetch thread context from Neynar API
+ */
+async function fetchThreadContext(castHash: string, threadHash: string): Promise<string> {
+  try {
+    if (!env.NEYNAR_API_KEY) {
+      console.log('⚠️ No Neynar API key for thread context');
+      return '';
+    }
+
+    // If no thread hash or it's the same as cast hash, it's not a reply
+    if (!threadHash || threadHash === castHash) {
+      console.log('📝 No thread context - this is an original cast');
+      return '';
+    }
+
+    console.log(`🔍 Fetching thread context for thread: ${threadHash}`);
+
+    const response = await fetch(`https://api.neynar.com/v2/farcaster/cast/conversation?identifier=${threadHash}&type=hash&reply_depth=5&include_chronological_parent_casts=true`, {
+      method: 'GET',
+      headers: {
+        'api_key': env.NEYNAR_API_KEY,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      console.error(`❌ Failed to fetch thread context: ${response.status}`);
+      return '';
+    }
+
+    const data = await response.json();
+    
+    // Extract conversation context from the thread
+    const threadMessages = [];
+    
+    // Add parent cast if available
+    if (data.conversation?.cast?.text) {
+      threadMessages.push(`${data.conversation.cast.author.username}: ${data.conversation.cast.text}`);
+    }
+    
+    // Add direct replies
+    if (data.conversation?.direct_replies) {
+      for (const reply of data.conversation.direct_replies.slice(0, 10)) { // Limit to 10 messages
+        threadMessages.push(`${reply.author.username}: ${reply.text}`);
+      }
+    }
+    
+    const context = threadMessages.join('\n');
+    console.log(`✅ Thread context fetched: ${threadMessages.length} messages`);
+    
+    return context;
+
+  } catch (error) {
+    console.error('❌ Error fetching thread context:', error);
+    return '';
+  }
+}
+
+/**
  * Generate ChatGPT response for general conversation
  */
-async function generateChatGPTResponse(castText: string, username: string, userHasFkey: boolean): Promise<string> {
+async function generateChatGPTResponse(castText: string, username: string, userHasFkey: boolean, threadContext?: string): Promise<string> {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -614,7 +614,9 @@ Be helpful, concise, and friendly. Always mention relevant features like the dSt
 Current user context:
 - Username: @${username}
 - Has fkey.id set: ${userHasFkey ? 'Yes' : 'No'}
-${!userHasFkey ? '\n- Should be encouraged to set their fkey.id for anonymous payments' : ''}`
+${!userHasFkey ? '\n- Should be encouraged to set their fkey.id for anonymous payments' : ''}
+
+${threadContext ? `\nConversation context:\n${threadContext}` : ''}`
         },
         {
           role: 'user',
