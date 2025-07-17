@@ -470,13 +470,27 @@ async function replyToCast(parentCastHash: string, message: string): Promise<{su
       return {success: false, error: 'Neynar signer UUID not configured'};
     }
 
+    // 🔧 DEBUG: Clean and validate the signer UUID
+    const cleanSignerUUID = env.NEYNAR_SIGNER_UUID.trim();
+    console.log(`🔍 DEBUG: Raw signer UUID: "${env.NEYNAR_SIGNER_UUID}"`);
+    console.log(`🔍 DEBUG: Cleaned signer UUID: "${cleanSignerUUID}"`);
+    console.log(`🔍 DEBUG: UUID length: ${cleanSignerUUID.length}`);
+    console.log(`🔍 DEBUG: UUID format check: ${/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanSignerUUID)}`);
+
     console.log(`📝 Posting cast reply to ${parentCastHash}: ${message}`);
+    
+    // 🔧 DEBUG: Log the exact signer UUID being used
+    console.log(`🔍 DEBUG: Using signer UUID: ${cleanSignerUUID}`);
+    console.log(`🔍 DEBUG: Using API key: ${env.NEYNAR_API_KEY ? env.NEYNAR_API_KEY.substring(0, 10) + '...' : 'undefined'}`);
 
     const requestPayload = {
       text: message,
       parent: parentCastHash,
-      signer_uuid: env.NEYNAR_SIGNER_UUID
+      signer_uuid: cleanSignerUUID
     };
+    
+    // 🔧 DEBUG: Log the exact payload being sent
+    console.log(`🔍 DEBUG: Request payload:`, JSON.stringify(requestPayload, null, 2));
 
     const response = await fetch('https://api.neynar.com/v2/farcaster/cast', {
       method: 'POST',
@@ -491,9 +505,22 @@ async function replyToCast(parentCastHash: string, message: string): Promise<{su
       const errorData = await response.json();
       console.error(`❌ Neynar cast reply error: ${response.status}`, errorData);
       
+      // 🔧 DEBUG: Enhanced error logging
+      console.error('🔍 DEBUG: Full error response:', JSON.stringify(errorData, null, 2));
+      
+      // 🔧 DEBUG: Log response headers safely
+      const headers: Record<string, string> = {};
+      response.headers.forEach((value, key) => {
+        headers[key] = value;
+      });
+      console.error('🔍 DEBUG: Response headers:', JSON.stringify(headers, null, 2));
+      
       // 🔧 ENHANCED: Specific error handling for common issues
       if (response.status === 400 && errorData.message?.includes('signer')) {
         console.error('🔍 Signer UUID issue detected - please verify NEYNAR_SIGNER_UUID');
+      }
+      if (response.status === 400 && errorData.message?.includes('Pro subscription')) {
+        console.error('🔍 Pro subscription issue - check if signer UUID is associated with pro account');
       }
       if (response.status === 429) {
         console.error('🔍 Rate limit exceeded - please wait before retrying');
@@ -526,6 +553,23 @@ router.get('/farcaster/test', (req, res) => {
       'User lookup by wallet address',
       'Automatic fkey.id setting'
     ]
+  });
+});
+
+/**
+ * 🔧 DEBUG: Environment variables test endpoint
+ */
+router.get('/farcaster/debug', (req, res) => {
+  res.json({
+    message: 'Environment variables debug info',
+    timestamp: new Date().toISOString(),
+    environment: {
+      NEYNAR_API_KEY: env.NEYNAR_API_KEY ? `${env.NEYNAR_API_KEY.substring(0, 10)}...` : 'NOT_SET',
+      NEYNAR_SIGNER_UUID: env.NEYNAR_SIGNER_UUID || 'NOT_SET',
+      NEYNAR_WEBHOOK_SECRET: env.NEYNAR_WEBHOOK_SECRET ? 'SET' : 'NOT_SET',
+      OPENAI_API_KEY: env.OPENAI_API_KEY ? 'SET' : 'NOT_SET',
+      NODE_ENV: process.env.NODE_ENV || 'NOT_SET'
+    }
   });
 });
 
@@ -609,7 +653,7 @@ async function generateChatGPTResponse(castText: string, username: string, userH
 - XMTP for decentralized messaging
 - Cryptocurrency and privacy technology
 
-Be helpful, concise, and friendly. Always mention relevant features like the dStealth miniapp and XMTP messaging when appropriate.
+Be helpful, concise, and friendly. IMPORTANT: Keep responses under 200 characters to fit Farcaster's limits. Be very brief and to the point.
 
 Current user context:
 - Username: @${username}
@@ -623,7 +667,7 @@ ${threadContext ? `\nConversation context:\n${threadContext}` : ''}`
           content: castText.replace('@dstealth', '').trim()
         }
       ],
-      max_tokens: 280, // Tweet-like length for Farcaster
+      max_tokens: 100, // Reduced from 280 to keep responses shorter
       temperature: 0.7
     })
   });
@@ -635,6 +679,12 @@ ${threadContext ? `\nConversation context:\n${threadContext}` : ''}`
   const data = await response.json();
   let chatGPTResponse = data.choices[0].message.content;
 
+  // 🔧 CRITICAL: Ensure response fits within Farcaster's 320 character limit
+  const maxLength = 250; // Leave room for footer
+  if (chatGPTResponse.length > maxLength) {
+    chatGPTResponse = chatGPTResponse.substring(0, maxLength - 3) + '...';
+  }
+
   // Add footer with actions
   if (!userHasFkey) {
     chatGPTResponse += '\n\n🔧 Set your fkey.id: @dstealth yourname.fkey.id';
@@ -642,6 +692,12 @@ ${threadContext ? `\nConversation context:\n${threadContext}` : ''}`
   
   chatGPTResponse += '\n\n🌐 dStealth miniapp: https://dstealth.xyz';
   chatGPTResponse += '\n💬 DM me on XMTP @dstealth.base.eth';
+
+  // 🔧 FINAL CHECK: Ensure total response fits
+  if (chatGPTResponse.length > 320) {
+    // Truncate and add link only
+    chatGPTResponse = data.choices[0].message.content.substring(0, 200) + '...\n\n🌐 https://dstealth.xyz';
+  }
 
   return chatGPTResponse;
 }
