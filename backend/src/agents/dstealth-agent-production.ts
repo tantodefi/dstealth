@@ -2466,31 +2466,8 @@ Need larger amounts? Visit ${this.DSTEALTH_APP_URL} for alternatives.`;
       // 🔧 FIXED: Send Transaction Actions to the same conversation where requested
       await this.sendTransactionActions(senderInboxId, amount, currentData.fkeyId, daimoResponse.url, currentAddress, conversationId, isGroup, conversation);
 
-      // 🔧 FIXED: Always return proper text response with payment links
-      return `💳 Payment Link Created! ${addressChangeWarning}
-
-💰 Amount: $${amount} USDC
-🎯 Recipient: ${currentData.fkeyId}.fkey.id
-📍 Address: ${currentAddress.slice(0, 8)}...${currentAddress.slice(-6)}
-
-🔗 **Payment Links:**
-
-**Daimo (Recommended):**
-${daimoResponse.url}
-
-**Coinbase Wallet:**
-${coinbaseWalletUrl}
-
-🥷 **Privacy Features:**
-• Anonymous sender protection
-• ZK proof receipts available
-• Stealth address technology
-• Earn privacy rewards
-
-💡 **Share this link** to receive payments from anyone!
-📊 **View receipts:** ${this.DSTEALTH_APP_URL}
-
-${isGroup ? "💬 **DM me** for more payment options and features!" : ""}`;
+      // 🔧 FIXED: Return empty string since action buttons are already sent (no duplicate text response)
+      return "";
 
     } catch (error) {
       console.error("Error creating payment link:", error);
@@ -3685,20 +3662,107 @@ Examples:
 
 What would you like to send?`;
 
+        case 'send-to-stealth':
+          const stealthPaymentData = this.getPaymentDataForUser(senderInboxId);
+          if (stealthPaymentData) {
+            try {
+              // Get the user's wallet address for the transaction
+              const inboxState = await this.client!.preferences.inboxStateFromInboxIds([senderInboxId]);
+              const senderWalletAddress = inboxState[0]?.identifiers[0]?.identifier;
+              
+              if (!senderWalletAddress) {
+                return `❌ Could not determine your wallet address. Please try again.`;
+              }
+
+              // Find the user's conversation to send the transaction request
+              const conversations = await this.client!.conversations.list();
+              const targetConversation = conversations.find(conv => {
+                if (!(conv instanceof Group)) {
+                  return conv.peerInboxId === senderInboxId;
+                }
+                return false;
+              });
+
+              if (!targetConversation) {
+                return `❌ Could not find conversation to send transaction request.`;
+              }
+
+              // Create the stealth wallet send calls
+              const walletSendCalls = this.createStealthWalletSendCalls(
+                senderWalletAddress,
+                stealthPaymentData.stealthAddress,
+                stealthPaymentData.amount,
+                stealthPaymentData.fkeyId
+              );
+
+              // Send the wallet transaction request
+              await targetConversation.send(walletSendCalls, ContentTypeWalletSendCalls);
+
+              return `✅ Stealth Transaction Request Created!
+
+💰 Amount: $${stealthPaymentData.amount} USDC
+🎯 To: ${stealthPaymentData.fkeyId}.fkey.id
+📍 Address: ${stealthPaymentData.stealthAddress.slice(0, 8)}...${stealthPaymentData.stealthAddress.slice(-6)}
+
+🥷 Privacy Features Active:
+• Anonymous sender protection
+• ZK proof receipts
+• Stealth address technology
+
+⚡ Check your wallet to approve the transaction!`;
+
+            } catch (error) {
+              console.error("Error creating stealth transaction:", error);
+              return `❌ Failed to create stealth transaction. Please try again.`;
+            }
+          } else {
+            return `❌ Payment data not found. Please create a new payment link.`;
+          }
+
         case 'dstealth-miniapp':
-          return `🌐 dStealth Miniapp
+          return `https://dstealth.xyz`;
 
-Access the full dStealth platform:
-${this.DSTEALTH_APP_URL}
+        case 'tba-request-link':
+          const paymentData = this.getPaymentDataForUser(senderInboxId);
+          if (paymentData) {
+            return `📱 TBA Request Link
 
-Features:
-• 🔒 Privacy dashboard
-• 💳 Payment link management
-• 🧾 ZK receipt history
-• 🎯 Privacy rewards
-• 👥 Social discovery
+${paymentData.cbwLink}
 
-🚀 Open in your browser or mobile app!`;
+💡 This link works with any compatible wallet app:
+• Coinbase Wallet
+• Trust Wallet
+• MetaMask Mobile
+• Rainbow Wallet
+
+🔗 Share this link to request $${paymentData.amount} USDC from anyone!
+
+📍 Payment goes to: ${paymentData.fkeyId}.fkey.id
+🥷 Privacy features included automatically`;
+          } else {
+            return `❌ Payment data not found. Please create a new payment link.`;
+          }
+
+        case 'daimo-pay-link':
+          const daimoPaymentData = this.getPaymentDataForUser(senderInboxId);
+          if (daimoPaymentData) {
+            return `🔗 Daimo Pay Link
+
+${daimoPaymentData.daimoLink}
+
+💡 Best experience with Daimo:
+• Direct USDC transfers
+• Built-in privacy features
+• Mobile-optimized
+• Instant transactions
+
+🔗 Share this link to receive $${daimoPaymentData.amount} USDC!
+
+📍 Payment goes to: ${daimoPaymentData.fkeyId}.fkey.id
+🥷 ZK receipts included automatically`;
+          } else {
+            return `❌ Payment data not found. Please create a new payment link.`;
+          }
 
         default:
           // Handle legacy action IDs
@@ -4009,8 +4073,8 @@ Choose your next action:`,
             style: "secondary"
           },
           {
-            id: `cbw-request-link-${renderTimestamp}-${randomSuffix}`,
-            label: "📱 CBW Request Link",
+            id: `tba-request-link-${renderTimestamp}-${randomSuffix}`,
+            label: "📱 TBA Request Link",
             style: "secondary"
           },
           {
