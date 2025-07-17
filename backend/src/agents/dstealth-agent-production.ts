@@ -3654,7 +3654,7 @@ I'll search across all databases and tell you if they have set their fkey.id!
 **🚀 Getting Started:**
 
 **1. Set Your fkey.id:**
-• Get FluidKey: https://ref.fluidkey.com/Y7wGKXG
+• Get FluidKey: ${this.FLUIDKEY_REFERRAL_URL}
 • Then: /set yourusername
 • Or: yourusername.fkey.id
 
