@@ -3642,25 +3642,42 @@ I'll search across all databases and tell you if they have set their fkey.id!
 
 💡 Just type the username you want to search for.`;
 
+        case 'more-help':
+          return `🥷 dStealth: Privacy-First Payments
+
+**🔑 Key Features:**
+• **Stealth Addresses**: Receive payments anonymously
+• **ZK Proofs**: Cryptographic privacy verification
+• **Payment Links**: Share links to request payments
+• **Cross-Platform**: Works on Farcaster, XMTP, and web
+
+**🚀 Getting Started:**
+
+**1. Set Your fkey.id:**
+• Get FluidKey: https://ref.fluidkey.com/Y7wGKXG
+• Then: /set yourusername
+• Or: yourusername.fkey.id
+
+**2. Create Payment Links:**
+• Type: "$50" or "create payment link for $100"
+• Share the link to receive anonymous payments
+• Fresh ZK proof generated every time
+
+**3. dStealth Miniapp:**
+• Full dashboard at https://dstealth.xyz
+• View ZK receipts, manage links, privacy rewards
+• Access all features in one place
+
+**💡 Pro Tips:**
+• Payment links work with any wallet
+• Each payment gets fresh stealth address
+• ZK receipts prove payment privacy
+• Search for users: type their username
+
+Ready to get started? Type /help for action buttons!`;
+
         case 'check-balance':
           return await this.handleBalanceCheck(senderInboxId);
-
-        case 'send-transaction':
-          return `🚀 Send Transaction
-
-I can help you create transaction requests for:
-• 💰 Token transfers (ETH, USDC, etc.)
-• 🔒 Privacy payments via stealth addresses
-• 📱 Cross-chain transactions
-
-Examples:
-• "send 0.1 ETH to tantodefi"
-• "send 25 USDC to @username"
-• "create payment link for $100"
-
-🥷 All transactions include privacy features and ZK receipts!
-
-What would you like to send?`;
 
         case 'send-to-stealth':
           const stealthPaymentData = this.getPaymentDataForUser(senderInboxId);
@@ -3855,14 +3872,9 @@ Hi ${userData?.fkeyId || 'there'}! I'm your privacy assistant. Choose what you'd
             style: "secondary" as const
           },
           {
-            id: `check-balance-${renderTimestamp}-${randomSuffix}`,
-            label: "💰 Check Balance",
+            id: `more-help-${renderTimestamp}-${randomSuffix}`,
+            label: "❓ More Help",
             style: "secondary" as const
-          },
-          {
-            id: `send-transaction-${renderTimestamp}-${randomSuffix}`,
-            label: "🚀 Send Transaction",
-            style: "primary" as const
           },
           {
             id: `dstealth-miniapp-${renderTimestamp}-${randomSuffix}`,
